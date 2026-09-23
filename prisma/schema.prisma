@@ -1,0 +1,238 @@
+// Autopipsz — autopips.pro
+// Managed trading platform data model.
+//
+// Design notes:
+//  - Zero Simulation Policy: every numeric column here is written either by a
+//    verified NOWPayments IPN callback, an admin action recorded in AuditLog,
+//    or a MetaApi (MT4/MT5) broker event. Nothing is seeded with invented P/L.
+//  - All money columns use Decimal(18, 2) / Decimal(18, 5) — never JS floats.
+//  - Indexes are additive performance metadata and do not alter the model
+//    contract defined in the build brief.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  CLIENT
+  ADMIN
+  TRADING_MANAGER
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  ADDITIONAL_INFO_REQUIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  WAITING
+  CONFIRMED
+  SENDING
+  FINISHED
+  FAILED
+  REFUNDED
+}
+
+enum InvestmentStatus {
+  PENDING
+  ACTIVE
+  PAUSED
+  MATURED
+  CANCELLED
+  CLOSED
+}
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String
+  fullName        String
+  phone           String?
+  country         String
+  role            Role      @default(CLIENT)
+  kycStatus       KycStatus @default(NOT_SUBMITTED)
+  twoFactorSecret String?
+  is2FAEnabled    Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  kycProfile  KycProfile?
+  deposits    Deposit[]
+  withdrawals Withdrawal[]
+  investments Investment[]
+  auditLogs   AuditLog[]
+
+  @@index([role])
+  @@index([kycStatus])
+}
+
+model KycProfile {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  legalName         String
+  dob               DateTime
+  address           String
+  idType            String // "PASSPORT" | "NATIONAL_ID" | "DRIVERS_LICENSE"
+  idNumber          String
+  idFrontKey        String // S3 Private Object Key
+  idBackKey         String?
+  proofOfAddressKey String
+  selfieKey         String
+  rejectionReason   String?
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  status            KycStatus @default(PENDING)
+  createdAt         DateTime  @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model TradingPlan {
+  id              String  @id @default(uuid())
+  name            String // e.g., "Gold Momentum Strategy"
+  description     String
+  minInvestment   Decimal @db.Decimal(18, 2)
+  maxInvestment   Decimal @db.Decimal(18, 2)
+  durationDays    Int
+  targetReturnMin Decimal @db.Decimal(18, 2) // Target % (e.g. 5.0) — INDICATIVE, NON-GUARANTEED
+  targetReturnMax Decimal @db.Decimal(18, 2) // Target % (e.g. 12.0) — INDICATIVE, NON-GUARANTEED
+  riskLevel       String // "LOW" | "MEDIUM" | "HIGH"
+  performanceFee  Decimal @db.Decimal(18, 2) // e.g. 20.0 %
+  managementFee   Decimal @db.Decimal(18, 2) // e.g. 1.5 %
+  maxDrawdown     Decimal @db.Decimal(18, 2) // Risk stop limit e.g. 15.0 %
+  isActive        Boolean @default(true)
+
+  investments Investment[]
+  createdAt   DateTime     @default(now())
+
+  @@index([isActive])
+}
+
+model Investment {
+  id            String           @id @default(uuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId        String
+  plan          TradingPlan      @relation(fields: [planId], references: [id])
+  capitalUsd    Decimal          @db.Decimal(18, 2)
+  currentValUsd Decimal          @db.Decimal(18, 2)
+  realizedPnL   Decimal          @default(0.00) @db.Decimal(18, 2)
+  unrealizedPnL Decimal          @default(0.00) @db.Decimal(18, 2)
+  feesDeducted  Decimal          @default(0.00) @db.Decimal(18, 2)
+  status        InvestmentStatus @default(PENDING)
+  startDate     DateTime?
+  maturityDate  DateTime?
+  trades        TradeRecord[]
+  createdAt     DateTime         @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@index([planId])
+}
+
+model Deposit {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountUsd      Decimal       @db.Decimal(18, 2)
+  cryptoCurrency String        @db.VarChar(32)
+  paymentId      String        @unique // NOWPayments payment_id
+  depositAddress String
+  payAmount      Decimal       @db.Decimal(18, 8)
+  status         PaymentStatus @default(PENDING)
+  ipnPayload     Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Withdrawal {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountUsd      Decimal       @db.Decimal(18, 2)
+  cryptoCurrency String        @db.VarChar(32)
+  payoutAddress  String
+  feeUsd         Decimal       @default(0.00) @db.Decimal(18, 2)
+  status         PaymentStatus @default(PENDING)
+  approvedBy     String?
+  txHash         String?
+  createdAt      DateTime      @default(now())
+
+  @@index([userId])
+  @@index([status])
+}
+
+model BrokerConnection {
+  id               String   @id @default(uuid())
+  metaApiAccountId String   @unique
+  brokerName       String // e.g. "Exness", "ICMarkets"
+  environment      String // "LIVE" or "DEMO"
+  maskedAccount    String // "***-9012"
+  balance          Decimal  @db.Decimal(18, 2)
+  equity           Decimal  @db.Decimal(18, 2)
+  freeMargin       Decimal  @db.Decimal(18, 2)
+  status           String // "CONNECTED" | "DISCONNECTED" | "ERROR"
+  updatedAt        DateTime @updatedAt
+
+  trades TradeRecord[]
+
+  @@index([status])
+}
+
+model TradeRecord {
+  id                String           @id @default(uuid())
+  investmentId      String
+  investment        Investment       @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+  brokerId          String
+  broker            BrokerConnection @relation(fields: [brokerId], references: [id])
+  metaApiPositionId String?
+  instrument        String // e.g. "XAUUSD"
+  direction         String // "BUY" | "SELL"
+  volume            Decimal          @db.Decimal(18, 5) // Lot size
+  entryPrice        Decimal          @db.Decimal(18, 5)
+  exitPrice         Decimal?         @db.Decimal(18, 5)
+  stopLoss          Decimal?         @db.Decimal(18, 5)
+  takeProfit        Decimal?         @db.Decimal(18, 5)
+  grossPnL          Decimal          @default(0.00) @db.Decimal(18, 2)
+  commission        Decimal          @default(0.00) @db.Decimal(18, 2)
+  swap              Decimal          @default(0.00) @db.Decimal(18, 2)
+  netPnL            Decimal          @default(0.00) @db.Decimal(18, 2)
+  status            String // "OPEN" | "CLOSED" | "CANCELLED"
+  openedAt          DateTime         @default(now())
+  closedAt          DateTime?
+
+  @@unique([brokerId, metaApiPositionId])
+  @@index([investmentId])
+  @@index([status])
+  @@index([instrument])
+  @@index([openedAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String // e.g. "KYC_APPROVED", "WITHDRAWAL_REQUESTED", "METAAPI_ORDER_FILLED"
+  details   Json
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

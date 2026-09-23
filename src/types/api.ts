@@ -1,0 +1,266 @@
+/**
+ * Wire DTOs shared by API routes and the React client.
+ *
+ * Rule: these types describe *verified* data only. There is no field here that
+ * a UI could fill with a placeholder value.
+ */
+
+export interface SessionUser {
+  id: string;
+  email: string;
+  fullName: string;
+  role: 'CLIENT' | 'ADMIN' | 'TRADING_MANAGER';
+  kycStatus: KycStatusValue;
+  is2FAEnabled: boolean;
+  country: string;
+  createdAt: string;
+}
+
+export type KycStatusValue =
+  | 'NOT_SUBMITTED'
+  | 'PENDING'
+  | 'UNDER_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'ADDITIONAL_INFO_REQUIRED';
+
+export type PaymentStatusValue =
+  | 'PENDING'
+  | 'WAITING'
+  | 'CONFIRMED'
+  | 'SENDING'
+  | 'FINISHED'
+  | 'FAILED'
+  | 'REFUNDED';
+
+export type InvestmentStatusValue =
+  | 'PENDING'
+  | 'ACTIVE'
+  | 'PAUSED'
+  | 'MATURED'
+  | 'CANCELLED'
+  | 'CLOSED';
+
+/** /api/v1/account/overview */
+export interface AccountOverview {
+  equity: number;
+  breakdown: {
+    /**
+     * Capital currently DEPLOYED with a strategy. Together with
+     * `unallocatedCash` this is the capital half of the equity formula — the
+     * two are a partition of contributed capital and never overlap.
+     */
+    startingCapital: number;
+    realizedPnL: number;
+    unrealizedPnL: number;
+    deductedFees: number;
+    withdrawals: number;
+    /** Confirmed deposits not yet deployed (idle cash). */
+    confirmedDeposits: number;
+    /** = startingCapital + confirmedDeposits = net contributed capital. */
+    netContributedCapital: number;
+    /** Gross deposits ever credited, for the deposit history headline. */
+    totalCreditedDeposits: number;
+    /** Gross withdrawals ever paid. */
+    totalPaidWithdrawals: number;
+  };
+  netProfit: number;
+  netReturnPct: number;
+  grossPnL: number;
+  activeCapital: number;
+  withdrawableBalance: number;
+  pendingWithdrawals: number;
+  formula: string;
+  disclaimer: string;
+}
+
+export interface InvestmentDTO {
+  id: string;
+  planId: string;
+  planName: string;
+  riskLevel: string;
+  capitalUsd: number;
+  currentValUsd: number;
+  realizedPnL: number;
+  unrealizedPnL: number;
+  feesDeducted: number;
+  status: InvestmentStatusValue;
+  startDate: string | null;
+  maturityDate: string | null;
+  /** Indicative objective only — never a promise. */
+  targetReturnMin: number;
+  targetReturnMax: number;
+  createdAt: string;
+}
+
+export interface PositionDTO {
+  id: string;
+  metaApiPositionId: string | null;
+  investmentId: string;
+  instrument: string;
+  direction: 'BUY' | 'SELL' | string;
+  volume: number;
+  entryPrice: number;
+  currentPrice: number | null;
+  exitPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  grossPnL: number;
+  commission: number;
+  swap: number;
+  netPnL: number;
+  floatingPnL: number;
+  status: 'OPEN' | 'CLOSED' | 'CANCELLED' | string;
+  openedAt: string;
+  closedAt: string | null;
+}
+
+export interface DepositDTO {
+  id: string;
+  amountUsd: number;
+  cryptoCurrency: string;
+  paymentId: string;
+  depositAddress: string;
+  payAmount: number;
+  status: PaymentStatusValue;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WithdrawalDTO {
+  id: string;
+  amountUsd: number;
+  cryptoCurrency: string;
+  payoutAddress: string;
+  feeUsd: number;
+  status: PaymentStatusValue;
+  txHash: string | null;
+  createdAt: string;
+}
+
+export interface TradingPlanDTO {
+  id: string;
+  name: string;
+  description: string;
+  minInvestment: number;
+  maxInvestment: number;
+  durationDays: number;
+  targetReturnMin: number;
+  targetReturnMax: number;
+  riskLevel: string;
+  performanceFee: number;
+  managementFee: number;
+  maxDrawdown: number;
+  isActive: boolean;
+  /** Present so no client can render a target without the caveat. */
+  targetReturnLabel: string;
+  /** Live, verified aggregate stats. Null when there is no realised history yet. */
+  stats: StrategyStats | null;
+}
+
+export interface StrategyStats {
+  planId: string;
+  closedTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  /** winningTrades / closedTrades * 100. Null when closedTrades is 0. */
+  winRatePct: number | null;
+  grossProfit: number;
+  grossLoss: number;
+  netPnL: number;
+  /** Sum of netPnL / sum of capital deployed, as %. Null when no history. */
+  observedReturnPct: number | null;
+  maxObservedDrawdownPct: number | null;
+  firstTradeAt: string | null;
+  lastTradeAt: string | null;
+  /** Always true — the UI must render the non-guarantee caveat. */
+  indicativeOnly: true;
+}
+
+export interface ActivityEventDTO {
+  id: string;
+  action: string;
+  message: string;
+  severity: 'info' | 'success' | 'warning' | 'error';
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface BrokerConnectionDTO {
+  id: string;
+  metaApiAccountId: string;
+  brokerName: string;
+  environment: 'LIVE' | 'DEMO' | string;
+  maskedAccount: string;
+  balance: number;
+  equity: number;
+  freeMargin: number;
+  status: string;
+  updatedAt: string;
+  /** Populated from a live MetaApi RPC probe; null when not probed this request. */
+  latencyMs: number | null;
+}
+
+export interface KycProfileDTO {
+  id: string;
+  legalName: string;
+  dob: string;
+  address: string;
+  idType: string;
+  idNumberMasked: string;
+  status: KycStatusValue;
+  rejectionReason: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  documents: { kind: string; uploaded: boolean }[];
+}
+
+/** Admin: pending KYC queue row. */
+export interface KycReviewRow {
+  id: string;
+  userId: string;
+  email: string;
+  fullName: string;
+  country: string;
+  legalName: string;
+  idType: string;
+  status: KycStatusValue;
+  createdAt: string;
+}
+
+export interface AumSummary {
+  totalManagedCapital: number;
+  totalEquity: number;
+  openMarketExposure: number;
+  openPositions: number;
+  netTodayPnL: number;
+  pendingKycCount: number;
+  activeClients: number;
+  openInvestments: number;
+  /** Aggregate of every verified ledger row across the platform. */
+  platformBreakdown: {
+    realizedPnL: number;
+    unrealizedPnL: number;
+    deductedFees: number;
+    withdrawalsPaid: number;
+    confirmedDeposits: number;
+  };
+}
+
+export interface AuthLoginResponse {
+  user: SessionUser;
+  /** Present only when 2FA is required to complete the login. */
+  requires2FA: boolean;
+  challengeId?: string;
+}
+
+export interface ApiEnvelope<T> {
+  ok: true;
+  data: T;
+  disclaimer?: string;
+}
+
+export interface ApiErrorEnvelope {
+  ok: false;
+  error: { code: string; message: string; details?: unknown };
+}

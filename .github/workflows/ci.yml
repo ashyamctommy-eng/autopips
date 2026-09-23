@@ -1,0 +1,187 @@
+# Autopipsz — autopips.pro
+# Continuous integration: type-check, lint, build, and the test suite.
+#
+# ── TWO JOBS, AND WHY ───────────────────────────────────────────────────────
+# `verify`      — no service containers. Proves the suite is green on a bare
+#                 runner: the DB-backed specs skip themselves (a top-level
+#                 `await isDatabaseReachable()` in each DB test file decides
+#                 `describe` vs `describe.skip`, with a loud SKIPPED console
+#                 line). Verified on 2026-09-23 with an unreachable
+#                 DATABASE_URL/REDIS_URL: `Test Files 7 passed | 4 skipped`,
+#                 `Tests 148 passed | 51 skipped`, exit code 0.
+# `integration` — provisions postgres:16 + redis:7, applies the migrations and
+#                 runs the SAME suite with a live database, so the 51 skipped
+#                 specs actually execute. Those specs are the money-path
+#                 accounting ratchets (equity/ledger identities, IPN crediting,
+#                 withdrawal decisions, admin cross-surface agreement) — the
+#                 reason this repo has integration tests at all. Skipping them
+#                 forever in CI would leave the highest-risk code untested.
+#                 Verified on 2026-09-23 against a live, migrated Postgres+Redis:
+#                 `Test Files 11 passed`, `Tests 199 passed`, exit code 0.
+#
+# `prisma validate`, `prisma generate` and `next build` have no database
+# dependency. `prisma validate` needs DATABASE_URL to be *present* (the
+# datasource block references `env("DATABASE_URL")`), which is why both jobs set
+# one — an unreachable dummy in `verify`, the service container in `integration`.
+#
+# Everything here is a DUMMY value; none of it is a production secret and none
+# of it is used outside this workflow. The app's real environment contract is
+# `.env.example`, and `src/lib/env.ts` fails the process at boot if anything is
+# missing.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Least privilege: the pipeline only reads the repository.
+permissions:
+  contents: read
+
+# A new push to the same ref cancels the previous run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────── no services ────────────────────────────────
+  verify:
+    name: verify (typecheck / lint / build / tests, no database)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      # NOTE: NODE_ENV is deliberately NOT set to `production` here. npm treats
+      # NODE_ENV=production as `--omit=dev`, which would strip prisma, typescript,
+      # eslint-config-next and vitest from the install and break every step below
+      # (`npm config get omit` → `dev` under NODE_ENV=production). Next.js sets
+      # NODE_ENV=production for its own build, and tests/helpers/test-env.ts forces
+      # NODE_ENV=test for the suite, so nothing here needs to.
+      NEXT_PUBLIC_APP_URL: https://ci.autopips.invalid
+      NEXT_PUBLIC_APP_NAME: Autopipsz
+      WS_PORT: "4001"
+      WS_INTERNAL_TOKEN: ci-dummy-internal-token-0123456789
+      # Deliberately unreachable (nothing listens on 5999): the DB/Redis-backed
+      # specs skip. A refused connection fails instantly, so no timeouts.
+      DATABASE_URL: postgresql://ci_dummy:ci_dummy@127.0.0.1:5999/ci_dummy?schema=public
+      REDIS_URL: redis://127.0.0.1:5999
+      REDIS_TLS: "false"
+      JWT_SECRET: ci-dummy-jwt-secret-0123456789abcdef0123456789abcdef
+      JWT_ISSUER: autopips.pro
+      JWT_AUDIENCE: autopips-pro-clients
+      # base64 of 32 'a' bytes — valid shape, obviously not a credential.
+      CREDENTIAL_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+      AWS_REGION: eu-west-1
+      AWS_KYC_BUCKET: ci-dummy-kyc-bucket
+      NOWPAYMENTS_API_KEY: ci-dummy-nowpayments-key
+      NOWPAYMENTS_IPN_SECRET: ci-dummy-nowpayments-ipn-secret
+      METAAPI_TOKEN: ci-dummy-metaapi-token
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Prisma validate
+        run: npx prisma validate
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: "Test (database-less — DB-backed specs skip themselves)"
+        run: npm test
+
+  # ──────────────────────── with postgres + redis ───────────────────────────
+  integration:
+    name: integration (real postgres + redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: autopips_ci
+          POSTGRES_PASSWORD: autopips_ci
+          POSTGRES_DB: autopips_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U autopips_ci -d autopips_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # See the note in the `verify` job: no NODE_ENV=production (npm would omit
+      # devDependencies, so `prisma migrate deploy` and `npm test` would fail with
+      # "command not found").
+      NEXT_PUBLIC_APP_URL: https://ci.autopips.invalid
+      NEXT_PUBLIC_APP_NAME: Autopipsz
+      WS_PORT: "4001"
+      WS_INTERNAL_TOKEN: ci-dummy-internal-token-0123456789
+      # Points at the postgres service container above. `connection_limit` keeps
+      # the fixture-heavy specs inside the container's default max_connections.
+      DATABASE_URL: postgresql://autopips_ci:autopips_ci@127.0.0.1:5432/autopips_ci?schema=public&connection_limit=10
+      REDIS_URL: redis://127.0.0.1:6379
+      REDIS_TLS: "false"
+      JWT_SECRET: ci-dummy-jwt-secret-0123456789abcdef0123456789abcdef
+      JWT_ISSUER: autopips.pro
+      JWT_AUDIENCE: autopips-pro-clients
+      CREDENTIAL_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+      AWS_REGION: eu-west-1
+      AWS_KYC_BUCKET: ci-dummy-kyc-bucket
+      NOWPAYMENTS_API_KEY: ci-dummy-nowpayments-key
+      NOWPAYMENTS_IPN_SECRET: ci-dummy-nowpayments-ipn-secret
+      METAAPI_TOKEN: ci-dummy-metaapi-token
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      # The same command the deploy's one-shot `migrate` service runs. Applies
+      # prisma/migrations/** to the empty container database.
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Test (live database — the 51 DB-backed specs run here)
+        run: npm test

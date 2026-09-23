@@ -1,0 +1,54 @@
+# ── build context hygiene (docker build / docker compose build) ──────────────
+# Keep this in sync with the real image needs: Dockerfile (web) needs
+# source + prisma + next.config.mjs; Dockerfile.worker needs src/ + prisma/.
+# Nothing else has any business being in the context.
+
+# dependencies / build output — always rebuilt inside the image
+node_modules
+**/node_modules
+.npm
+.next
+out
+build
+dist
+*.tsbuildinfo
+next-env.d.ts
+
+# version control + CI + editor noise
+.git
+.gitignore
+.github
+.claude
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# secrets — NEVER in a build context. .env.example is documentation and is
+# kept (it is referenced by scripts/preflight.sh and the docs, and contains no
+# real value); every populated .env / key file is excluded.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+**/credentials*
+**/service-account*.json
+
+# tests and verifier notes — not part of either runtime image
+tests
+coverage
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# local infrastructure data / scratch
+*.sqlite
+*.db
+*.db-journal
+prisma/*.db*
+docker-compose.override.yml

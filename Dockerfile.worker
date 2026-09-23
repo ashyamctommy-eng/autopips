@@ -1,0 +1,103 @@
+# syntax=docker/dockerfile:1.7
+###############################################################################
+# Autopipsz — autopips.pro
+# SOCKET + BOT RUNTIME image  (`npm run start:ws` → `tsx src/server/main.ts`).
+#
+#   docker build -f Dockerfile.worker -t autopipsz/worker:$(git rev-parse --short HEAD) .
+#   docker run --rm -p 127.0.0.1:4001:4001 --env-file .env autopipsz/worker:latest
+#
+# What this process is:
+#   * `GET  /healthz`          — readiness: probes Postgres (`SELECT 1`) and Redis
+#                                (`PING`), 200 when both are up, 503 when either
+#                                is down. Body reports db/redis latency, socket
+#                                connections, rooms, namespace and pid.
+#   * `POST /internal/publish` — Bearer `WS_INTERNAL_TOKEN`, timing-safe compare.
+#                                INTERNAL ONLY: nginx returns 404 for this path
+#                                (see deploy/nginx/autopips.pro.conf). The normal
+#                                publish path used by the Next.js app is the Redis
+#                                pub/sub channel `autopips:ws:events`.
+#   * Socket.IO on namespace `/ws/trading`, engine.io path `/ws/socket.io`,
+#     bound to `WS_PORT` (4001); production binds 0.0.0.0, development 127.0.0.1
+#     (`src/server/main.ts`) — which is why NODE_ENV=production is mandatory here.
+#   * The bot runtime + broker-sync worker, started AFTER the socket server is
+#     listening (`METAAPI_SYNC_INTERVAL`, default 15s).
+#
+# ── WHY THIS PROCESS IS A SINGLETON ────────────────────────────────────────
+# `src/server/modules/bot/bot.runtime.ts` takes a Redis single-writer lock
+# (`autopips:lock:bot-runtime`, `SET NX EX 60`, renewed every tick with a
+# compare-and-set Lua script). Exactly one runtime may trade:
+#   * a second replica that starts while the lock is held logs
+#     `LOCK_HELD: another bot runtime already owns autopips:lock:bot-runtime`
+#     and its trading loop does NOT run (it still serves /healthz and sockets);
+#   * a runtime that loses the lock mid-flight stops its own loop
+#     (`lock-lost`) rather than trading alongside the new owner;
+#   * two runtimes trading the same master signal would DOUBLE every client's
+#     exposure, which is why the lock exists at all.
+# Consequence for scaling: run ONE worker replica. The Socket.IO layer itself is
+# scale-out friendly (all replicas subscribe to `autopips:ws:events` and clients
+# reconnect), but every extra replica is a bot-runtime contender for the same
+# lock, so scaling the worker buys socket fan-out (and, on a restart, a race for
+# the lock) rather than trading throughput. Scale the *web* service instead.
+# The `/healthz` endpoint deliberately reports HTTP+socket health, NOT whether
+# this replica owns the bot lock — check the admin health screen / the logs
+# (`[bot.runtime] started`, `LOCK_HELD`) to see which replica is trading.
+#
+# ── WHY `tsx` AND NOT `dist/` ───────────────────────────────────────────────
+# `npm run start:ws` is `tsx src/server/main.ts` (package.json). `tsx` resolves
+# the repo's TypeScript path alias (`@/*` → `./src/*`) at runtime. The
+# alternative, `npm run build:server` (`tsc -p tsconfig.server.json` → `dist/`),
+# emits `require('@/lib/env')` unchanged — tsc does not rewrite path aliases — so
+# `node dist/server/main.js` cannot resolve `@/…` without an extra loader. This
+# image therefore runs the documented script and installs the FULL dependency
+# tree (tsx is a devDependency). `dist/` is still used by `src/server/main.ts` as
+# a fallback import path for the bot/broker modules, which is harmless.
+#
+# SECRETS: none are passed as build args (they are recorded in image history —
+# see the Dockerfile header). Everything arrives at runtime via `--env-file` /
+# compose `env_file:` and is validated by `src/lib/env.ts`, which exits 1 on any
+# missing or malformed value before the process listens on a port.
+###############################################################################
+
+FROM node:20-alpine
+
+# libc6-compat: prebuilt native addons. openssl: Prisma query engines.
+RUN apk add --no-cache libc6-compat openssl dumb-init
+
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Full install (tsx, prisma CLI and typescript are devDependencies and are all
+# needed at runtime here). No build secrets involved.
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci
+
+COPY prisma ./prisma
+# Generate the client for the musl target of this image.
+RUN npx prisma generate
+
+# Source only: src/ (server modules + lib), tsconfig.json for the `@/*` alias,
+# next.config.mjs is NOT needed (this process never boots Next.js). `tests/`,
+# `.next/` and coverage are excluded via .dockerignore.
+COPY tsconfig.json tsconfig.server.json ./
+COPY src ./src
+
+# Non-root.
+RUN chown -R node:node /app
+USER node
+
+# NODE_ENV=production matters twice: it makes the runtime bind 0.0.0.0 (the dev
+# default is 127.0.0.1, unreachable from another container) and it stops
+# `loadDotEnv()` from reading a .env file that is not in the image.
+ENV NODE_ENV=production \
+    WS_PORT=4001
+
+EXPOSE 4001
+
+# Readiness probe. `/healthz` answers 503 while Postgres or Redis is down, and
+# busybox wget exits non-zero on a 5xx — so a failing healthcheck means "cannot
+# reach its datastores", not "the HTTP listener is gone".
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:${WS_PORT:-4001}/healthz > /dev/null 2>&1 || exit 1
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["npm", "run", "start:ws"]

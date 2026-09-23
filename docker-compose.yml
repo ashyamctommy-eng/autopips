@@ -1,0 +1,199 @@
+# Autopipsz — autopips.pro
+# Production-shaped local / self-hosted stack.
+#
+#   cp .env.example .env            # then fill in real values — NEVER commit it
+#   docker compose up -d --build
+#   docker compose logs -f worker
+#
+# ── WHAT IS IN HERE ─────────────────────────────────────────────────────────
+#   postgres   postgres:16-alpine, named volume, healthcheck  (app database)
+#   redis      redis:7-alpine, append-only AOF, healthcheck   (sessions, rate
+#              limits, IPN replay guard, bot lock, pub/sub bus)
+#   migrate    one-shot: `npx prisma migrate deploy` — the app waits for it
+#   web        Next.js 14 (`next start`, port 3000)           → Dockerfile
+#   worker     socket.io + bot runtime (`npm run start:ws`,  → Dockerfile.worker
+#              port 4001) — ONE replica, see below
+#
+# ── .env FOR COMPOSE IS NOT THE SAME .env AS FOR A BARE-METAL RUN ───────────
+#   Inside this compose network the datastore hostnames are the SERVICE NAMES,
+#   not localhost. The values from .env.example must be adjusted:
+#
+#     DATABASE_URL=postgresql://autopips:${POSTGRES_PASSWORD}@postgres:5432/autopips?schema=public&connection_limit=10
+#     REDIS_URL=redis://redis:6379
+#     NEXT_PUBLIC_APP_URL=https://autopips.pro
+#     # leave NEXT_PUBLIC_WS_URL EMPTY/absent: the browser then connects
+#     # same-origin to /ws/socket.io and nginx proxies it to the worker.
+#
+#   Every secret (JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY, NOWPAYMENTS_*, …) is a
+#   normal key in that file — nothing is hardcoded here and nothing is committed.
+#   `.env` is git-ignored (see .gitignore); `.env.example` is the template only.
+#   POSTGRES_PASSWORD is read from the shell/`.env` by compose interpolation and
+#   must match the password inside DATABASE_URL above.
+#
+# ── SINGLETON RULE ──────────────────────────────────────────────────────────
+#   Run exactly ONE `worker` replica. The bot runtime holds the Redis
+#   single-writer lock `autopips:lock:bot-runtime` (SET NX EX 60, renewed every
+#   tick); a second replica refuses to start its trading loop (`LOCK_HELD`) and
+#   would only add socket fan-out plus a restart-time race for the lock. Scale
+#   `web` instead: both processes publish/subscribe over Redis
+#   (`autopips:ws:events`), so socket replicas see the same events.
+#
+# ── OUTSIDE THE STACK ───────────────────────────────────────────────────────
+#   TLS termination + the WebSocket upgrade live in nginx on the host
+#   (deploy/nginx/autopips.pro.conf), which proxies 127.0.0.1:3000 (web) and
+#   127.0.0.1:4001 (worker). That is why the ports below are published on the
+#   loopback interface only — never `0.0.0.0`.
+
+name: autopips
+
+services:
+  # ────────────────────────────── database ────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-autopips}
+      # `:?` makes compose fail fast instead of starting Postgres with a
+      # well-known default password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set (see DEPLOYMENT.md)}
+      POSTGRES_DB: ${POSTGRES_DB:-autopips}
+      # Deterministic collation for a fresh cluster.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autopips} -d ${POSTGRES_DB:-autopips}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Not published: only the app services need it. For a psql session use
+    #   docker compose exec postgres psql -U autopips -d autopips
+    networks: [internal]
+
+  # ──────────────────────────────── cache ─────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Append-only persistence: this Redis is NOT a pure cache. It holds the
+    # refresh-token revocation store (session survival across a restart), the
+    # login/deposit/withdrawal rate-limit buckets, the IPN replay guard and the
+    # bot single-writer lock. Losing it means: every user is signed out, the
+    # bot lock must be re-acquired, and an IPN delivered while it was down is
+    # treated as a duplicate (the guard fails closed) — recoverable through the
+    # idempotent deposit reconciliation path, but avoidable with AOF.
+    command:
+      [
+        "redis-server",
+        "--appendonly", "yes",
+        "--appendfsync", "everysec",
+        "--save", "900 1",
+        "--dir", "/data",
+      ]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # Not published. To require a password instead, add `--requirepass ...` to
+    # the command above and put the credentials in REDIS_URL (redis://:pw@redis:6379).
+    networks: [internal]
+
+  # ─────────────────────────── schema migration ───────────────────────────
+  # One-shot. `prisma migrate deploy` applies prisma/migrations/** in order and
+  # is idempotent — it is the ONLY migration command that belongs in a deploy
+  # (`prisma migrate dev` is for development and can reset data).
+  # Uses the worker image because the `prisma` CLI is a devDependency and the
+  # worker image intentionally keeps the full dependency tree (tsx is needed at
+  # runtime too).
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: autopipsz/worker:latest
+    restart: "no"
+    env_file:
+      - .env
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+
+  # ────────────────────────────── Next.js app ─────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Public values only — build args are recorded in image history.
+        # Secrets must never appear here; they come from env_file at runtime.
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://autopips.pro}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+    image: autopipsz/web:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      # Loopback only: nginx on the host terminates TLS and proxies / and /api/.
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ > /dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks: [internal]
+
+  # ─────────────────── socket.io + bot runtime (SINGLETON) ────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: autopipsz/worker:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      WS_PORT: "4001"
+    ports:
+      # nginx proxies /ws/ and /socket.io/ here, with the WebSocket upgrade.
+      - "127.0.0.1:4001:4001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # 200 = Postgres and Redis both reachable; 503 = degraded (see /healthz body).
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4001/healthz > /dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: [internal]
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  internal:
+    driver: bridge

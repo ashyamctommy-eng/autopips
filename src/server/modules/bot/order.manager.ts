@@ -1,0 +1,725 @@
+/**
+ * Order manager — the signal execution pipeline.
+ *
+ *   signal → broker connection → live account state → RISK GATE → lot allocation
+ *          → broker order (per investment) → TradeRecord + audit + activity
+ *
+ * Invariants:
+ *  - The risk gate is evaluated BEFORE any allocation or order; a rejection records
+ *    `RISK_CHECK_FAILED` and publishes an activity, and never touches the broker.
+ *  - A `TradeRecord` is only ever created from a broker-confirmed fill; a rejected
+ *    order produces an audit entry and nothing else (no fabricated P/L, ever).
+ *  - Every order carries a deterministic `clientOrderId` (`sig:<signalId>:inv:<investmentId>`)
+ *    which is passed to the broker as the position comment, so a position can be
+ *    traced back to the investment that funded it (and a retry cannot double-open).
+ *  - Nothing throws for a broker rejection: brokers say no all the time, and that is
+ *    a normal, audited outcome.
+ */
+
+import type { BrokerConnection } from '@prisma/client';
+import { WS_EVENTS } from '@/lib/contracts';
+import { serverEnv } from '@/lib/env';
+import { ApiError } from '@/lib/http';
+import { D, toPrismaDecimal, usd } from '@/lib/money';
+import { prisma } from '@/lib/prisma';
+import { redis, rkey } from '@/lib/redis';
+import { publishActivity, publishTradeEvent } from '@/server/ws/event-bus';
+import { AUDIT, recordAudit, recordAuditSafe } from '../audit/audit.service';
+import {
+  ensureBrokerConnected,
+  getAdapterForConnection,
+  investmentRooms,
+  makeActivity,
+} from '../broker/broker.registry';
+import { applyPositionClosure, recomputeInvestment, supportsPositionClosure } from '../broker/broker.sync';
+import type {
+  BrokerAccountState,
+  BrokerAdapter,
+  BrokerPosition,
+  PlaceOrderRequest,
+  SymbolSpec,
+} from '../broker/broker.types';
+import type { MarginCapableAdapter, TradabilityCapableAdapter } from '../broker/metaapi.adapter';
+import { allocateAcrossInvestments, MASTER_TO_CLIENT_FORMULA } from './lot.allocator';
+import { evaluatePreTradeRisk, type RiskContextWithFloor } from './risk.engine';
+import type { LotAllocation, OrderOutcome, RiskDecision, TradeSignal } from './bot.types';
+
+/** Signals already handled by this platform (idempotency guard). */
+function signalClaimKey(signalId: string): string {
+  return rkey('signal-claimed', signalId);
+}
+
+/** Highest master-account equity seen, used as the drawdown peak. */
+function masterPeakEquityKey(metaApiAccountId: string): string {
+  return rkey('master-peak-equity', metaApiAccountId);
+}
+
+/** How long a processed signal is remembered (broker time is irrelevant here). */
+const SIGNAL_CLAIM_TTL_SECONDS = 24 * 60 * 60;
+
+export interface SignalExecutionResult {
+  signalId: string;
+  status: 'REJECTED' | 'NO_CONNECTION' | 'NO_ALLOCATIONS' | 'EXECUTED';
+  reason?: string;
+  decision?: RiskDecision;
+  allocations: LotAllocation[];
+  outcomes: OrderOutcome[];
+}
+
+export interface ClosePositionInput {
+  brokerConnectionId: string;
+  investmentId: string;
+  positionId: string;
+  /** Partial volume; omitted/0 closes the whole position. */
+  volume?: number;
+}
+
+export interface ClosePositionOutcome {
+  ok: boolean;
+  positionId: string;
+  investmentId: string;
+  /** True when the TradeRecord was closed in this call. */
+  tradeClosed: boolean;
+  /** True when the broker still holds a remainder of the position. */
+  partialOnly: boolean;
+  closePrice?: number;
+  netPnL?: number;
+  brokerMessage?: string;
+  errorCode?: string;
+}
+
+// -------------------------------------------------------------- capabilities
+
+function isMarginCapable(adapter: BrokerAdapter): adapter is BrokerAdapter & MarginCapableAdapter {
+  return typeof (adapter as { calculateRequiredMargin?: unknown }).calculateRequiredMargin === 'function';
+}
+
+function isTradabilityCapable(adapter: BrokerAdapter): adapter is BrokerAdapter & TradabilityCapableAdapter {
+  return typeof (adapter as { isSymbolTradable?: unknown }).isSymbolTradable === 'function';
+}
+
+// -------------------------------------------------------------- aggregation
+
+interface ActiveInvestment {
+  id: string;
+  capitalUsd: number;
+  currentValUsd: number;
+  maxDrawdownPct: number;
+}
+
+/**
+ * ACTIVE investments that trade on this broker connection.
+ *
+ * The schema has no `Investment.brokerId`, so the link is derived from booked
+ * trades: an investment counts as "on this broker" when it already has a trade on
+ * this connection. In a single-connection deployment (which this runtime is
+ * documented for) every ACTIVE investment belongs to that master account, so all
+ * of them are returned.
+ */
+async function resolveActiveInvestments(connectionId: string): Promise<ActiveInvestment[]> {
+  const connectionCount = await prisma.brokerConnection.count();
+  const linked = await prisma.tradeRecord.findMany({
+    where: { brokerId: connectionId },
+    select: { investmentId: true },
+    distinct: ['investmentId'],
+  });
+  const linkedIds = linked.map((row) => row.investmentId);
+
+  const investments = await prisma.investment.findMany({
+    where: {
+      status: 'ACTIVE',
+      ...(connectionCount > 1 && linkedIds.length > 0 ? { id: { in: linkedIds } } : {}),
+    },
+    include: { plan: { select: { maxDrawdown: true } } },
+    orderBy: { id: 'asc' },
+  });
+
+  return investments.map((investment) => ({
+    id: investment.id,
+    capitalUsd: D(investment.capitalUsd).toNumber(),
+    currentValUsd: D(investment.currentValUsd).toNumber(),
+    maxDrawdownPct: D(investment.plan.maxDrawdown).toNumber(),
+  }));
+}
+
+// --------------------------------------------------------------- the pipeline
+
+/**
+ * Connects the adapter, reporting (audit + activity) instead of throwing when the
+ * bridge is unreachable. Returns null when the signal cannot be executed at all.
+ */
+async function connectOrReport(
+  conn: BrokerConnection,
+  details: Record<string, unknown>,
+): Promise<BrokerAdapter | null> {
+  try {
+    return await ensureBrokerConnected(await getAdapterForConnection(conn));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await recordAuditSafe({
+      action: AUDIT.BROKER_ERROR,
+      details: { ...details, brokerConnectionId: conn.id, phase: 'execute_signal.connect', error: message },
+    });
+    await publishActivity(
+      makeActivity(
+        'SIGNAL_NO_CONNECTION',
+        `Cannot reach broker connection ${conn.maskedAccount}: ${message}`,
+        'error',
+        { ...details, brokerConnectionId: conn.id },
+        investmentRooms(null),
+      ),
+    );
+    return null;
+  }
+}
+
+/** Account snapshot, reported instead of thrown when the bridge answers nonsense. */
+async function readAccountOrReport(
+  adapter: BrokerAdapter,
+  conn: BrokerConnection,
+  details: Record<string, unknown>,
+): Promise<BrokerAccountState | null> {
+  try {
+    return await adapter.getAccountState();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await recordAuditSafe({
+      action: AUDIT.BROKER_ERROR,
+      details: { ...details, brokerConnectionId: conn.id, phase: 'execute_signal.account_state', error: message },
+    });
+    await publishActivity(
+      makeActivity(
+        'SIGNAL_NO_ACCOUNT_STATE',
+        `Broker did not return a usable account snapshot for ${conn.maskedAccount}: ${message}`,
+        'error',
+        { ...details, brokerConnectionId: conn.id },
+        investmentRooms(null),
+      ),
+    );
+    return null;
+  }
+}
+
+/**
+ * Executes one strategy signal end to end.
+ *
+ * Returns a summary rather than throwing: "rejected" is a normal outcome that the
+ * activity feed and the audit log both record.
+ */
+export async function executeSignal(signal: TradeSignal): Promise<SignalExecutionResult> {
+  const env = serverEnv();
+  const claimKey = signalClaimKey(signal.signalId);
+  const configClaim = { signalId: signal.signalId, strategy: signal.strategy, symbol: signal.symbol };
+
+  const conn = await prisma.brokerConnection.findUnique({
+    where: { metaApiAccountId: signal.brokerAccountId },
+  });
+  if (!conn) {
+    await recordAudit({
+      action: AUDIT.BROKER_ERROR,
+      details: { ...configClaim, phase: 'execute_signal', reason: 'UNKNOWN_BROKER_ACCOUNT' },
+    });
+    await publishActivity(
+      makeActivity(
+        'SIGNAL_NO_BROKER',
+        `Signal ${signal.signalId} targets broker account ${signal.brokerAccountId}, which is not registered.`,
+        'error',
+        configClaim,
+        investmentRooms(null),
+      ),
+    );
+    return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'UNKNOWN_BROKER_ACCOUNT', allocations: [], outcomes: [] };
+  }
+
+  const adapter = await connectOrReport(conn, configClaim);
+  if (!adapter) {
+    return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'BROKER_UNAVAILABLE', allocations: [], outcomes: [] };
+  }
+
+  // Duplicate protection: the claim is taken before the first broker call, so two
+  // replicas racing on the same signal cannot both submit orders.
+  const claimed = await redis.set(claimKey, '1', 'EX', SIGNAL_CLAIM_TTL_SECONDS, 'NX');
+  const duplicate = claimed === null;
+
+  const account = await readAccountOrReport(adapter, conn, configClaim);
+  if (!account) {
+    if (claimed !== null) await redis.del(claimKey);
+    return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'ACCOUNT_STATE_UNAVAILABLE', allocations: [], outcomes: [] };
+  }
+
+  // An empty position list is only ever a real "no open position" answer: when the
+  // broker call fails we stop the pipeline instead of assuming flat.
+  let positions: BrokerPosition[];
+  try {
+    positions = await adapter.getOpenPositions();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await recordAuditSafe({
+      action: AUDIT.BROKER_ERROR,
+      details: { ...configClaim, phase: 'execute_signal.open_positions', error: message },
+    });
+    if (claimed !== null) await redis.del(claimKey);
+    return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'POSITIONS_UNAVAILABLE', allocations: [], outcomes: [] };
+  }
+
+  const investments = await resolveActiveInvestments(conn.id);
+
+  const capitalUsd = D(investments.reduce((acc, item) => acc.plus(item.capitalUsd), D(0)));
+  const currentEquity = D(investments.reduce((acc, item) => acc.plus(item.currentValUsd), D(0)));
+
+  // Drawdown peak: highest equity this master account has reached. Operational
+  // state (Redis), never a trade value — seeded from the current ledger sum.
+  const storedPeak = await redis.get(masterPeakEquityKey(conn.metaApiAccountId));
+  const peakFromStore = storedPeak !== null && Number.isFinite(Number(storedPeak)) ? D(storedPeak) : null;
+  const peakEquity = peakFromStore && peakFromStore.greaterThan(currentEquity) ? peakFromStore : currentEquity;
+
+  // Most conservative limit across the plans funding this signal.
+  const maxDrawdownPct = investments.length
+    ? Math.min(...investments.map((investment) => investment.maxDrawdownPct))
+    : 0;
+
+  const spec: SymbolSpec | null = await adapter.getSymbolSpec(signal.symbol);
+  const quote = await adapter.getQuote(signal.symbol);
+  const referencePrice = quote ? (signal.direction === 'BUY' ? quote.ask : quote.bid) : null;
+
+  // Required margin comes from the broker's own margin RPC; when it cannot be
+  // computed the risk gate rejects (INSUFFICIENT_FREE_MARGIN) instead of guessing.
+  let requiredMargin: number | null = null;
+  if (isMarginCapable(adapter) && referencePrice !== null && Number.isFinite(referencePrice)) {
+    requiredMargin = await adapter.calculateRequiredMargin(
+      signal.symbol,
+      signal.direction,
+      signal.masterVolume,
+      referencePrice,
+    );
+  }
+
+  let symbolTradable = false;
+  if (
+    spec !== null &&
+    isTradabilityCapable(adapter) &&
+    signal.masterVolume >= spec.minVolume &&
+    signal.masterVolume <= spec.maxVolume
+  ) {
+    symbolTradable = (await adapter.isSymbolTradable(signal.symbol)) === true;
+  }
+
+  const riskContext: RiskContextWithFloor = {
+    account,
+    maxDrawdownPct,
+    peakEquity: peakEquity.toNumber(),
+    capitalUsd: capitalUsd.toNumber(),
+    currentEquity: currentEquity.toNumber(),
+    openPositions: positions.length,
+    maxOpenPositions: env.RISK_MAX_OPEN_POSITIONS,
+    signalVolume: signal.masterVolume,
+    maxLotPerOrder: env.RISK_MAX_LOT_PER_ORDER,
+    minClientCapitalUsd: env.RISK_MIN_CLIENT_CAPITAL_USD,
+    duplicate,
+    freeMargin: account.freeMargin,
+    requiredMargin,
+    symbolTradable,
+    masterEquityFloorUsd: env.RISK_MASTER_EQUITY_FLOOR_USD,
+  };
+
+  const decision = evaluatePreTradeRisk(riskContext);
+  await recordAudit({
+    action: decision.passed ? AUDIT.RISK_CHECK_PASSED : AUDIT.RISK_CHECK_FAILED,
+    details: {
+      ...configClaim,
+      brokerConnectionId: conn.id,
+      masterVolume: signal.masterVolume,
+      direction: signal.direction,
+      rejectionReason: decision.rejectionReason ?? null,
+      checks: decision.checks.map((entry) => ({
+        name: entry.name,
+        passed: entry.passed,
+        detail: entry.detail,
+        observed: entry.observed ?? null,
+        threshold: entry.threshold ?? null,
+      })),
+    },
+  });
+
+  if (!decision.passed) {
+    // The signal never reached the broker, so the claim is released for a retry.
+    if (claimed !== null) await redis.del(claimKey);
+    await publishActivity(
+      makeActivity(
+        'SIGNAL_REJECTED',
+        `Signal ${signal.signalId} (${signal.direction} ${signal.masterVolume} ${signal.symbol}) rejected by risk: ${decision.rejectionReason ?? 'unknown'}.`,
+        'warning',
+        { ...configClaim, rejectionReason: decision.rejectionReason ?? null, checks: decision.checks },
+        investmentRooms(null),
+      ),
+    );
+    return { signalId: signal.signalId, status: 'REJECTED', decision, allocations: [], outcomes: [] };
+  }
+
+  // The master high-water mark only ever moves up. Redis holds this operational
+  // state (the schema has no peak-equity column); it is seeded from the ledger.
+  const masterNow = D(account.equity).greaterThan(currentEquity) ? D(account.equity) : currentEquity;
+  if (!peakFromStore || peakFromStore.lessThan(masterNow)) {
+    await redis.set(masterPeakEquityKey(conn.metaApiAccountId), masterNow.toString());
+  }
+
+  if (!spec) {
+    // Unreachable when the risk gate passed (SYMBOL_NOT_TRADABLE would have fired),
+    // but the pipeline must not continue without a real specification.
+    return { signalId: signal.signalId, status: 'NO_ALLOCATIONS', reason: 'NO_SYMBOL_SPEC', decision, allocations: [], outcomes: [] };
+  }
+
+  const allocations = allocateAcrossInvestments({
+    masterVolume: signal.masterVolume,
+    masterEquity: account.equity,
+    symbolSpec: spec,
+    minClientCapitalUsd: env.RISK_MIN_CLIENT_CAPITAL_USD,
+    investments: investments.map((investment) => ({
+      investmentId: investment.id,
+      capitalUsd: investment.capitalUsd,
+    })),
+  });
+
+  // Audit every allocation (including the skipped ones) before touching the broker.
+  for (const allocation of allocations) {
+    await recordAudit({
+      action: AUDIT.LOT_ALLOCATED,
+      details: {
+        ...configClaim,
+        investmentId: allocation.investmentId,
+        masterVolume: signal.masterVolume,
+        masterEquity: account.equity,
+        clientVolume: allocation.clientVolume,
+        ratio: allocation.ratio,
+        skipped: allocation.skipped,
+        skipReason: allocation.skipReason ?? null,
+        formula: MASTER_TO_CLIENT_FORMULA,
+      },
+    });
+  }
+
+  const executable = allocations.filter((allocation) => !allocation.skipped);
+  if (executable.length === 0) {
+    if (claimed !== null) await redis.del(claimKey);
+    await publishActivity(
+      makeActivity(
+        'SIGNAL_NO_ALLOCATION',
+        `Signal ${signal.signalId} produced no executable allocation (all investments skipped).`,
+        'warning',
+        { ...configClaim, allocations },
+        investmentRooms(null),
+      ),
+    );
+    return { signalId: signal.signalId, status: 'NO_ALLOCATIONS', decision, allocations, outcomes: [] };
+  }
+
+  const outcomes: OrderOutcome[] = [];
+  for (const allocation of executable) {
+    const clientOrderId = `sig:${signal.signalId}:inv:${allocation.investmentId}`;
+    const request: PlaceOrderRequest = {
+      symbol: signal.symbol,
+      direction: signal.direction,
+      volume: allocation.clientVolume,
+      ...(signal.stopLoss !== undefined ? { stopLoss: signal.stopLoss } : {}),
+      ...(signal.takeProfit !== undefined ? { takeProfit: signal.takeProfit } : {}),
+      comment: clientOrderId,
+      clientOrderId,
+    };
+
+    await recordAudit({
+      action: AUDIT.METAAPI_ORDER_SUBMITTED,
+      details: {
+        ...configClaim,
+        investmentId: allocation.investmentId,
+        clientOrderId,
+        symbol: request.symbol,
+        direction: request.direction,
+        volume: request.volume,
+        stopLoss: request.stopLoss ?? null,
+        takeProfit: request.takeProfit ?? null,
+      },
+    });
+
+    let result: Awaited<ReturnType<BrokerAdapter['placeOrder']>>;
+    try {
+      result = await adapter.placeOrder(request);
+    } catch (err) {
+      // placeOrder maps broker rejections itself; anything thrown here is an
+      // infrastructure failure and is reported the same way.
+      result = {
+        ok: false,
+        errorCode: 'ORDER_LAYER_ERROR',
+        brokerMessage: err instanceof Error ? err.message : 'Unknown order error',
+      };
+    }
+
+    const outcome: OrderOutcome = {
+      investmentId: allocation.investmentId,
+      request,
+      ok: result.ok,
+      ...(result.positionId !== undefined ? { positionId: result.positionId } : {}),
+      ...(result.fillPrice !== undefined ? { fillPrice: result.fillPrice } : {}),
+      ...(result.brokerMessage !== undefined ? { brokerMessage: result.brokerMessage } : {}),
+      ...(result.errorCode !== undefined ? { errorCode: result.errorCode } : {}),
+    };
+    outcomes.push(outcome);
+
+    if (!result.ok) {
+      await recordAudit({
+        action: AUDIT.METAAPI_ORDER_REJECTED,
+        details: {
+          ...configClaim,
+          investmentId: allocation.investmentId,
+          clientOrderId,
+          errorCode: result.errorCode ?? null,
+          brokerMessage: result.brokerMessage ?? null,
+        },
+      });
+      await publishActivity(
+        makeActivity(
+          'ORDER_REJECTED',
+          `Broker rejected ${request.direction} ${request.volume} ${request.symbol} for investment ${allocation.investmentId}: ${result.brokerMessage ?? result.errorCode ?? 'unknown error'}.`,
+          'error',
+          {
+            ...configClaim,
+            investmentId: allocation.investmentId,
+            clientOrderId,
+            errorCode: result.errorCode ?? null,
+          },
+          investmentRooms(allocation.investmentId),
+        ),
+      );
+      continue;
+    }
+
+    await recordAudit({
+      action: AUDIT.METAAPI_ORDER_FILLED,
+      details: {
+        ...configClaim,
+        investmentId: allocation.investmentId,
+        clientOrderId,
+        orderId: result.orderId ?? null,
+        positionId: result.positionId ?? null,
+        fillPrice: result.fillPrice ?? null,
+        filledVolume: result.volume ?? null,
+        brokerMessage: result.brokerMessage ?? null,
+      },
+    });
+
+    // The ledger row is written ONLY when the broker reported the position id, the
+    // fill price and the filled volume. Missing any of them → no row here; the
+    // sync cycle reconciles the position from the broker's own record.
+    if (result.positionId && result.fillPrice !== undefined && result.volume !== undefined) {
+      try {
+        await prisma.tradeRecord.create({
+          data: {
+            investmentId: allocation.investmentId,
+            brokerId: conn.id,
+            metaApiPositionId: result.positionId,
+            instrument: request.symbol,
+            direction: request.direction,
+            volume: toPrismaDecimal(result.volume, 5),
+            entryPrice: toPrismaDecimal(result.fillPrice, 5),
+            stopLoss: request.stopLoss === undefined ? null : toPrismaDecimal(request.stopLoss, 5),
+            takeProfit: request.takeProfit === undefined ? null : toPrismaDecimal(request.takeProfit, 5),
+            status: 'OPEN',
+            // The next sync cycle replaces this with the broker's own open time.
+            openedAt: new Date(),
+          },
+        });
+        await publishTradeEvent(
+          WS_EVENTS.positionOpened,
+          {
+            positionId: result.positionId,
+            investmentId: allocation.investmentId,
+            instrument: request.symbol,
+            direction: request.direction,
+            volume: result.volume,
+            entryPrice: result.fillPrice,
+            clientOrderId,
+          },
+          investmentRooms(allocation.investmentId),
+        );
+      } catch (err) {
+        await recordAuditSafe({
+          action: AUDIT.BROKER_ERROR,
+          details: {
+            ...configClaim,
+            investmentId: allocation.investmentId,
+            positionId: result.positionId,
+            phase: 'trade_record_create',
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+      }
+    } else {
+      await recordAuditSafe({
+        action: AUDIT.BROKER_ERROR,
+        details: {
+          ...configClaim,
+          investmentId: allocation.investmentId,
+          positionId: result.positionId ?? null,
+          phase: 'fill_details_missing',
+          note: 'Broker confirmed the order but did not report position id / fill price / volume yet; no ledger row written, the sync cycle will reconcile it.',
+        },
+      });
+    }
+
+    await publishActivity(
+      makeActivity(
+        'ORDER_FILLED',
+        `Filled ${request.direction} ${result.volume ?? request.volume} ${request.symbol} for investment ${allocation.investmentId}${result.fillPrice !== undefined ? ` @ ${result.fillPrice}` : ''}.`,
+        'success',
+        {
+          ...configClaim,
+          investmentId: allocation.investmentId,
+          positionId: result.positionId ?? null,
+          clientOrderId,
+        },
+        investmentRooms(allocation.investmentId),
+      ),
+    );
+  }
+
+  const filled = outcomes.filter((outcome) => outcome.ok).length;
+  await publishActivity(
+    makeActivity(
+      'SIGNAL_EXECUTED',
+      `Signal ${signal.signalId}: ${filled}/${outcomes.length} mirrored orders confirmed by the broker.`,
+      filled > 0 ? 'success' : 'warning',
+      { ...configClaim, filled, attempted: outcomes.length },
+      investmentRooms(null),
+    ),
+  );
+
+  return { signalId: signal.signalId, status: 'EXECUTED', decision, allocations, outcomes };
+}
+
+// -------------------------------------------------------------------- closing
+
+/**
+ * Closes a booked position for one investment: broker close → TradeRecord closure
+ * (from the broker's closing deals) → investment roll-up.
+ *
+ * A partial close leaves the position open at the broker, so the TradeRecord stays
+ * OPEN; its realised part is picked up when the position is finally closed, because
+ * the closure aggregate always sums *every* closing deal of the position.
+ */
+export async function closePositionForInvestment(input: ClosePositionInput): Promise<ClosePositionOutcome> {
+  const conn = await prisma.brokerConnection.findUnique({ where: { id: input.brokerConnectionId } });
+  if (!conn) throw ApiError.notFound('Broker connection not found.');
+
+  const trade = await prisma.tradeRecord.findUnique({
+    where: {
+      brokerId_metaApiPositionId: {
+        brokerId: input.brokerConnectionId,
+        metaApiPositionId: input.positionId,
+      },
+    },
+  });
+  if (!trade || trade.investmentId !== input.investmentId) {
+    // Refuse to close a position the platform cannot attribute to this investment.
+    throw ApiError.notFound('No booked position matches this investment and position id.');
+  }
+
+  const adapter = await ensureBrokerConnected(await getAdapterForConnection(conn));
+  const result = await adapter.closePosition(input.positionId, input.volume);
+
+  if (!result.ok) {
+    await recordAudit({
+      action: AUDIT.METAAPI_ORDER_REJECTED,
+      details: {
+        brokerConnectionId: conn.id,
+        investmentId: input.investmentId,
+        metaApiPositionId: input.positionId,
+        phase: 'close_position',
+        errorCode: result.errorCode ?? null,
+        brokerMessage: result.brokerMessage ?? null,
+      },
+    });
+    return {
+      ok: false,
+      positionId: input.positionId,
+      investmentId: input.investmentId,
+      tradeClosed: false,
+      partialOnly: false,
+      ...(result.brokerMessage !== undefined ? { brokerMessage: result.brokerMessage } : {}),
+      ...(result.errorCode !== undefined ? { errorCode: result.errorCode } : {}),
+    };
+  }
+
+  const remaining: BrokerPosition[] = await adapter.getOpenPositions();
+  const stillOpen = remaining.some((position) => position.positionId === input.positionId);
+
+  let tradeClosed = false;
+  let closePrice = result.closePrice;
+  let netPnL = result.netPnL;
+
+  if (stillOpen) {
+    // Broker confirmed a partial fill: book nothing against the open row yet.
+    await recordAuditSafe({
+      action: 'METAAPI_POSITION_PARTIALLY_CLOSED',
+      details: {
+        brokerConnectionId: conn.id,
+        investmentId: input.investmentId,
+        metaApiPositionId: input.positionId,
+        requestedVolume: input.volume ?? null,
+        note: 'Position is still open at the broker; TradeRecord stays OPEN until the closing deal set is complete.',
+      },
+    });
+  } else if (supportsPositionClosure(adapter)) {
+    const closure = await adapter.getPositionClosure(input.positionId);
+    if (closure) {
+      const applied = await applyPositionClosure(conn.id, closure);
+      tradeClosed = applied !== null;
+      if (closure.exitPrice !== null) closePrice = closure.exitPrice;
+      netPnL = closure.netPnL;
+    } else {
+      await recordAuditSafe({
+        action: AUDIT.BROKER_ERROR,
+        details: {
+          brokerConnectionId: conn.id,
+          investmentId: input.investmentId,
+          metaApiPositionId: input.positionId,
+          phase: 'close_position_closure',
+          note: 'Broker reported no closing deal yet; TradeRecord left OPEN for the sync cycle.',
+        },
+      });
+    }
+  }
+
+  const unrealized = D(
+    remaining
+      .filter((position) => position.investmentId === input.investmentId)
+      .reduce((acc, position) => acc.plus(position.unrealizedPnL), D(0)),
+  ).toNumber();
+  await recomputeInvestment(input.investmentId, unrealized);
+
+  await publishActivity(
+    makeActivity(
+      tradeClosed ? 'POSITION_CLOSED' : 'POSITION_PARTIALLY_CLOSED',
+      tradeClosed
+        ? `Position ${input.positionId} closed${netPnL !== undefined ? ` with net P/L ${usd(netPnL).toString()}` : ''} for investment ${input.investmentId}.`
+        : `Position ${input.positionId} partially closed for investment ${input.investmentId}.`,
+      tradeClosed ? 'success' : 'info',
+      {
+        brokerConnectionId: conn.id,
+        investmentId: input.investmentId,
+        metaApiPositionId: input.positionId,
+        netPnL: netPnL ?? null,
+      },
+      investmentRooms(input.investmentId),
+    ),
+  );
+
+  return {
+    ok: true,
+    positionId: input.positionId,
+    investmentId: input.investmentId,
+    tradeClosed,
+    partialOnly: stillOpen,
+    ...(closePrice !== undefined ? { closePrice } : {}),
+    ...(netPnL !== undefined ? { netPnL } : {}),
+    ...(result.brokerMessage !== undefined ? { brokerMessage: result.brokerMessage } : {}),
+  };
+}
