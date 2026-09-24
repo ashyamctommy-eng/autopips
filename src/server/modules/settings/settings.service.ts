@@ -40,7 +40,7 @@ export type PlatformSettingKey =
   | 'nowpayments.ipn_secret'
   | 'nowpayments.api_base'
   | 'nowpayments.allowed_currencies'
-  | 'metaapi.token';
+  | 'deriv.api_token';
 
 type SettingKind = 'secret' | 'url' | 'list';
 
@@ -102,14 +102,14 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     inputHint: 'usdttrc20,usdterc20,btc',
   },
   {
-    key: 'metaapi.token',
-    envName: 'METAAPI_TOKEN',
-    label: 'MetaApi token',
+    key: 'deriv.api_token',
+    envName: 'DERIV_API_TOKEN',
+    label: 'Deriv API token',
     description:
-      'Fallback token used for broker connections that have no token of their own stored against them. Per-account tokens set in Admin → Brokers always win.',
+      'Account API token used to authenticate the broker connection (balance, portfolio and trading; it needs the “trade” scope to place orders). Without one the platform still streams public market data, but nothing authenticated works. A token stored against a specific connection in Admin → Brokers wins over this one.',
     kind: 'secret',
     defaultValue: '',
-    inputHint: 'MetaApi → API access token',
+    inputHint: 'api.deriv.com → API token (read + trade scopes)',
   },
 ] as const;
 

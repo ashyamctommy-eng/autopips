@@ -26,7 +26,7 @@ export interface LatencyProbeCellProps {
  * The latency cell of a broker connection.
  *
  * A latency figure only ever comes from `GET /api/v1/admin/brokers/:id/status`,
- * which performs a real MetaApi RPC round-trip (`adapter.ping()`). Probes are
+ * which performs a real broker round-trip (`adapter.ping()`). Probes are
  * never run implicitly — they connect an adapter — so the cell starts at "—" and
  * the number appears only after a probe actually returned one. A probe that fails
  * keeps the dash and says so.
@@ -71,7 +71,7 @@ export function LatencyProbeCell({
         toast({
           variant: 'success',
           title: `Round-trip ${result.latencyMs} ms`,
-          description: `${brokerName}: measured by a live MetaApi RPC (adapter.ping). Stored status: ${result.status}.`,
+          description: `${brokerName}: measured by a live broker round-trip (adapter.ping). Stored status: ${result.status}.`,
         });
       }
       router.refresh();
@@ -104,8 +104,8 @@ export function LatencyProbeCell({
           {latencyMs === null
             ? failed
               ? 'The last probe could not complete. Nothing is estimated — re-probe to try again.'
-              : 'Not probed in this request. A probe performs a real MetaApi RPC round-trip.'
-            : 'Measured by a real MetaApi RPC round-trip (adapter.ping).'}
+              : 'Not probed in this request. A probe performs a real broker round-trip.'
+            : 'Measured by a real broker round-trip (adapter.ping).'}
         </TooltipContent>
       </Tooltip>
       <Button

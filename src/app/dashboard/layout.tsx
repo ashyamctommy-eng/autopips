@@ -51,7 +51,6 @@ function hrefForAction(action: string): string {
   if (
     action.startsWith('BOT_') ||
     action.startsWith('RISK_') ||
-    action.startsWith('METAAPI_') ||
     action.startsWith('BROKER_') ||
     action.startsWith('SIGNAL_') ||
     action.startsWith('ORDER_') ||

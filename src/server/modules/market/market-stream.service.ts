@@ -14,7 +14,7 @@ import { publishTick } from '@/server/ws/event-bus';
  * symbol" and "the broker terminal is streaming it".
  *
  * WHY THIS EXISTS
- *   A MetaApi streaming connection only pushes prices for symbols the terminal
+ *   A broker streaming connection only pushes prices for symbols the terminal
  *   has been told to stream (or that the account holds a position in). The
  *   adapter already maps `onSymbolPriceUpdated` → `onQuote` →
  *   `publishTick()` → Socket.IO, but NOTHING ever called
@@ -31,7 +31,7 @@ import { publishTick } from '@/server/ws/event-bus';
  *   Ticks are symbol-scoped public market data, not account-scoped, so every
  *   symbol is streamed from the most recently active CONNECTED broker
  *   connection. When that connection is rebuilt, `reattachMarketSubscriptions()`
- *   puts the subscriptions back (MetaApi drops them with the connection).
+ *   puts the subscriptions back (Deriv drops them with the connection).
  *
  * FAILURE POLICY
  *   Nothing here throws to the caller. A client asking to watch a symbol must
@@ -58,7 +58,7 @@ const pending = new Map<string, Promise<boolean>>();
  *
  * A runaway client cannot ask the broker to stream the whole instrument list:
  * the socket layer already caps market rooms per connection, and this is the
- * platform-wide backstop (MetaApi accounts have subscription limits).
+ * platform-wide backstop (broker accounts have subscription limits).
  */
 const MAX_STREAMED_SYMBOLS = 50;
 
@@ -173,7 +173,7 @@ export async function releaseMarketSymbol(rawSymbol: string): Promise<void> {
  * Re-establish every live subscription after a broker connection came back.
  *
  * Called when the socket runtime sees a `broker:status` event with
- * `connected: true`: MetaApi tears subscriptions down with the connection, so
+ * `connected: true`: the broker tears subscriptions down with the connection, so
  * the streams map would otherwise look healthy while producing nothing.
  */
 export async function reattachMarketSubscriptions(): Promise<void> {

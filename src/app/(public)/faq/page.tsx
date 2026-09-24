@@ -180,7 +180,7 @@ const FAQ_ITEMS: readonly FaqItem[] = [
       <>
         <p>
           Autopipsz does not hold your funds in a bank account of its own and does not claim a
-          segregated-custody arrangement. Strategy capital executes on a MetaTrader account held with
+          segregated-custody arrangement. Strategy capital executes on a Deriv account held with
           a broker, and that account is subject to the broker&rsquo;s own terms, including how client
           money is held and what happens if the broker fails.
         </p>
@@ -318,7 +318,7 @@ const FAQ_ITEMS: readonly FaqItem[] = [
     answer: (
       <>
         <p>
-          Orders are submitted to MetaTrader 4 / MT5 accounts through MetaApi.cloud, which connects
+          Orders are submitted to Deriv accounts through Deriv&rsquo;s WebSocket API, which connects
           to the broker&rsquo;s own trade servers. Autopipsz is not a broker, is not a venue, and
           does not hold a matching engine; the broker executes, and the broker&rsquo;s deal reports
           are the source of every P/L figure shown in your account.

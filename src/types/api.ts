@@ -192,12 +192,13 @@ export interface BrokerConnectionDTO {
   brokerName: string;
   environment: 'LIVE' | 'DEMO' | string;
   maskedAccount: string;
-  balance: number;
-  equity: number;
-  freeMargin: number;
+  /** Null when the broker did not report the figure (never a filled-in zero). */
+  balance: number | null;
+  equity: number | null;
+  freeMargin: number | null;
   status: string;
   updatedAt: string;
-  /** Populated from a live MetaApi RPC probe; null when not probed this request. */
+  /** Populated from a live broker round-trip probe; null when not probed this request. */
   latencyMs: number | null;
 }
 

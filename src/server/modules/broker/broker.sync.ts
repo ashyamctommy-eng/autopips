@@ -18,7 +18,7 @@
  * entry, or a skipped update) — never to a substituted number.
  *
  * Positions are matched on the `inv:<uuid>` tag carried in the broker comment
- * (see `metaapi.adapter.ts` for how the tag is written and its length caveat).
+ * (see `deriv.adapter.ts`: a contract broker reports no comment field at all).
  */
 
 import type { BrokerConnection } from '@prisma/client';
@@ -27,7 +27,24 @@ import { redis, rkey } from '@/lib/redis';
 import { D, toPrismaDecimal, usd, type Numeric } from '@/lib/money';
 import { publishActivity, publishEquity } from '@/server/ws/event-bus';
 import { AUDIT, recordAudit, recordAuditSafe } from '../audit/audit.service';
-import { extractInvestmentIdTag, type PositionClosure } from './metaapi.adapter';
+import type { PositionClosure } from './broker.types';
+
+/**
+ * Investment tag found in a broker position comment (`inv:<uuid>`).
+ *
+ * An MT4/MT5 bridge let the platform stamp the investment id into the order
+ * comment and read it back on the position. Deriv contracts have no comment
+ * field, so for a contract broker this returns null and the position is
+ * attributable only through this platform's own records — which is precisely
+ * why contract settlement is gated (see the guard in `bookPosition`).
+ */
+const INVESTMENT_TAG_RE = /inv:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
+function extractInvestmentIdTag(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const match = INVESTMENT_TAG_RE.exec(text);
+  return match ? match[1]!.toLowerCase() : null;
+}
 import {
   ensureBrokerConnected,
   getAdapterForConnection,
@@ -73,7 +90,7 @@ export interface SyncSummary {
 
 /**
  * Optional adapter capability: the complete closing-deal aggregate of a position.
- * Implemented by `MetaApiBrokerAdapter`; other adapters may offer it later.
+ * Implemented by the broker adapter when the broker reports closure detail.
  */
 export interface PositionClosureCapable {
   getPositionClosure(positionId: string): Promise<PositionClosure | null>;
@@ -189,6 +206,20 @@ async function upsertOpenTradeRecord(
   investmentId: string,
   position: BrokerPosition,
 ): Promise<boolean> {
+  // A contract broker (Deriv) reports no lot size, and `TradeRecord.volume` is a
+  // LOT column that the ledger multiplies by the entry price to size open
+  // exposure. Writing a stake there would silently redefine the column, and
+  // writing 0 would understate exposure to nothing — so the position is NOT
+  // booked until the exposure model is defined for stake x multiplier contracts
+  // (see PRODUCTION-READINESS.md). The broker still shows the contract; the
+  // platform simply refuses to invent its size.
+  if (position.volume === null) {
+    console.warn(
+      `[broker.sync] position ${position.positionId} (${position.instrument}) reports no lot size — contract-based broker; not booked to the ledger.`,
+    );
+    return false;
+  }
+
   const existing = await prisma.tradeRecord.findUnique({
     where: {
       brokerId_metaApiPositionId: { brokerId: connectionId, metaApiPositionId: position.positionId },
@@ -209,8 +240,8 @@ async function upsertOpenTradeRecord(
         takeProfit: position.takeProfit === null ? null : toPrismaDecimal(position.takeProfit, 5),
         // Broker-reported costs only; P/L columns stay at their schema defaults
         // until a broker deal reports them (no invented zero "result").
-        commission: toPrismaDecimal(position.commission),
-        swap: toPrismaDecimal(position.swap),
+        ...(position.commission === null ? {} : { commission: toPrismaDecimal(position.commission) }),
+        ...(position.swap === null ? {} : { swap: toPrismaDecimal(position.swap) }),
         status: 'OPEN',
         openedAt: position.openedAt,
       },
@@ -237,8 +268,8 @@ async function upsertOpenTradeRecord(
       volume: toPrismaDecimal(position.volume, 5),
       stopLoss: position.stopLoss === null ? null : toPrismaDecimal(position.stopLoss, 5),
       takeProfit: position.takeProfit === null ? null : toPrismaDecimal(position.takeProfit, 5),
-      commission: toPrismaDecimal(position.commission),
-      swap: toPrismaDecimal(position.swap),
+      ...(position.commission === null ? {} : { commission: toPrismaDecimal(position.commission) }),
+      ...(position.swap === null ? {} : { swap: toPrismaDecimal(position.swap) }),
       // The broker's own open time replaces the placeholder written at fill time.
       openedAt: position.openedAt,
       status: 'OPEN',
@@ -281,18 +312,21 @@ export async function applyPositionClosure(
     return null;
   }
 
-  const gross = usd(closure.grossPnL);
-  const commission = usd(closure.commission);
-  const swap = usd(closure.swap);
+  // Deriv publishes one net profit for a settled contract; it itemises no gross
+  // figure, commission or swap. Those stay absent (the columns keep their schema
+  // default) rather than being written as a zero the broker never reported.
+  const gross = closure.grossPnL === null ? null : usd(closure.grossPnL);
+  const commission = closure.commission === null ? null : usd(closure.commission);
+  const swap = closure.swap === null ? null : usd(closure.swap);
   const net = usd(closure.netPnL);
 
   await prisma.tradeRecord.update({
     where: { id: trade.id },
     data: {
       exitPrice: toPrismaDecimal(closure.exitPrice, 5),
-      grossPnL: toPrismaDecimal(gross),
-      commission: toPrismaDecimal(commission),
-      swap: toPrismaDecimal(swap),
+      ...(gross === null ? {} : { grossPnL: toPrismaDecimal(gross) }),
+      ...(commission === null ? {} : { commission: toPrismaDecimal(commission) }),
+      ...(swap === null ? {} : { swap: toPrismaDecimal(swap) }),
       netPnL: toPrismaDecimal(net),
       status: 'CLOSED',
       closedAt: closure.closedAt,
@@ -300,7 +334,7 @@ export async function applyPositionClosure(
   });
 
   await recordAudit({
-    action: AUDIT.METAAPI_POSITION_CLOSED,
+    action: AUDIT.BROKER_POSITION_CLOSED,
     userId: null,
     details: {
       brokerConnectionId: connectionId,
@@ -310,9 +344,9 @@ export async function applyPositionClosure(
       dealIds: closure.dealIds,
       exitPrice: closure.exitPrice,
       closingVolume: closure.closingVolume,
-      grossPnL: gross.toNumber(),
-      commission: commission.toNumber(),
-      swap: swap.toNumber(),
+      grossPnL: gross === null ? null : gross.toNumber(),
+      commission: commission === null ? null : commission.toNumber(),
+      swap: swap === null ? null : swap.toNumber(),
       netPnL: net.toNumber(),
       closedAt: closure.closedAt.toISOString(),
     },

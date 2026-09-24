@@ -522,7 +522,7 @@ export default async function AdminDashboardPage() {
           <CardContent className="p-0">
             {overview.brokers.length === 0 ? (
               <p className="px-5 pb-5 text-sm leading-relaxed text-muted">
-                No MetaApi connection is registered, so no broker balance, equity or exposure figure
+                No broker connection is registered, so no broker balance, equity or exposure figure
                 exists to report. Add a connection from{' '}
                 <Link href="/admin/brokers" className="text-brand-300 underline-offset-4 hover:underline">
                   Broker connections

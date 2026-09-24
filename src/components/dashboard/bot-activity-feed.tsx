@@ -32,7 +32,6 @@ const TRADING_ACTION_PREFIXES = [
   'ORDER_',
   'POSITION_',
   'LOT_',
-  'METAAPI_',
   'BROKER_',
   'FEE_',
 ] as const;

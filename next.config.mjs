@@ -9,7 +9,7 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: [
       '@prisma/client',
-      'metaapi.cloud-sdk',
+      'ws',
       '@node-rs/argon2',
       'ioredis',
       'speakeasy',

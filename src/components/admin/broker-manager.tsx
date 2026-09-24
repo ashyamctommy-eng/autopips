@@ -94,9 +94,9 @@ export interface BrokerManagerProps {
 }
 
 /**
- * MetaApi connection manager.
+ * Broker connection manager (Deriv).
  *
- * The MetaApi token is the platform's most sensitive credential. This component:
+ * The Deriv API token is the platform's most sensitive credential. This component:
  *   - keeps it only in React state for the duration of the form,
  *   - renders it with `type="password"` and never reads it back from anywhere,
  *   - never logs it, never puts it in a toast, never writes it to localStorage,
@@ -143,7 +143,7 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
 
   const submitAdd = async () => {
     if (form.metaApiAccountId.trim() === '' || form.brokerName.trim() === '' || form.token.trim() === '') {
-      setFormError('Account id, broker name and MetaApi token are all required.');
+      setFormError('Account id, broker name and Deriv API token are all required.');
       return;
     }
 
@@ -275,19 +275,40 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
         key: 'balance',
         header: 'Balance',
         align: 'right',
-        cell: (connection) => <Usd value={connection.balance} tone="neutral" className="text-sm" />,
+        cell: (connection) =>
+          connection.balance === null ? (
+            <span className="text-muted" title="The broker did not report this figure.">
+              —
+            </span>
+          ) : (
+            <Usd value={connection.balance} tone="neutral" className="text-sm" />
+          ),
       },
       {
         key: 'equity',
         header: 'Equity',
         align: 'right',
-        cell: (connection) => <Usd value={connection.equity} tone="neutral" className="text-sm" />,
+        cell: (connection) =>
+          connection.equity === null ? (
+            <span className="text-muted" title="The broker did not report this figure.">
+              —
+            </span>
+          ) : (
+            <Usd value={connection.equity} tone="neutral" className="text-sm" />
+          ),
       },
       {
         key: 'freeMargin',
         header: 'Free margin',
         align: 'right',
-        cell: (connection) => <Usd value={connection.freeMargin} tone="neutral" className="text-sm" />,
+        cell: (connection) =>
+          connection.freeMargin === null ? (
+            <span className="text-muted" title="The broker did not report this figure.">
+              —
+            </span>
+          ) : (
+            <Usd value={connection.freeMargin} tone="neutral" className="text-sm" />
+          ),
       },
       {
         key: 'updated',
@@ -401,7 +422,7 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
           <EmptyState
             icon={Plug}
             title="No broker connection registered"
-            description="Until a MetaApi account is added there is no broker balance, equity or exposure to report — and nothing on this platform invents one."
+            description="Until a Deriv account is connected there is no broker balance, equity or exposure to report — and nothing on this platform invents one."
             action={
               canManage ? (
                 <Button variant="primary" onClick={() => setAddOpen(true)}>
@@ -415,7 +436,7 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
       />
 
       <Alert variant="info" icon={ShieldCheck}>
-        <AlertTitle>How the MetaApi token is handled</AlertTitle>
+        <AlertTitle>How the Deriv API token is handled</AlertTitle>
         <AlertDescription>
           The token is sent once, encrypted server-side (AES-256-GCM) before it is stored, and never
           returned by any API response. The browser keeps it only in this form&apos;s state: it is
@@ -436,7 +457,7 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Plug aria-hidden className="size-4 text-brand-400" />
-              Add MetaApi connection
+              Add Deriv connection
             </DialogTitle>
             <DialogDescription>
               Register the trading account this platform may execute on. The account is probed live
@@ -446,7 +467,7 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
 
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="broker-account-id">MetaApi account id</Label>
+              <Label htmlFor="broker-account-id">Deriv account id (loginid)</Label>
               <Input
                 id="broker-account-id"
                 value={form.metaApiAccountId}
@@ -487,7 +508,7 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="broker-token" className="flex items-center gap-2">
                 <KeyRound aria-hidden className="size-3.5 text-muted" />
-                MetaApi token
+                Deriv API token
               </Label>
               <Input
                 id="broker-token"

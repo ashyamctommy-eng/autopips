@@ -19,7 +19,17 @@ they did not have.
 It is **not yet deployed and not yet exercised against live broker, payment or storage
 providers.** Go-live is blocked on credentials and infrastructure that only the operator
 can supply — enumerated precisely in §5. No claim in this report rests on a live
-MetaApi, NOWPayments or S3 call, because none was made.
+Deriv, NOWPayments or S3 call, because none was made.
+
+One integration is deliberately incomplete, and this report says so up front rather than
+burying it: Deriv's *market-data and account* paths are implemented (candles, ticks,
+balance/open-contract profit, portfolio), but the **trade-execution engine is not yet
+driven from the ledger**. A Deriv trade is a *contract* — stake × multiplier — while the
+ledger computes open exposure as `volume × entryPrice` from the MT5 lot model. That
+exposure/notional model must be decided and reworked before positions are booked to
+`TradeRecord`, so the bot's allocator currently **refuses to place a Deriv trade** with a
+clear error rather than mis-sizing one. End-to-end trading is therefore not claimed
+anywhere in this document.
 
 ---
 
@@ -90,7 +100,7 @@ and fixed.
 | --- | --- | --- |
 | `/login` and `/register` were **404** — never built | Every "Sign in" CTA and every protected-route redirect led to a 404; the app was unusable through its own UI | ✅ Fixed — full auth pages incl. the 2FA challenge step and an open-redirect guard |
 | An extra export in a route file | Failed the Next.js production build | ✅ Fixed |
-| `@types/socket.io-client@1.4.33` (a transitive dep of the MetaApi SDK) declares an ambient Socket.IO **v1** module that shadowed the real v4 types | `import { io, Socket } from 'socket.io-client'` was a hard type error | ✅ Fixed via an npm `overrides` pin to the deprecation stub |
+| `@types/socket.io-client@1.4.33` (a transitive dependency of the then-current broker SDK) declares an ambient Socket.IO **v1** module that shadowed the real v4 types | `import { io, Socket } from 'socket.io-client'` was a hard type error | ✅ Fixed via an npm `overrides` pin to the deprecation stub |
 | `text-base` emitted a **colour** rule that overrode the font-size rule (the design system defines `colors.base.DEFAULT`) | Near-invisible text on real pages | ✅ Fixed — replaced with `text-[1rem]` across the codebase |
 | `@node-rs/argon2` declares `Algorithm` as an ambient const enum | TS2748 under `isolatedModules` | ✅ Fixed — the value is inlined with an explanatory comment |
 
@@ -118,10 +128,11 @@ replay-triggered family revocation, TOTP 2FA, login rate limiting) · `kyc` (pri
 SSE-KMS-or-AES256 enforced, non-guessable keys, **300-second** pre-signed admin URLs, every
 view audited) · `payments` (NOWPayments client, strict HMAC-SHA512 IPN verification with
 timing-safe comparison and a Redis replay guard, deposit/withdrawal lifecycle) · `broker`
-(MetaApi adapter implementing a broker-agnostic interface, connection registry with
-AES-256-GCM token encryption, sync worker) · `bot` (9-check fail-closed risk engine,
-master→client lot allocator, strategy engine on real broker candles, high-water-mark fee
-engine, Redis-singleton runtime) · `account` · `admin` · `audit` (append-only).
+(Deriv WebSocket client + adapter implementing a broker-agnostic interface, connection
+registry with AES-256-GCM token encryption, sync worker) · `bot` (9-check fail-closed
+risk engine, master→client allocator, strategy engine on real broker candles,
+high-water-mark fee engine, Redis-singleton runtime) · `account` · `admin` · `audit`
+(append-only).
 
 ### Accounting
 One implementation of the equity formula, used by every surface, with the formula string
@@ -165,7 +176,7 @@ None of it has been tested live; that is stated plainly rather than assumed away
 
 | # | Blocker | What is needed |
 | --- | --- | --- |
-| 1 | **MetaApi broker account** | A token, a funded MT4/MT5 account, and the terminal **deployed** via MetaApi. No order has ever been placed. Until then the bot has nothing to trade and the chart shows its empty state by design. |
+| 1 | **Deriv broker account** | An `app_id` from <https://api.deriv.com> (`DERIV_APP_ID`) and an account API token (`DERIV_API_TOKEN`). No order has ever been placed. Even with credentials supplied, the bot cannot trade yet: the trade-execution engine is not driven from the ledger until the exposure/notional model is reworked for contracts (stake × multiplier). Until then it refuses to place a Deriv trade rather than mis-size one. |
 | 2 | **NOWPayments production key + IPN secret** | `NOWPAYMENTS_API_KEY` and `NOWPAYMENTS_IPN_SECRET`. Every IPN test used a self-computed HMAC. Register the callback as `https://autopips.pro/api/v1/payments/nowpayments/ipn`. |
 | 3 | **NOWPayments payout credentials** | The payout API needs a JWT from `/auth`, not the API key. Until supplied, approved withdrawals remain approved for manual settlement and the platform records the transaction hash by hand — it will never invent one. |
 | 4 | **Private S3 bucket** | A bucket with **Block Public Access ON**, SSE-KMS preferred, plus credentials. No upload has been performed against real S3. |
@@ -173,6 +184,7 @@ None of it has been tested live; that is stated plainly rather than assumed away
 | 6 | **Hosting + TLS + DNS** | `autopips.pro` pointed at the host, certificates issued, **and the `/ws/` location proxied with WebSocket upgrade support** — without it the real-time tier silently falls back and never connects. |
 | 7 | **Container images** | No Docker daemon exists in the build sandbox, so the Dockerfiles and compose file are reasoned and syntax-validated but **never built**. First `docker compose build` should be treated as the first real test. |
 | 8 | **Compliance sign-off** | The platform deliberately makes no regulatory claim. Whoever operates `autopips.pro` must confirm their own licensing position, terms of service, and privacy policy for the jurisdictions they accept clients from. |
+| 9 | **Deriv contract/exposure model** | The ledger computes open exposure as `volume × entryPrice` (MT5 lots); Deriv exposure is **stake × multiplier** and Deriv reports no lots, no contract size, no tick value and no free margin. This model must be decided and reworked before positions can be booked to `TradeRecord`. Until then the bot refuses to place Deriv trades. |
 
 ---
 
@@ -180,12 +192,12 @@ None of it has been tested live; that is stated plainly rather than assumed away
 
 | Brief | Delivered | Why |
 | --- | --- | --- |
-| `@metaapi/metaapi-node-sdk` | `metaapi.cloud-sdk` v29 | The named package **does not exist on npm**. The real SDK is `metaapi.cloud-sdk`; the adapter is written against its actual published API surface, verified against its type declarations. |
+| `@metaapi/metaapi-node-sdk` (an MT5 bridge) | **Deriv's WebSocket API** on the `ws` package — MetaApi was removed | The named package **does not exist on npm** (the real MT5 SDK was `metaapi.cloud-sdk`), and the MT5 bridge was later dropped entirely in favour of Deriv's contract API. The typed client is `src/server/modules/broker/deriv.client.ts`; `@deriv/deriv-api` is **not** used because it ships no TypeScript types, so the trade path owns typed, validated messages. No Deriv SDK package is a dependency. |
 | `aws-sdk` | `@aws-sdk/client-s3` v3 | AWS SDK v2 is end-of-life; v3 is the current AWS SDK for JavaScript. |
 | NestJS **or** Next.js API Routes | Next.js App Router route handlers + framework-agnostic modules in `src/server/modules/*` with `src/server/main.ts` | The brief allowed either. One deployable keeps the surface smaller while preserving the required tree and modularity. |
 | Socket.io "directly to Next.js clients" | A separate Node socket process, bridged by Redis pub/sub | A Next.js App Router app **cannot** host a Socket.io server. Documented in the README and `DEPLOYMENT.md`; the nginx config carries the upgrade. |
 | Exact schema | Fields unchanged; **indexes added**, decimal scales specified, `onDelete` behaviour set | Indexes and scales are additive/unspecified; float money was not acceptable. No field was renamed or removed. |
-| MetaApi token storage | AES-256-GCM-encrypted in Redis, with a documented note to move it to a dedicated column or secrets manager | The frozen schema has no token column on `BrokerConnection`. |
+| Deriv account token storage | AES-256-GCM-encrypted in Redis, with a documented note to move it to a dedicated column or secrets manager | The frozen schema has no token column on `BrokerConnection`. |
 | `PaymentStatus` for withdrawal approval | `SENDING` = approved, `FAILED` = rejected, with the reason in the audit row | The enum has no `APPROVED`/`REJECTED` member; adding one would change the frozen schema. |
 | `argon2` | `@node-rs/argon2` (Argon2id, standard PHC format) | Avoids a node-gyp toolchain at image build time; same algorithm and hash format. |
 
@@ -201,7 +213,7 @@ None of it has been tested live; that is stated plainly rather than assumed away
 - **No penetration test.** Authz was probed systematically over HTTP (18 admin
   route/method combinations, cross-tenant reads), but that is not a substitute for one.
 - **`npm audit` was not reviewed.** Several transitive advisories are plausible; the
-  dependency tree includes a large broker SDK.
+  dependency tree is still large (Next.js, AWS SDK v3, Socket.IO).
 - **No CSRF token** beyond `SameSite=Lax` cookies and JSON-only bodies.
 - **Single region, no WAF, no DDoS protection.**
 - **`createInvestment`/`requestWithdrawal` serialise per user via a row lock**, which is
@@ -223,12 +235,14 @@ None of it has been tested live; that is stated plainly rather than assumed away
    the container artifacts.
 5. Point `autopips.pro` at the host; issue TLS; confirm the `/ws/` proxy carries the
    WebSocket upgrade.
-6. Add the MetaApi account and confirm the broker connection reports `CONNECTED` with a
-   real balance in `/admin/brokers`.
+6. Register the Deriv connection (`DERIV_APP_ID` + `DERIV_API_TOKEN`) and confirm it
+   reports `CONNECTED` with a real balance in `/admin/brokers`.
 7. Register the IPN callback with NOWPayments and send a **live minimum deposit**;
    confirm it credits exactly once and appears in the client's deposit history.
 8. Create the first ADMIN user, then create plans in `/admin/plans`.
 9. Submit one KYC file as a test client and walk the admin approve flow, confirming the
    signed URLs expire after 300 seconds.
-10. Fund a small test allocation and observe one full trade cycle end to end before
-    accepting client capital.
+10. Fund a small test allocation and observe one full trade cycle end to end **before
+    accepting client capital**. This step is blocked until the Deriv contract/exposure
+    model is reworked and the bot can place a correctly-sized contract (§1, §5 row 9) — do
+    not accept client capital against an execution path that refuses every order.

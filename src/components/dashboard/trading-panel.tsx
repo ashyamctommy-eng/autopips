@@ -44,7 +44,7 @@ import type { InvestmentStatusValue, PositionDTO } from '@/types/api';
  * state — this component never draws a bar the broker did not report.
  */
 
-/** Mirrors the values the candles route accepts (MetaApi's history timeframes). */
+/** Mirrors the values the candles route accepts (the broker's timeframes). */
 const TIMEFRAME_OPTIONS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const;
 const CANDLE_LIMIT = 300;
 

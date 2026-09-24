@@ -59,7 +59,8 @@ build. That is why the worker is created first.
    | `WS_INTERNAL_TOKEN` | *generate — see §3* |
    | `NOWPAYMENTS_API_KEY` | from NOWPayments dashboard |
    | `NOWPAYMENTS_IPN_SECRET` | from NOWPayments dashboard |
-   | `METAAPI_TOKEN` | from MetaApi dashboard |
+   | `DERIV_APP_ID` | the `app_id` from <https://api.deriv.com> |
+   | `DERIV_API_TOKEN` | from the Deriv dashboard (optional at boot; can also be set in Admin → Platform settings) |
    | `AWS_REGION` | e.g. `eu-west-1` |
    | `AWS_ACCESS_KEY_ID` | IAM user with `s3:PutObject`/`GetObject` on the KYC bucket |
    | `AWS_SECRET_ACCESS_KEY` | as above |
@@ -88,7 +89,7 @@ openssl rand -base64 32      # CREDENTIAL_ENCRYPTION_KEY (must decode to >= 32 b
 openssl rand -hex 32         # WS_INTERNAL_TOKEN
 ```
 
-`CREDENTIAL_ENCRYPTION_KEY` encrypts MetaApi tokens at rest (AES-256-GCM). **If you
+`CREDENTIAL_ENCRYPTION_KEY` encrypts Deriv account tokens at rest (AES-256-GCM). **If you
 change it later, every stored broker token becomes undecryptable** and must be
 re-entered in `/admin/brokers`.
 
@@ -229,9 +230,17 @@ Do these in order; each one depends on the previous.
    UPDATE "User" SET role = 'ADMIN', "kycStatus" = 'APPROVED' WHERE email = 'you@example.com';
    ```
 3. Sign in at `/login`, enable 2FA in `/dashboard/settings`.
-4. Add the MetaApi account in `/admin/brokers` → the connection must read
-   `CONNECTED` with a real balance. Until it does, the bot does nothing and the
-   chart shows its empty state — that is correct, not broken.
+4. Register the Deriv connection in `/admin/brokers` (your `DERIV_APP_ID` plus the
+   account API token) → the connection must read `CONNECTED` with a real balance.
+   Until it does, the bot does nothing and the chart shows its empty state — that is
+   correct, not broken.
+
+   > **Trading is not end-to-end yet.** Deriv trades are contracts (stake ×
+   > multiplier) and the platform's ledger still expresses open exposure in the old
+   > MT5 lot model, so the bot **refuses to place Deriv trades** with a clear error
+   > instead of mis-sizing them until that exposure/notional model is reworked.
+   > Confirm deposits, KYC, the chart and the realtime feed on this first run; do
+   > not expect a filled contract from the bot.
 5. Create plans in `/admin/plans`.
 6. Send a **live minimum deposit** through the real NOWPayments flow and confirm
    it credits exactly once in the client's deposit history.
@@ -311,7 +320,7 @@ Payment provider and broker credentials, editable by an `ADMIN`:
 | NOWPayments IPN secret | `NOWPAYMENTS_IPN_SECRET` |
 | NOWPayments API base URL | `NOWPAYMENTS_API_BASE` |
 | Accepted deposit currencies | `NOWPAYMENTS_ALLOWED_CURRENCIES` |
-| MetaApi token (platform fallback) | `METAAPI_TOKEN` |
+| Deriv API token | `DERIV_API_TOKEN` |
 
 Rules that hold for every one of them:
 

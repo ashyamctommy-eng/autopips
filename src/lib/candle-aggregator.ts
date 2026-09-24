@@ -26,6 +26,12 @@ import type { Candle } from '@/server/modules/broker/broker.types';
 export interface LiveTick {
   bid?: number | null;
   ask?: number | null;
+  /**
+   * Single-price instruments (Deriv synthetics) report one number instead of a
+   * bid/ask pair. Used as the last resort — after the mid and after a single
+   * reported side — and never averaged with anything.
+   */
+  quote?: number | null;
   /** Broker quote time: epoch seconds, epoch milliseconds, or an ISO string. */
   time?: number | string | null;
 }
@@ -66,7 +72,9 @@ export function tickPrice(tick: LiveTick): number | null {
   const bid = isFiniteNumber(tick.bid) ? tick.bid : null;
   const ask = isFiniteNumber(tick.ask) ? tick.ask : null;
   if (bid !== null && ask !== null) return (bid + ask) / 2;
-  return bid ?? ask;
+  if (bid !== null || ask !== null) return bid ?? ask;
+  // Single-price instrument: the broker sent exactly one price.
+  return isFiniteNumber(tick.quote) ? tick.quote : null;
 }
 
 /**

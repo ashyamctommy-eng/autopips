@@ -12,7 +12,7 @@ import type { ApiEnvelope, ApiErrorEnvelope } from '@/types/api';
  *     verbatim instead of inventing a friendlier one.
  *
  * It never touches localStorage and never logs a request body — admin request
- * bodies can carry a MetaApi token.
+ * bodies can carry a broker API token.
  */
 
 export interface AdminApiErrorInit {

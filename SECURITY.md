@@ -57,7 +57,7 @@ seals credentials that must be stored in Postgres with **AES-256-GCM**:
 
 * key material from `CREDENTIAL_ENCRYPTION_KEY` (≥ 32 bytes; base64 or raw),
   purpose-separated via `sha256("autopips:<purpose>" || key)` so a token
-  encrypted for the `metaapi` purpose cannot be decrypted as a `payout` secret;
+  encrypted for the broker purpose cannot be decrypted as a `payout` secret;
 * a **fresh 96-bit IV per encryption**, with the GCM authentication tag stored
   alongside;
 * versioned wire format `v1.<iv>.<tag>.<ciphertext>` (base64url) so keys can be
@@ -65,8 +65,8 @@ seals credentials that must be stored in Postgres with **AES-256-GCM**:
 * `maskAccount()` keeps only the last four characters of an account id in
   logs/UI — never the full login.
 
-MetaApi tokens are encrypted with `encryptCredential(token, 'metaapi')`
-(`src/server/modules/broker/broker.registry.ts`); the SDK token is never logged,
+Deriv account tokens are encrypted with `encryptCredential(…)`
+(`src/server/modules/broker/broker.registry.ts`); the token is never logged,
 never returned in an API response and never put into an error. NOWPayments
 payout secrets are read from the environment only, and `scrub()` in
 `nowpayments.client.ts` removes the API key, payout JWT and payout password from
@@ -251,8 +251,8 @@ passed / 51 DB-backed skipped) and against a real Postgres 16 + Redis 7
 
 Broker data is never synthetic: `src/no-fabricated-data` style static guards
 (`tests/no-fabricated-data.test.ts`) fail the build on mock/simulated data in the
-producer paths, and the MetaApi adapter copies broker-reported numbers verbatim
-or returns null.
+producer paths, and the Deriv adapter copies broker-reported numbers verbatim or
+returns null (`src/server/modules/broker/deriv.adapter.ts`).
 
 ---
 

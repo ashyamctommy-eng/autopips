@@ -76,7 +76,8 @@ jobs:
       AWS_KYC_BUCKET: ci-dummy-kyc-bucket
       NOWPAYMENTS_API_KEY: ci-dummy-nowpayments-key
       NOWPAYMENTS_IPN_SECRET: ci-dummy-nowpayments-ipn-secret
-      METAAPI_TOKEN: ci-dummy-metaapi-token
+      DERIV_APP_ID: "1089"
+      DERIV_API_TOKEN: ci-dummy-deriv-token
 
     steps:
       - name: Checkout
@@ -160,7 +161,8 @@ jobs:
       AWS_KYC_BUCKET: ci-dummy-kyc-bucket
       NOWPAYMENTS_API_KEY: ci-dummy-nowpayments-key
       NOWPAYMENTS_IPN_SECRET: ci-dummy-nowpayments-ipn-secret
-      METAAPI_TOKEN: ci-dummy-metaapi-token
+      DERIV_APP_ID: "1089"
+      DERIV_API_TOKEN: ci-dummy-deriv-token
 
     steps:
       - name: Checkout

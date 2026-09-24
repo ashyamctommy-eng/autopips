@@ -73,8 +73,9 @@ Files added by this deployment work, all at the repository root:
   see the note inside that file for the older syntax).
 * Ports 80 and 443 open to the internet. **Postgres 5432, Redis 6379, 3000 and
   4001 must NOT be exposed** — compose publishes 3000/4001 on `127.0.0.1` only.
-* Outbound HTTPS (443): `api.nowpayments.io`, MetaApi endpoints
-  (`*.metaapi.cloud`), your S3 endpoint, and `fonts.googleapis.com` /
+* Outbound HTTPS (443): Deriv's WebSocket endpoint
+  (`wss://ws.derivws.com`, TLS on 443), `api.nowpayments.io`, your S3 endpoint, and
+  `fonts.googleapis.com` /
   `fonts.gstatic.com` **at image build time** (`next/font/google` downloads the
   Inter and JetBrains Mono subsets during `next build`; the build fails without
   network access).
@@ -84,8 +85,8 @@ Files added by this deployment work, all at the repository root:
   at the host.
 * An AWS S3 bucket for KYC documents (private; see §6).
 * A NOWPayments account with an API key and the IPN secret (see §7).
-* A MetaApi.cloud account with an API token and at least one **deployed** MT4/MT5
-  account (see §8).
+* A Deriv account with an `app_id` registered at <https://api.deriv.com> and an
+  account API token (see §8).
 
 **Local tooling used below**: `git`, `openssl`, `curl`, `jq` (optional, for
 pretty JSON), `node` 20+ (only if you want to run `npm` tooling or
@@ -141,7 +142,7 @@ The same file refuses to boot if a variable named like a secret is prefixed with
 
 | Variable | Required | Secret | Purpose | Example |
 | --- | --- | --- | --- | --- |
-| `CREDENTIAL_ENCRYPTION_KEY` | yes (must decode to ≥ 32 bytes) | **secret** | AES-256-GCM envelope key for broker/MetaApi tokens and payout secrets stored in the DB (`src/lib/crypto/credential-cipher.ts`). **Changing it makes every stored credential undecryptable** — re-enter broker tokens after a rotation. | `openssl rand -base64 32` |
+| `CREDENTIAL_ENCRYPTION_KEY` | yes (must decode to ≥ 32 bytes) | **secret** | AES-256-GCM envelope key for broker (Deriv) tokens and payout secrets stored in the DB (`src/lib/crypto/credential-cipher.ts`). **Changing it makes every stored credential undecryptable** — re-enter broker tokens after a rotation. | `openssl rand -base64 32` |
 
 ### 3.5 AWS S3 (private KYC bucket)
 
@@ -166,15 +167,17 @@ The same file refuses to boot if a variable named like a secret is prefixed with
 | `NOWPAYMENTS_ALLOWED_CURRENCIES` | no (default listed) | no | Allow-list shown on the deposit screen. | `usdttrc20,usdterc20,btc,eth,ltc,trx,bnb` |
 | `NOWPAYMENTS_PAYOUT_JWT` **or** `NOWPAYMENTS_PAYOUT_EMAIL` + `NOWPAYMENTS_PAYOUT_PASSWORD` | optional | **secret** | Out-of-band payout credentials (§7.3). Deliberately **not** part of `src/lib/env.ts` — the app boots without them and falls back to manual settlement. | see §7.3 |
 
-### 3.7 MetaApi.cloud
+### 3.7 Deriv (broker)
 
 | Variable | Required | Secret | Purpose | Example |
 | --- | --- | --- | --- | --- |
-| `METAAPI_TOKEN` | yes | **secret** | MetaApi account-scoped API token. | MetaApi dashboard → *API access* |
-| `METAAPI_REGION` | no (default `new-york`) | no | Region of the *deployment* the accounts live in. **Must match where the MT4/MT5 accounts were created.** | `new-york` / `london` / `singapore` |
-| `METAAPI_SYNC_INTERVAL` | no (default `15`) | no | Seconds between broker polls in the bot loop (floored at 5 s in code). | `15` |
-| `METAAPI_RISK_MANAGEMENT_ENABLED` | no (default `true`) | no | Additionally use MetaApi's own risk-management API. Additive to — never a replacement for — the local pre-trade gate. | `true` |
-| `METAAPI_TERMINAL_TIMEOUT` | no (default `120`) | no | Seconds to wait for terminal synchronization on connect. | `120` |
+| `DERIV_APP_ID` | yes | no (public) | The `app_id` registered at <https://api.deriv.com>, sent in the WebSocket URL. | `1089` |
+| `DERIV_API_TOKEN` | optional at boot | **secret** | The account API token. Without it the platform still streams public market data but cannot authenticate, read balance or trade. Can also be set at runtime in **Admin → Platform settings** (env stays the fallback). | Deriv dashboard → *API token* |
+| `DERIV_API_URL` | no (default `wss://ws.derivws.com/websockets/v3`) | no | WebSocket endpoint. Override only for a Deriv-hosted/alternate origin. | `wss://ws.derivws.com/websockets/v3` |
+| `DERIV_MULTIPLIER` | no (default `100`) | no | Multiplier used for `MULTUP`/`MULTDOWN` contracts. | `100` |
+| `BROKER_SYNC_INTERVAL` | no (default `15`) | no | Seconds between broker state polls in the sync worker (floored at 5 s in code). | `15` |
+| `BROKER_CONNECT_TIMEOUT` | no (default `120`) | no | Seconds to wait for the broker connection (Deriv WebSocket authorise) before a cycle gives up. | `120` |
+| `BROKER_RISK_MANAGEMENT_ENABLED` | no (default `true`) | no | Use Deriv's own risk-management/portfolio state in addition to the local pre-trade gate. Additive to — never a replacement for — the local pre-trade gate. | `true` |
 
 ### 3.8 Risk engine / business guards
 
@@ -432,31 +435,49 @@ scrubbed from error messages before they are logged.
 
 ---
 
-## 8. MetaApi setup
+## 8. Deriv setup
 
-1. Create/sign in to the MetaApi.cloud dashboard and copy the **API token**
-   into `METAAPI_TOKEN`.
-2. Pick the **region** where your MT4/MT5 accounts will be created and set
-   `METAAPI_REGION` to the same value (`new-york`, `london`, `singapore`, …).
-   The adapter constructs `new MetaApi(token, { region })`
-   (`src/server/modules/broker/metaapi.adapter.ts`); a mismatch means the SDK
-   cannot see the account.
-3. **Add the trading account in the MetaApi dashboard** (login, server, password,
-   platform MT4/MT5, DEMO or LIVE) and **deploy it**. The account must reach the
-   `DEPLOYED` state — the platform reads `account.state` verbatim and surfaces it
-   as the raw state string; an undeployed account yields no positions, no candles
-   and therefore no signals, and the bot will log connection failures per tick
-   rather than invent data.
-4. In the admin UI, add the account as a **broker connection**
-   (`POST /api/v1/admin/brokers` with `metaApiAccountId`, environment
-   `LIVE`/`DEMO`, and the account token). The per-account token is stored
-   AES-256-GCM encrypted with `CREDENTIAL_ENCRYPTION_KEY` and is never returned by
-   an API response.
-5. Optional: enable MetaApi's risk-management API
-   (`METAAPI_RISK_MANAGEMENT_ENABLED=true`). This is **additive** to the local
-   fail-closed pre-trade gate, never a replacement.
-6. Tune `METAAPI_TERMINAL_TIMEOUT` if your broker is slow to synchronise, and
-   `METAAPI_SYNC_INTERVAL` for poll frequency (floored at 5 s).
+1. Register an `app_id` at <https://api.deriv.com> and set `DERIV_APP_ID`. It is
+   public — it travels in the WebSocket URL — but it identifies this installation
+   to Deriv (rate limits and attribution are per `app_id`), so use one per
+   deployment rather than sharing one across clients.
+2. Create the account API token in the Deriv dashboard and set `DERIV_API_TOKEN`
+   — or leave it unset and add it later in **Admin → Platform settings**. Without
+   a token the platform still streams public market data, but cannot authenticate
+   (`authorize`), read `balance`/`portfolio`, or trade; the admin broker screen
+   says so rather than pretending to be connected.
+3. `DERIV_API_URL` defaults to `wss://ws.derivws.com/websockets/v3`. Override it
+   only for a Deriv-hosted mirror, and keep the outbound TLS/443 allowance from §2.
+4. **Register the connection in the admin UI** (`POST /api/v1/admin/brokers`, or
+   `/admin/brokers`). The token is stored AES-256-GCM encrypted with
+   `CREDENTIAL_ENCRYPTION_KEY` and is never returned by an API response. There is
+   no password to store — Deriv exposes API-token authentication only — and a
+   token is account-scoped, so use the token issued for the account you intend to
+   trade.
+5. **No Deriv SDK is installed.** The transport is the `ws` package with a typed,
+   validated client (`src/server/modules/broker/deriv.client.ts`); broker policy —
+   reconnect, re-authorise, which symbols matter — lives in the adapter
+   (`src/server/modules/broker/deriv.adapter.ts`). `@deriv/deriv-api` is **not**
+   used: it ships no TypeScript types, and the trade path needs explicit,
+   reviewable request/response shapes rather than an untyped wrapper.
+6. Tune `BROKER_CONNECT_TIMEOUT` if Deriv is slow to authorise, and
+   `BROKER_SYNC_INTERVAL` for the state-poll interval (floored at 5 s).
+
+> **Deriv trades are contracts, and end-to-end trading is not wired up yet.**
+> The read path is live: candles come from `ticks_history` (`style: "candles"`,
+> granularity in seconds — 1m/5m/15m/30m/1h/4h/1d → 60…86400), live prices come
+> from a refcounted `ticks` subscription (a client watching a symbol starts it; the
+> last watcher leaving releases it — the refcount lives in
+> `src/server/modules/market/market-stream.service.ts`), and account state comes from `balance` (plus
+> open-contract profit) and `portfolio`. Order-execution calls are implemented
+> against Deriv's contract API — `proposal` → `buy` → contract id, early close via
+> `sell`, settlement/closure via `proposal_open_contract` and `profit_table` — but
+> the platform's ledger still computes open exposure as `volume × entryPrice` from
+> the old MT5 lot model. Deriv exposure is **stake × multiplier** and Deriv reports
+> no lots, no contract size, no tick value and no free margin, so the bot's lot
+> allocator cannot size a contract correctly and **refuses to place Deriv trades**
+> with a clear error rather than mis-sizing one. The exposure/notional model must
+> be decided and reworked before positions are booked to `TradeRecord`.
 
 ---
 
@@ -591,7 +612,7 @@ curl -fsSI https://autopips.pro/ | grep -i strict-transport-security      # HSTS
 curl -s  https://autopips.pro/internal/publish -o /dev/null -w '%{http_code}\n'  # 404
 # browser: sign in, load /dashboard/live, confirm the socket connects
 #   (DevTools → Network → WS → /ws/socket.io/?EIO=4&transport=websocket)
-# admin: /admin → brokers shows the MetaApi account state; logs fill with activity
+# admin: /admin → brokers shows the Deriv connection state; logs fill with activity
 ```
 
 ---
@@ -699,8 +720,8 @@ docker compose logs web    | grep -E "Invalid or missing server environment|\[au
 | IPNs rejected; `AuditLog` shows `DEPOSIT_IPN_REJECTED` | Wrong `NOWPAYMENTS_IPN_SECRET`, or the proxy/body pipeline is rewriting the body or dropping `x-nowpayments-sig` | Re-copy the secret from *Store settings → IPN*; verify the registered callback URL is `https://autopips.pro/api/v1/payments/nowpayments/ipn`; remove any body-rewriting proxy rule |
 | Deposits stay `PENDING` though the provider says paid | Redis was down, so the replay guard failed closed and dropped the delivery; or the callback URL is unreachable | Restore Redis, then use the reconciliation/recovery path (it is idempotent) and confirm the `AuditLog` entries |
 | `[bot.runtime] refusing to start — LOCK_HELD` | A second worker container owns `autopips:lock:bot-runtime` | Ensure exactly one worker; if the previous container was hard-killed, wait ≤ 60 s (lock TTL) and restart the worker |
-| No trades at all, but the socket server is healthy | No `DEPLOYED` MetaApi account, all strategies disabled, or a risk guard is blocking (`RISK_MAX_OPEN_POSITIONS=0`, equity floor, `RISK_MIN_CLIENT_CAPITAL_USD`) | Check the admin broker screen for the raw MetaApi state, then the risk config, then worker logs for per-cycle audit errors |
-| Broker connection shows `ERROR`/`DISCONNECTED` | Wrong account id/token, wrong `METAAPI_REGION`, or the account is not deployed | Re-check `METAAPI_REGION`, re-deploy the account in the MetaApi dashboard, re-enter the token in the admin UI |
+| No trades at all, but the socket server is healthy | Deriv trade execution is not wired to the ledger yet (expected — see §8), no `DERIV_API_TOKEN`, all strategies disabled, or a risk guard is blocking (`RISK_MAX_OPEN_POSITIONS=0`, equity floor, `RISK_MIN_CLIENT_CAPITAL_USD`) | Check the admin broker screen for the Deriv connection state, then the risk config, then worker logs for per-cycle audit errors |
+| Broker connection shows `ERROR`/`DISCONNECTED` | Wrong `DERIV_APP_ID`, a missing/invalid `DERIV_API_TOKEN`, or a token not issued for that account | Re-check `DERIV_APP_ID`/`DERIV_API_TOKEN` (and whether the token is still valid in the Deriv dashboard), then re-enter it in the admin UI |
 | Users are signed out after every deploy | Redis was replaced/flushed, or web and worker point at different Redis instances | Make both services use the same `REDIS_URL`; enable AOF persistence (already set in compose) |
 | `prisma migrate deploy` fails with `P1001`/connection refused | Postgres not healthy yet, or `DATABASE_URL` uses the wrong host | `docker compose ps postgres`; inside compose the host must be `postgres` |
 | KYC upload returns 413 | Request exceeded `client_max_body_size` (12m) or a single document exceeded the 10 MB limit | Check both; the per-document limit is enforced in code and is not configurable |
@@ -727,3 +748,6 @@ docker compose logs web    | grep -E "Invalid or missing server environment|\[au
   or schedules them.
 * **Migration history is forward-only.** There are no down migrations; plan
   rollbacks around expand/contract or a restore.
+* **Deriv trade execution is not yet driven from the ledger** (§8): the platform
+  refuses to place Deriv contracts until the exposure/notional model is reworked
+  for stake × multiplier. Do not treat this deployment as end-to-end trading.

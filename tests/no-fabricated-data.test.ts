@@ -194,11 +194,6 @@ const COMMENT_ALLOW_LIST: Array<{ rel: string; token: RegExp; justification: str
     justification: 'Doc comment: states the adapter has no mockMode — the ban itself.',
   },
   {
-    rel: 'src/server/modules/broker/metaapi.adapter.ts',
-    token: /^placeholder$/i,
-    justification: 'Doc comment: states the adapter returns provider data verbatim, with no placeholder.',
-  },
-  {
     rel: 'src/server/modules/broker/broker.registry.ts',
     token: /^placeholder$/i,
     justification: 'Doc comment: a placeholder mask/balance must never reach the admin UI.',
@@ -260,7 +255,7 @@ describe('static guard: no fabricated data in the producer paths', () => {
     expect(rels).toContain('src/server/accounting/ledger.ts');
     expect(rels).toContain('src/server/accounting/strategy-stats.ts');
     expect(rels).toContain('src/server/modules/bot/strategy.engine.ts');
-    expect(rels).toContain('src/server/modules/broker/metaapi.adapter.ts');
+    expect(rels).toContain('src/server/modules/broker/deriv.adapter.ts');
     expect(rels.some((rel) => rel.startsWith('src/app/api/'))).toBe(true);
   });
 
@@ -384,12 +379,17 @@ describe('static guard: no fabricated data in the producer paths', () => {
   });
 
   it('the broker adapter declares no simulation/mock mode switch', () => {
-    const adapter = FILES.find((file) => file.rel === 'src/server/modules/broker/metaapi.adapter.ts');
+    const adapter = FILES.find((file) => file.rel === 'src/server/modules/broker/deriv.adapter.ts');
     expect(adapter).toBeDefined();
     const code = adapter?.code ?? '';
     expect(code).not.toMatch(/mock|simulate|simulation/i);
-    // A positive control: the adapter really does talk to the SDK.
-    expect(code).toMatch(/metaapi\.cloud-sdk|MetaApi/);
+    // A positive control: the adapter really does talk to the broker.
+    expect(code).toMatch(/DerivClient|deriv\.client|Deriv/);
+
+    // The transport is held to the same rule: no simulated price source.
+    const transport = FILES.find((file) => file.rel === 'src/server/modules/broker/deriv.client.ts');
+    expect(transport).toBeDefined();
+    expect(transport?.code ?? '').not.toMatch(/mock|simulate|simulation/i);
   });
 
   it('no faker/fixture-data generator is imported by producer code', () => {

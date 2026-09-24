@@ -69,8 +69,12 @@ export interface RiskContext {
   minClientCapitalUsd: number;
   /** True when an identical signalId was already processed. */
   duplicate: boolean;
-  /** Free margin available, account currency. */
-  freeMargin: number;
+  /**
+   * Free margin available, in account currency. NULL when the broker does not
+   * report margin (a contract broker): the margin rule then fails CLOSED, it
+   * does not assume headroom.
+   */
+  freeMargin: number | null;
   /** Margin the intended order would consume. Null when the spec is unknown. */
   requiredMargin: number | null;
   symbolTradable: boolean;
@@ -82,7 +86,12 @@ export interface LotAllocation {
   clientVolume: number;
   /** Rounded down to the symbol's volume step; never zero unless skipped. */
   skipped: boolean;
-  skipReason?: 'BELOW_MIN_VOLUME' | 'BELOW_MIN_CAPITAL' | 'CAPITAL_UNKNOWN' | 'MASTER_EQUITY_ZERO';
+  skipReason?:
+    | 'BELOW_MIN_VOLUME'
+    | 'BELOW_MIN_CAPITAL'
+    | 'CAPITAL_UNKNOWN'
+    | 'MASTER_EQUITY_ZERO'
+    | 'SYMBOL_SPEC_UNKNOWN';
   /** The raw ratio before rounding, for auditability. */
   ratio: number;
 }

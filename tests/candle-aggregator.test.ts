@@ -56,6 +56,16 @@ describe('tick extraction', () => {
     expect(tickPrice({ bid: Number.NaN, ask: Number.POSITIVE_INFINITY })).toBeNull();
   });
 
+  it('uses the single reported price for a one-price instrument (Deriv synthetics)', () => {
+    // No bid/ask at all — Deriv quotes these instruments as one number, and the
+    // chart must use exactly that number rather than inventing a spread.
+    expect(tickPrice({ quote: 1234.5 })).toBe(1234.5);
+    // A bid/ask pair still wins over a stale `quote` field.
+    expect(tickPrice({ bid: 10, ask: 12, quote: 999 })).toBe(11);
+    // One side plus a quote: the reported side is the price, not the quote.
+    expect(tickPrice({ bid: 10, quote: 999 })).toBe(10);
+  });
+
   it('reads seconds, milliseconds and ISO times as seconds', () => {
     expect(tickTimeSeconds({ time: T12 })).toBe(T12);
     expect(tickTimeSeconds({ time: T12 * 1000 })).toBe(T12);

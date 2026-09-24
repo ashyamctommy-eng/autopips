@@ -1,7 +1,7 @@
 /**
  * Bot runtime — the supervised loop that actually trades.
  *
- * What it does on every tick (interval = `METAAPI_SYNC_INTERVAL` seconds):
+ * What it does on every tick (interval = `BROKER_SYNC_INTERVAL` seconds):
  *   1. `runSyncCycle()` — refresh broker snapshots, book positions/deals, roll up
  *      every investment from broker-reported numbers;
  *   2. for each enabled strategy × symbol × live connection: evaluate the rules in
@@ -71,7 +71,7 @@ export interface StrategyRuntimeConfig {
  *
  *   rule: see `STRATEGY_RULE` in strategy.engine.ts
  *   risk: every signal still has to pass `risk.engine.ts` (fail-closed) before an
- *         order is built, and `METAAPI_RISK_MANAGEMENT_ENABLED` (MetaApi's own
+ *         order is built, and `BROKER_RISK_MANAGEMENT_ENABLED` (MetaApi's own
  *         risk-management API) is additional to, never a replacement for, that gate.
  */
 export const strategies: Record<string, StrategyRuntimeConfig> = {
@@ -172,7 +172,7 @@ async function runCycle(): Promise<void> {
 
     const connections = await prisma.brokerConnection.findMany({ where: { status: 'CONNECTED' } });
     const enabled = Object.entries(strategies).filter(([, config]) => config.enabled);
-    const riskManagementEnabled = serverEnv().METAAPI_RISK_MANAGEMENT_ENABLED;
+    const riskManagementEnabled = serverEnv().BROKER_RISK_MANAGEMENT_ENABLED;
 
     for (const [strategyId, config] of enabled) {
       for (const conn of connections) {
@@ -255,7 +255,7 @@ export async function startBotRuntime(): Promise<BotRuntimeStatus> {
   }
 
   const env = serverEnv();
-  const intervalSeconds = Math.max(MIN_INTERVAL_SECONDS, env.METAAPI_SYNC_INTERVAL);
+  const intervalSeconds = Math.max(MIN_INTERVAL_SECONDS, env.BROKER_SYNC_INTERVAL);
   const enabledStrategies = Object.entries(strategies)
     .filter(([, config]) => config.enabled)
     .map(([id]) => id);
@@ -284,7 +284,7 @@ export async function startBotRuntime(): Promise<BotRuntimeStatus> {
       intervalSeconds,
       enabledStrategies,
       lockTtlSeconds: LOCK_TTL_SECONDS,
-      metaApiRiskManagementEnabled: env.METAAPI_RISK_MANAGEMENT_ENABLED,
+      metaApiRiskManagementEnabled: env.BROKER_RISK_MANAGEMENT_ENABLED,
       strategies: enabledStrategies.map((id) => ({
         id,
         timeframe: strategies[id]?.timeframe,

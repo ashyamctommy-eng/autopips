@@ -45,7 +45,7 @@ import { planInputSchema, planUpdateSchema, type PlanInput, type PlanUpdateInput
  *    `null` when there is no closed-trade history.
  *  - Every state transition that touches money, identity, roles or the broker is
  *    written to the append-only AuditLog.
- *  - No secret (MetaApi token, password hash, 2FA secret, KYC object key) is
+ *  - No secret (broker API token, password hash, 2FA secret, KYC object key) is
  *    ever returned or written to the audit details.
  */
 
@@ -759,9 +759,9 @@ function toBrokerDTO(row: BrokerConnection, latencyMs: number | null = null): Br
     brokerName: row.brokerName,
     environment: row.environment,
     maskedAccount: row.maskedAccount,
-    balance: usd(row.balance).toNumber(),
-    equity: usd(row.equity).toNumber(),
-    freeMargin: usd(row.freeMargin).toNumber(),
+    balance: row.balance === null ? null : usd(row.balance).toNumber(),
+    equity: row.equity === null ? null : usd(row.equity).toNumber(),
+    freeMargin: row.freeMargin === null ? null : usd(row.freeMargin).toNumber(),
     status: row.status,
     updatedAt: row.updatedAt.toISOString(),
     latencyMs,
@@ -778,7 +778,7 @@ export async function getBrokerConnection(id: string): Promise<BrokerConnectionD
 /**
  * Every broker connection.
  *
- * `latencyMs` is a REAL RPC round-trip (`BrokerAdapter.ping()` → MetaApi
+ * `latencyMs` is a REAL RPC round-trip (`BrokerAdapter.ping()` → broker
  * `getServerTime`). Probing means connecting an adapter per account, which is
  * far too expensive to do on every page load, so it only happens when the caller
  * asks for it (`?probe=1`). Otherwise `latencyMs` is `null` — meaning "not
@@ -873,9 +873,7 @@ const ACTIVITY_ACRONYMS = new Set([
   'AUM',
   'HWM',
   '2FA',
-  'MT4',
-  'MT5',
-  'METAAPI',
+  'DERIV',
   'TOTP',
   'PNL',
   'USD',
@@ -903,7 +901,7 @@ const ACTIVITY_SEVERITY = {
     AUDIT.WITHDRAWAL_BROADCAST,
     AUDIT.INVESTMENT_ACTIVATED,
     AUDIT.INVESTMENT_MATURED,
-    AUDIT.METAAPI_ORDER_FILLED,
+    AUDIT.BROKER_ORDER_FILLED,
     AUDIT.BROKER_ADDED,
     AUDIT.BROKER_CONNECTED,
     AUDIT.RISK_CHECK_PASSED,

@@ -517,13 +517,13 @@ const ACTIVITY_TEMPLATES: Record<AuditAction, ActivityTemplate> = {
     severity: 'error',
   },
   BROKER_ADDED: always('Broker account added', 'info'),
-  METAAPI_ORDER_SUBMITTED: always('Order submitted to the broker', 'info'),
-  METAAPI_ORDER_FILLED: always('Order filled by the broker', 'success'),
-  METAAPI_ORDER_REJECTED: {
+  BROKER_ORDER_SUBMITTED: always('Order submitted to the broker', 'info'),
+  BROKER_ORDER_FILLED: always('Order filled by the broker', 'success'),
+  BROKER_ORDER_REJECTED: {
     message: (d) => withSuffix('Order rejected by the broker', str(d, 'reason')),
     severity: 'error',
   },
-  METAAPI_POSITION_CLOSED: always('Position closed by the broker', 'info'),
+  BROKER_POSITION_CLOSED: always('Position closed by the broker', 'info'),
 
   // risk / bot
   RISK_CHECK_PASSED: always('Risk check passed', 'info'),

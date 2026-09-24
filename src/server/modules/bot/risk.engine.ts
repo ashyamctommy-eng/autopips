@@ -80,7 +80,9 @@ function check(
  *   6. MAX_OPEN_POSITIONS_REACHED  — openPositions < maxOpenPositions
  *   7. LOT_TOO_LARGE               — 0 < signalVolume <= maxLotPerOrder
  *   8. SYMBOL_NOT_TRADABLE         — broker reports the symbol as tradable
- *   9. INSUFFICIENT_FREE_MARGIN    — requiredMargin is known and <= freeMargin
+ *   9. INSUFFICIENT_FREE_MARGIN    — requiredMargin is known and <= freeMargin.
+ *                                     FAILS CLOSED when either figure is unknown
+ *                                     (a contract broker reports no margin at all).
  */
 export function evaluatePreTradeRisk(ctx: RiskContextWithFloor): RiskDecision {
   const checks: RiskCheck[] = [];
@@ -220,7 +222,10 @@ export function evaluatePreTradeRisk(ctx: RiskContextWithFloor): RiskDecision {
 
   // 9 ── free margin ---------------------------------------------------------
   const marginKnown = isFiniteNumber(ctx.requiredMargin) && isFiniteNumber(ctx.freeMargin) && ctx.requiredMargin >= 0;
-  const marginOk = marginKnown && ctx.requiredMargin !== null && ctx.requiredMargin <= ctx.freeMargin;
+  const marginOk =
+    marginKnown && ctx.requiredMargin !== null && ctx.freeMargin !== null
+      ? ctx.requiredMargin <= ctx.freeMargin
+      : false;
   checks.push(
     check(
       'INSUFFICIENT_FREE_MARGIN',
@@ -233,7 +238,7 @@ export function evaluatePreTradeRisk(ctx: RiskContextWithFloor): RiskDecision {
           : marginKnown
             ? `Required margin ${ctx.requiredMargin} exceeds free margin ${ctx.freeMargin}.`
             : 'Free margin or required margin is not a usable number; treated as insufficient.',
-      { observed: ctx.requiredMargin ?? 'unknown', threshold: ctx.freeMargin },
+      { observed: ctx.requiredMargin ?? 'unknown', threshold: ctx.freeMargin ?? 'unreported' },
     ),
   );
 

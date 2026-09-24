@@ -1,8 +1,9 @@
 # Autopipsz — autopips.pro
 
-Managed algorithmic trading platform. Client capital is mirrored onto MetaTrader 4/5
-accounts through **MetaApi.cloud**, settlements run through **NOWPayments.io**, and
-every figure the platform reports is derived from a persisted, verified record.
+Managed algorithmic trading platform. Client capital is mirrored onto **Deriv**
+accounts through Deriv's WebSocket API (`wss://ws.derivws.com/websockets/v3`),
+settlements run through **NOWPayments.io**, and every figure the platform reports is
+derived from a persisted, verified record.
 
 > **Targets shown anywhere in this product are `Target/Indicative — non-guaranteed`.**
 > They are strategy objectives, not promises. Capital is at risk of loss.
@@ -28,7 +29,7 @@ These are enforced in code, not just documented. Where a rule is mechanical, the
 enforcing file is named so a reviewer can check it.
 
 1. **Zero simulation.** Every trade, balance change and P/L figure originates from a
-   verified NOWPayments IPN callback, a MetaApi broker event, or an admin action that
+   verified NOWPayments IPN callback, a Deriv broker event, or an admin action that
    wrote an audit row. There is no `mockMode`, no seed data, no fallback constant
    anywhere on a producer path. A static guard test (`tests/no-fabricated-data.test.ts`)
    parses the producer sources and fails if `Math.random`, mock/fake/sample data, or a
@@ -105,7 +106,7 @@ Next.js 14 (App Router)  ──┐
 Socket.io worker  ──────────┐               ├──> Redis  — sessions, rate limits, replay guard,
   • src/server/main.ts      │               │            socket pub/sub, bot singleton lock
   • /ws/trading namespace   └──> Redis pub/sub ──┘
-  • bot runtime + broker sync               └──> MetaApi.cloud ──> MT4 / MT5
+  • bot runtime + broker sync               └──> Deriv WS API ──> Deriv contracts
                                             └──> NOWPayments.io
                                             └──> AWS S3 (private, KYC)
 ```
@@ -134,7 +135,7 @@ src/
 │   │   ├── auth/            Argon2id, JWT sessions, TOTP 2FA
 │   │   ├── kyc/             private S3 storage, admin review
 │   │   ├── payments/        NOWPayments client, IPN verification, deposits, withdrawals
-│   │   ├── broker/          MetaApi adapter, registry, sync
+│   │   ├── broker/          Deriv client + adapter, registry, sync
 │   │   ├── bot/             risk engine, lot allocator, strategy engine, order manager, fees
 │   │   ├── account/         client account service
 │   │   ├── admin/           admin service
@@ -226,10 +227,21 @@ is safe in CI without infrastructure; when Postgres and Redis are present they r
   out-of-band, and when they are absent the row stays approved for manual settlement —
   the platform never fabricates a transaction hash.
 - **The bot is fail-closed.** Nine pre-trade checks (account active, broker connected,
-  duplicate signal, equity floor, drawdown, open-position cap, lot cap, symbol tradable,
-  free margin) run before any order. A check that cannot be evaluated is a rejection.
-  Client lots are scaled by `Client Lot = Master Lot × (Client Investment Capital /
-  Master Account Equity)` and always rounded **down** to the symbol's volume step.
+  duplicate signal, equity floor, drawdown, open-position cap, per-order cap, symbol
+  tradable, available capital) run before any order. A check that cannot be evaluated is
+  a rejection. Client allocation is scaled by `Client Investment Capital / Master Account
+  Equity` and only ever rounded **down** — the conservation property (a client is never
+  granted more exposure than the ratio allows) is asserted by `tests/lot-allocator.test.ts`.
+- **Deriv trades are contracts, and the bot does not place them yet.** A Deriv trade is a
+  *contract*: stake (buy price) × multiplier, identified by a contract id, with an
+  entry/exit spot and a profit. Deriv reports no lots, no contract size, no tick value and
+  no free margin. The ledger and the allocator above still compute open exposure as
+  `volume × entryPrice` from the old MT5 lot model, so booking a contract with them would
+  mis-state risk; that exposure/notional model must be decided and reworked before
+  positions are written to `TradeRecord`. Until then the execution path **refuses a Deriv
+  order with a clear error rather than mis-sizing one**. Everything else — KYC, crypto
+  deposits/withdrawals, the ledger, the realtime market feed — is live; end-to-end trading
+  is not.
 - **Fees** are management (pro-rata) and performance (high-water-mark, charged only on
   new profit).
 
@@ -242,7 +254,7 @@ runbook for the two services, the managed Postgres/Redis, the exact variable tab
 the cross-origin realtime wiring.
 
 **Self-hosted / Docker:** **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the full runbook
-(environment table, secret generation, S3/NOWPayments/MetaApi setup, TLS, the required
+(environment table, secret generation, S3/NOWPayments/Deriv setup, TLS, the required
 WebSocket proxy rule, backups and rollback), **[SECURITY.md](./SECURITY.md)** for the
 security posture and an honest list of what is not yet hardened, and `docker-compose.yml`
 + `deploy/nginx/` for a reference stack.

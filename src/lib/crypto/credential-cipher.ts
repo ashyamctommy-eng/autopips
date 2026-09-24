@@ -30,6 +30,11 @@ function keyFor(purpose: string): Buffer {
   return createHash('sha256').update(`autopips:${purpose}`).update(raw).digest();
 }
 
+/**
+ * Purpose strings are part of the key derivation and therefore permanent: the
+ * `'metaapi'` label is retained for tokens encrypted under it (renaming it would
+ * make every stored broker token undecryptable). It now holds Deriv API tokens.
+ */
 export type CredentialPurpose = 'metaapi' | 'payout' | 'generic';
 
 export function encryptCredential(plaintext: string, purpose: CredentialPurpose = 'generic'): string {

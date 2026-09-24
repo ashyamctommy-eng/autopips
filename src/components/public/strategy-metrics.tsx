@@ -322,7 +322,7 @@ function TrackRecordDisclosure() {
       </summary>
       <div className="mt-3 flex flex-col gap-3 leading-relaxed">
         <p>
-          Every figure in a track-record block is computed from closed MetaApi deal records written
+          Every figure in a track-record block is computed from closed broker records written
           back from the broker, joined to the capital the investment had deployed at the time. A
           trade enters the record only when the broker reports the position closed, carrying the
           broker&rsquo;s own exit price, P/L, commission and swap.

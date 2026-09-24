@@ -154,7 +154,7 @@ export function AuditLogTable({ rows, isLoading = false }: AuditLogTableProps) {
       <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">
         <ShieldAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
         Secret-looking keys (password, token, secret, key, credential) are masked before display. The
-        audit writer never stores a MetaApi token, a password hash, a 2FA secret or a KYC object key in
+        audit writer never stores a broker API token, a password hash, a 2FA secret or a KYC object key in
         the first place.
       </p>
     </div>

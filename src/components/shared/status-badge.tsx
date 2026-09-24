@@ -36,7 +36,7 @@ const INVESTMENT_STATUS_META: Record<string, { label: string; tone: StatusTone }
   CLOSED: { label: 'Closed', tone: 'neutral' },
 };
 
-/** Broker / MetaApi connection states as reported by the bridge. */
+/** Broker connection states as reported by the adapter. */
 const BROKER_STATUS_META: Record<string, { label: string; tone: StatusTone }> = {
   CONNECTED: { label: 'Connected', tone: 'ok' },
   DEPLOYED: { label: 'Deployed', tone: 'ok' },

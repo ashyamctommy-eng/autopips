@@ -61,9 +61,8 @@ export function SiteFooter({ className }: SiteFooterProps) {
           <div className="flex flex-col gap-3">
             <BrandMark size="md" />
             <p className="max-w-xs text-sm leading-relaxed text-muted">
-              Automated algorithmic trading infrastructure. Strategy capital executes on MetaTrader
-              4/5 accounts through MetaApi.cloud; deposits and payouts settle in crypto through
-              NOWPayments.
+              Automated algorithmic trading infrastructure. Strategy capital executes on Deriv
+              over its WebSocket API; deposits and payouts settle in crypto through NOWPayments.
             </p>
           </div>
 

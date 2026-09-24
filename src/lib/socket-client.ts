@@ -53,7 +53,9 @@ export interface PriceTick {
   symbol: string;
   bid?: number | null;
   ask?: number | null;
-  /** Quote time from the bridge: epoch ms (or an ISO string if re-stamped). */
+  /** Single-price instruments (Deriv synthetics) report one number. */
+  quote?: number | null;
+  /** Quote time from the bridge: epoch SECONDS (unix), as the broker sent it. */
   time?: number | string;
 }
 
@@ -65,7 +67,9 @@ export function tickMid(tick: PriceTick): number | null {
   const bid = typeof tick.bid === 'number' ? tick.bid : null;
   const ask = typeof tick.ask === 'number' ? tick.ask : null;
   if (bid !== null && ask !== null) return (bid + ask) / 2;
-  return bid ?? ask;
+  if (bid !== null || ask !== null) return bid ?? ask;
+  // Deriv synthetics: one price, reported once.
+  return typeof tick.quote === 'number' ? tick.quote : null;
 }
 
 /**

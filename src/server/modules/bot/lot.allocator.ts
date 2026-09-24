@@ -39,7 +39,8 @@ export interface AllocationInvestment {
 export interface AllocateLotInput {
   masterVolume: Numeric;
   masterEquity: Numeric;
-  symbolSpec: AllocationSpec;
+  /** Null when the broker publishes no lot metadata (a contract broker). */
+  symbolSpec: AllocationSpec | null;
   investment: AllocationInvestment;
   minClientCapitalUsd: Numeric;
 }
@@ -102,6 +103,20 @@ function skipped(
  */
 export function allocateLot(input: AllocateLotInput): LotAllocation {
   const { investment, symbolSpec } = input;
+
+  // No lot metadata: the broker does not size in lots (a contract broker), so
+  // there is no volume step to round to and no lot bounds to respect. Skip with
+  // a reason instead of rounding against an invented step.
+  if (symbolSpec === null) {
+    return {
+      investmentId: investment.investmentId,
+      clientVolume: 0,
+      skipped: true,
+      skipReason: 'SYMBOL_SPEC_UNKNOWN',
+      ratio: 0,
+    };
+  }
+
   const masterEquity = D(input.masterEquity);
   const masterVolume = D(input.masterVolume);
 

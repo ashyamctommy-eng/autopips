@@ -68,16 +68,16 @@ const COLUMNS: readonly Column[] = [
   },
   {
     icon: Radio,
-    title: 'Broker connectivity — MetaApi.cloud',
+    title: 'Broker connectivity — Deriv',
     paragraphs: [
       {
         key: 'execution',
         body: (
           <>
             Autopipsz is not a venue and does not run a matching engine. Orders are submitted to
-            MetaTrader 4 / MT5 accounts over <span className="text-base-100">MetaApi.cloud</span>,
-            which talks to the broker&rsquo;s own trade server. Fills, commissions, swaps and closes
-            come back as <span className="text-base-100">broker deals</span> — the only source of
+            a <span className="text-base-100">Deriv</span> account over Deriv&rsquo;s WebSocket API,
+            which talks to the broker&rsquo;s own trade server. Fills and settlements come back as
+            <span className="text-base-100">broker-reported contracts</span> — the only source of
             P/L this platform accepts.
           </>
         ),

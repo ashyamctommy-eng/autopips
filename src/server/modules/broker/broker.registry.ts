@@ -3,16 +3,22 @@
  *
  * Responsibilities:
  *  - turn a `BrokerConnection` row into a live `BrokerAdapter` (one adapter per
- *    MetaApi account id, cached in-process);
+ *    Deriv login id, cached in-process);
  *  - own the admin mutations (`addBrokerConnection`, `updateBrokerSnapshot`,
  *    `removeBrokerConnection`) and the audit trail for them;
  *  - expose the single activity/event-bus wiring used by the broker + bot runtime.
  *
- * ===================== WHERE THE METAAPI TOKEN LIVES =====================
+ * ====================== WHERE THE BROKER TOKEN LIVES =======================
  * The Prisma schema deliberately has no token column on `BrokerConnection`, so the
- * per-account MetaApi token is stored AES-256-GCM encrypted (`encryptCredential`,
- * purpose `metaapi`) under the Redis key
+ * per-connection Deriv API token is stored AES-256-GCM encrypted (`encryptCredential`)
+ * under the Redis key
  *   `autopips:broker-token:<metaApiAccountId>`
+ *
+ * NOTE on the cipher *purpose* string: it is still the literal `'metaapi'`, kept
+ * deliberately. It is part of the key-derivation input, so renaming it would make
+ * every already-encrypted token undecryptable. The DB column name
+ * (`metaApiAccountId`) is likewise still the historical one; both are identifiers
+ * with data in them, not branding, and they change only with a migration.
  * Redis is not durable storage for a credential: keys can be evicted and a Redis
  * dump is a wider blast radius than a single DB column.
  *
@@ -25,8 +31,8 @@
  * ========================================================================
  *
  * A connection with no per-account token falls back to the platform-level
- * `METAAPI_TOKEN` from the environment (a MetaApi account-scoped token narrows
- * that down; both are accepted by the SDK).
+ * `DERIV_API_TOKEN` from the environment, or the token saved in Admin → Platform
+ * settings. Without a token the adapter still streams public market data.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -49,7 +55,7 @@ import {
   publishTradeEvent,
 } from '@/server/ws/event-bus';
 import { AUDIT, recordAudit } from '../audit/audit.service';
-import { MetaApiBrokerAdapter } from './metaapi.adapter';
+import { DerivBrokerAdapter } from './deriv.adapter';
 import type {
   BrokerAccountState,
   BrokerAdapter,
@@ -112,20 +118,19 @@ export async function getAdapterForConnection(conn: BrokerConnection): Promise<B
 
   const env = serverEnv();
   const stored = await loadBrokerToken(conn.metaApiAccountId);
-  // Per-account token first, then the platform token: admin console → Settings,
-  // then the METAAPI_TOKEN environment variable.
-  const token = stored ?? (getSetting('metaapi.token') || env.METAAPI_TOKEN);
-  if (!token) {
-    throw ApiError.brokerUnavailable(`No MetaApi token available for account ${conn.metaApiAccountId}.`);
-  }
+  // Per-connection token first, then the platform token: admin console →
+  // Settings, then DERIV_API_TOKEN. A token is OPTIONAL — without one the
+  // adapter still streams public market data for the charts and simply cannot
+  // authenticate, read balance or trade.
+  const token = stored ?? (getSetting('deriv.api_token') || env.DERIV_API_TOKEN || null);
 
-  const adapter = new MetaApiBrokerAdapter({
-    accountId: conn.metaApiAccountId,
-    brokerName: conn.brokerName,
-    environment: asEnvironment(conn.environment),
-    token,
-    region: env.METAAPI_REGION,
-    terminalTimeout: env.METAAPI_TERMINAL_TIMEOUT,
+  const adapter = new DerivBrokerAdapter({
+    loginId: conn.metaApiAccountId,
+    appId: env.DERIV_APP_ID,
+    token: token && token.trim().length > 0 ? token : null,
+    url: env.DERIV_API_URL,
+    multiplier: env.DERIV_MULTIPLIER,
+    connectTimeoutMs: env.BROKER_CONNECT_TIMEOUT * 1000,
   });
   adapterCache.set(conn.metaApiAccountId, adapter);
   return adapter;
@@ -306,13 +311,13 @@ export async function addBrokerConnection(input: AddBrokerConnectionInput): Prom
   await saveBrokerToken(parsed.metaApiAccountId, parsed.token);
 
   const env = serverEnv();
-  const adapter = new MetaApiBrokerAdapter({
-    accountId: parsed.metaApiAccountId,
-    brokerName: parsed.brokerName,
-    environment: parsed.environment,
+  const adapter = new DerivBrokerAdapter({
+    loginId: parsed.metaApiAccountId,
+    appId: env.DERIV_APP_ID,
     token: parsed.token,
-    region: env.METAAPI_REGION,
-    terminalTimeout: env.METAAPI_TERMINAL_TIMEOUT,
+    url: env.DERIV_API_URL,
+    multiplier: env.DERIV_MULTIPLIER,
+    connectTimeoutMs: env.BROKER_CONNECT_TIMEOUT * 1000,
   });
 
   let state: BrokerAccountState;
@@ -332,7 +337,7 @@ export async function addBrokerConnection(input: AddBrokerConnectionInput): Prom
       },
     });
     throw ApiError.brokerUnavailable(
-      `Could not read account information for MetaApi account ${parsed.metaApiAccountId}; nothing was saved.`,
+      `Could not read account information for Deriv account ${parsed.metaApiAccountId}; nothing was saved.`,
     );
   }
 
@@ -345,18 +350,18 @@ export async function addBrokerConnection(input: AddBrokerConnectionInput): Prom
       brokerName: parsed.brokerName,
       environment: parsed.environment,
       maskedAccount: state.maskedAccount,
-      balance: toPrismaDecimal(state.balance),
-      equity: toPrismaDecimal(state.equity),
-      freeMargin: toPrismaDecimal(state.freeMargin),
+      balance: state.balance === null ? null : toPrismaDecimal(state.balance),
+      equity: state.equity === null ? null : toPrismaDecimal(state.equity),
+      freeMargin: state.freeMargin === null ? null : toPrismaDecimal(state.freeMargin),
       status: state.status,
     },
     update: {
       brokerName: parsed.brokerName,
       environment: parsed.environment,
       maskedAccount: state.maskedAccount,
-      balance: toPrismaDecimal(state.balance),
-      equity: toPrismaDecimal(state.equity),
-      freeMargin: toPrismaDecimal(state.freeMargin),
+      balance: state.balance === null ? null : toPrismaDecimal(state.balance),
+      equity: state.equity === null ? null : toPrismaDecimal(state.equity),
+      freeMargin: state.freeMargin === null ? null : toPrismaDecimal(state.freeMargin),
       status: state.status,
     },
   });
@@ -386,9 +391,9 @@ export async function updateBrokerSnapshot(id: string, state: BrokerAccountState
   await prisma.brokerConnection.update({
     where: { id },
     data: {
-      balance: toPrismaDecimal(state.balance),
-      equity: toPrismaDecimal(state.equity),
-      freeMargin: toPrismaDecimal(state.freeMargin),
+      balance: state.balance === null ? null : toPrismaDecimal(state.balance),
+      equity: state.equity === null ? null : toPrismaDecimal(state.equity),
+      freeMargin: state.freeMargin === null ? null : toPrismaDecimal(state.freeMargin),
       status: state.status,
       updatedAt: new Date(),
     },

@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET  /api/v1/admin/brokers?probe=1  — every MetaApi connection
+ * GET  /api/v1/admin/brokers?probe=1  — every broker connection
  * POST /api/v1/admin/brokers          — register an account (ADMIN only)
  *
  * LATENCY HONESTY: `latencyMs` is only populated when `?probe=1` is sent,
@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * never a fabricated number. Use GET /api/v1/admin/brokers/:id/status to probe a
  * single connection.
  *
- * TOKEN HANDLING: the POST body carries the account's MetaApi token in plain
+ * TOKEN HANDLING: the POST body carries the account's Deriv API token in plain
  * text over TLS. It is validated as a non-empty string, handed straight to
  * `addBrokerConnection` (which encrypts it with AES-256-GCM before it is stored)
  * and never logged, never echoed in the response and never written to the audit
@@ -31,9 +31,9 @@ const createBrokerSchema = z
     environment: z.enum(['LIVE', 'DEMO']),
     token: z
       .string()
-      .min(1, 'A MetaApi token is required.')
-      .max(4_096, 'That MetaApi token looks too long.')
-      .refine((value) => value.trim().length > 0, 'A MetaApi token is required.'),
+      .min(1, 'A Deriv API token is required.')
+      .max(4_096, 'That Deriv API token looks too long.')
+      .refine((value) => value.trim().length > 0, 'A Deriv API token is required.'),
   })
   .strict();
 

@@ -290,7 +290,7 @@ const RUNTIME_SPECS: RuntimeSpec[] = [
   // `broker.sync.ts` exports `runSyncCycle()` — a ONE-SHOT tick, not a loop — and
   // `bot.runtime.ts` calls it unconditionally at the top of every cycle. Broker
   // balances, positions and deal closures therefore sync on
-  // `METAAPI_SYNC_INTERVAL` for as long as the bot runtime is alive, including
+  // `BROKER_SYNC_INTERVAL` for as long as the bot runtime is alive, including
   // when zero strategies are enabled. That is the intended ownership.
   //
   // Registering a second, independent sync loop here would run two writers
@@ -511,7 +511,7 @@ async function main(): Promise<void> {
       `path ${DEFAULT_SOCKET_PATH} (${env.NODE_ENV})`,
   );
   console.log(
-    `[ws] broker sync is driven by the bot runtime cycle (every ${env.METAAPI_SYNC_INTERVAL}s), not a separate loop.`,
+    `[ws] broker sync is driven by the bot runtime cycle (every ${env.BROKER_SYNC_INTERVAL}s), not a separate loop.`,
   );
 
   // 4. Runtimes start only once sockets are reachable, so the first activity

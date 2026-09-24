@@ -55,12 +55,23 @@ const schema = z.object({
   NOWPAYMENTS_PAYOUT_CURRENCY: z.string().default('usdttrc20'),
   NOWPAYMENTS_ALLOWED_CURRENCIES: z.string().default('usdttrc20,usdterc20,btc,eth,ltc,trx,bnb'),
 
-  // MetaApi
-  METAAPI_TOKEN: z.string().min(1),
-  METAAPI_REGION: z.string().default('new-york'),
-  METAAPI_SYNC_INTERVAL: z.coerce.number().int().positive().default(15),
-  METAAPI_RISK_MANAGEMENT_ENABLED: booleanish.default('true'),
-  METAAPI_TERMINAL_TIMEOUT: z.coerce.number().int().positive().default(120),
+  // Deriv (broker + market data). See src/server/modules/broker/deriv.adapter.ts
+  DERIV_APP_ID: z.string().min(1),
+  /**
+   * Account API token. OPTIONAL on purpose: without it the platform still
+   * streams public market data (charts work) and simply cannot authenticate,
+   * read balance or trade. It can also be set at runtime in Admin → Platform
+   * settings, which is why boot does not fail on it.
+   */
+  DERIV_API_TOKEN: z.string().min(1).optional().or(z.literal('')),
+  DERIV_API_URL: z.string().url().default('wss://ws.derivws.com/websockets/v3'),
+  /** Contract multiplier for MULTUP/MULTDOWN orders. */
+  DERIV_MULTIPLIER: z.coerce.number().positive().default(100),
+  /** Broker sync cadence, in seconds. */
+  BROKER_SYNC_INTERVAL: z.coerce.number().int().positive().default(15),
+  BROKER_RISK_MANAGEMENT_ENABLED: booleanish.default('true'),
+  /** Seconds to wait for a Deriv connection/authorisation. */
+  BROKER_CONNECT_TIMEOUT: z.coerce.number().int().positive().default(120),
 
   // Risk
   RISK_MASTER_EQUITY_FLOOR_USD: z.coerce.number().nonnegative().default(0),

@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Broker connections',
-  description: 'MetaApi trading accounts, their broker-reported state and synchronisation.',
+  description: 'Deriv trading accounts, their broker-reported state and synchronisation.',
 };
 
 /**
@@ -34,7 +34,7 @@ export default async function AdminBrokersPage() {
         eyebrow="Execution"
         breadcrumb={[{ label: 'Admin', href: '/admin' }, { label: 'Broker connections' }]}
         title="Broker connections"
-        description="MetaApi accounts the platform executes on. The stored snapshot is the last value the broker actually reported; a synchronisation cycle re-reads positions, deals and investment roll-ups."
+        description="Deriv accounts the platform executes on. The stored snapshot is the last value the broker actually reported; a synchronisation cycle re-reads positions, deals and investment roll-ups."
       />
 
       <div className="mt-6">

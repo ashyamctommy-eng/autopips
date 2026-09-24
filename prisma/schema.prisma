@@ -183,9 +183,12 @@ model BrokerConnection {
   brokerName       String // e.g. "Exness", "ICMarkets"
   environment      String // "LIVE" or "DEMO"
   maskedAccount    String // "***-9012"
-  balance          Decimal  @db.Decimal(18, 2)
-  equity           Decimal  @db.Decimal(18, 2)
-  freeMargin       Decimal  @db.Decimal(18, 2)
+  /// Broker-reported snapshot. NULL means the broker did not report the figure
+  /// (Deriv reports no free margin, and nothing at all before a token is
+  /// authorised) — never 0, which would read as a real, empty balance.
+  balance          Decimal? @db.Decimal(18, 2)
+  equity           Decimal? @db.Decimal(18, 2)
+  freeMargin       Decimal? @db.Decimal(18, 2)
   status           String // "CONNECTED" | "DISCONNECTED" | "ERROR"
   updatedAt        DateTime @updatedAt
 

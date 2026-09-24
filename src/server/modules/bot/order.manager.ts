@@ -39,7 +39,6 @@ import type {
   PlaceOrderRequest,
   SymbolSpec,
 } from '../broker/broker.types';
-import type { MarginCapableAdapter, TradabilityCapableAdapter } from '../broker/metaapi.adapter';
 import { allocateAcrossInvestments, MASTER_TO_CLIENT_FORMULA } from './lot.allocator';
 import { evaluatePreTradeRisk, type RiskContextWithFloor } from './risk.engine';
 import type { LotAllocation, OrderOutcome, RiskDecision, TradeSignal } from './bot.types';
@@ -90,12 +89,23 @@ export interface ClosePositionOutcome {
 
 // -------------------------------------------------------------- capabilities
 
-function isMarginCapable(adapter: BrokerAdapter): adapter is BrokerAdapter & MarginCapableAdapter {
-  return typeof (adapter as { calculateRequiredMargin?: unknown }).calculateRequiredMargin === 'function';
-}
-
-function isTradabilityCapable(adapter: BrokerAdapter): adapter is BrokerAdapter & TradabilityCapableAdapter {
-  return typeof (adapter as { isSymbolTradable?: unknown }).isSymbolTradable === 'function';
+/**
+ * Contract-broker gate.
+ *
+ * Deriv prices orders as a contract — a stake in account currency times a
+ * multiplier — while this pipeline is MT5-shaped end to end: the lot allocator
+ * derives `volume` from the symbol's lot step, the risk engine reasons in lots,
+ * and the ledger computes open exposure as `volume x entryPrice`. None of those
+ * numbers exist on a contract broker.
+ *
+ * Bridging them would mean inventing a contract size, and that invented number
+ * would decide how much client money is put at risk. So a signal for a
+ * non-lot-denominated broker is REFUSED here, with an audit row naming the
+ * reason. Enabling contract trading needs the exposure-model decision documented
+ * in PRODUCTION-READINESS.md plus a stake-aware allocator.
+ */
+function isLotDenominated(adapter: BrokerAdapter): boolean {
+  return adapter.sizeDenomination === 'lots';
 }
 
 // -------------------------------------------------------------- aggregation
@@ -247,6 +257,32 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'ACCOUNT_STATE_UNAVAILABLE', allocations: [], outcomes: [] };
   }
 
+  if (!isLotDenominated(adapter)) {
+    const reason = 'BROKER_SIZE_DENOMINATION_UNSUPPORTED';
+    await recordAudit({
+      action: AUDIT.RISK_CHECK_FAILED,
+      details: {
+        ...configClaim,
+        reason,
+        sizeDenomination: adapter.sizeDenomination,
+        symbol: signal.symbol,
+        direction: signal.direction,
+        masterVolume: signal.masterVolume,
+      },
+    });
+    await publishActivity(
+      makeActivity(
+        'SIGNAL_REFUSED',
+        `Signal ${signal.signalId} refused: this broker denominates size in ${adapter.sizeDenomination}, and the lot-based sizing path cannot price it without inventing a contract size.`,
+        'warning',
+        { ...configClaim, reason, sizeDenomination: adapter.sizeDenomination },
+        investmentRooms(null),
+      ),
+    );
+    if (claimed !== null) await redis.del(claimKey);
+    return { signalId: signal.signalId, status: 'REJECTED', reason, allocations: [], outcomes: [] };
+  }
+
   // An empty position list is only ever a real "no open position" answer: when the
   // broker call fails we stop the pipeline instead of assuming flat.
   let positions: BrokerPosition[];
@@ -278,31 +314,18 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     ? Math.min(...investments.map((investment) => investment.maxDrawdownPct))
     : 0;
 
-  const spec: SymbolSpec | null = await adapter.getSymbolSpec(signal.symbol);
-  const quote = await adapter.getQuote(signal.symbol);
-  const referencePrice = quote ? (signal.direction === 'BUY' ? quote.ask : quote.bid) : null;
+  // Lot metadata for the allocator. A contract broker publishes none — and the
+  // gate above has already refused those brokers — so null here means "this
+  // broker cannot size lots" and the allocator skips instead of guessing.
+  const spec: SymbolSpec | null = null;
 
-  // Required margin comes from the broker's own margin RPC; when it cannot be
-  // computed the risk gate rejects (INSUFFICIENT_FREE_MARGIN) instead of guessing.
-  let requiredMargin: number | null = null;
-  if (isMarginCapable(adapter) && referencePrice !== null && Number.isFinite(referencePrice)) {
-    requiredMargin = await adapter.calculateRequiredMargin(
-      signal.symbol,
-      signal.direction,
-      signal.masterVolume,
-      referencePrice,
-    );
-  }
+  // No MT5 margin RPC exists any more: a contract broker prices an order from a
+  // proposal (`getOrderCost`), which the gate above routes to the stake path.
+  // Null therefore means "no margin figure was reported", and the risk engine
+  // fails that check closed rather than assuming headroom.
+  const requiredMargin: number | null = null;
 
-  let symbolTradable = false;
-  if (
-    spec !== null &&
-    isTradabilityCapable(adapter) &&
-    signal.masterVolume >= spec.minVolume &&
-    signal.masterVolume <= spec.maxVolume
-  ) {
-    symbolTradable = (await adapter.isSymbolTradable(signal.symbol)) === true;
-  }
+  const symbolTradable = (await adapter.isSymbolTradable(signal.symbol)) === true;
 
   const riskContext: RiskContextWithFloor = {
     account,
@@ -369,6 +392,19 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     return { signalId: signal.signalId, status: 'NO_ALLOCATIONS', reason: 'NO_SYMBOL_SPEC', decision, allocations: [], outcomes: [] };
   }
 
+  if (account.equity === null) {
+    // Sizing scales client lots against master equity; without a figure that is
+    // not a scale factor, it is a division by an unknown.
+    if (claimed !== null) await redis.del(claimKey);
+    return {
+      signalId: signal.signalId,
+      status: 'NO_CONNECTION',
+      reason: 'MASTER_EQUITY_UNREPORTED',
+      allocations: [],
+      outcomes: [],
+    };
+  }
+
   const allocations = allocateAcrossInvestments({
     masterVolume: signal.masterVolume,
     masterEquity: account.equity,
@@ -427,7 +463,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     };
 
     await recordAudit({
-      action: AUDIT.METAAPI_ORDER_SUBMITTED,
+      action: AUDIT.BROKER_ORDER_SUBMITTED,
       details: {
         ...configClaim,
         investmentId: allocation.investmentId,
@@ -466,7 +502,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
 
     if (!result.ok) {
       await recordAudit({
-        action: AUDIT.METAAPI_ORDER_REJECTED,
+        action: AUDIT.BROKER_ORDER_REJECTED,
         details: {
           ...configClaim,
           investmentId: allocation.investmentId,
@@ -493,7 +529,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     }
 
     await recordAudit({
-      action: AUDIT.METAAPI_ORDER_FILLED,
+      action: AUDIT.BROKER_ORDER_FILLED,
       details: {
         ...configClaim,
         investmentId: allocation.investmentId,
@@ -518,7 +554,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
             metaApiPositionId: result.positionId,
             instrument: request.symbol,
             direction: request.direction,
-            volume: toPrismaDecimal(result.volume, 5),
+            volume: toPrismaDecimal(result.volume ?? allocation.clientVolume, 5),
             entryPrice: toPrismaDecimal(result.fillPrice, 5),
             stopLoss: request.stopLoss === undefined ? null : toPrismaDecimal(request.stopLoss, 5),
             takeProfit: request.takeProfit === undefined ? null : toPrismaDecimal(request.takeProfit, 5),
@@ -627,7 +663,7 @@ export async function closePositionForInvestment(input: ClosePositionInput): Pro
 
   if (!result.ok) {
     await recordAudit({
-      action: AUDIT.METAAPI_ORDER_REJECTED,
+      action: AUDIT.BROKER_ORDER_REJECTED,
       details: {
         brokerConnectionId: conn.id,
         investmentId: input.investmentId,

@@ -93,7 +93,7 @@ export default async function StrategiesPage() {
           breadcrumb={[{ label: 'Home', href: '/' }, { label: 'Strategies' }]}
           eyebrow="Strategies"
           title="How the strategies are executed"
-          description="Autopipsz runs operator-configured strategies on a master MetaTrader account and mirrors the resulting positions into client-funded investments. This page documents the arithmetic, the safety checks and the fee model."
+          description="Autopipsz runs operator-configured strategies on a master Deriv account and mirrors the resulting positions into client-funded investments. This page documents the arithmetic, the safety checks and the fee model."
         />
       </div>
 

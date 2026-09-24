@@ -31,12 +31,12 @@ export const metadata: Metadata = {
     template: '%s · Autopipsz',
   },
   description:
-    'Autopipsz connects client capital to MetaTrader 4/5 execution via MetaApi.cloud, with crypto settlements through NOWPayments. Managed algorithmic trading with verifiable, broker-sourced records. Targets are indicative and non-guaranteed.',
+    'Autopipsz connects client capital to Deriv execution over its WebSocket API, with crypto settlements through NOWPayments. Managed algorithmic trading with verifiable, broker-sourced records. Targets are indicative and non-guaranteed.',
   keywords: [
     'managed trading',
     'algorithmic trading',
-    'MetaTrader 5',
-    'MetaApi',
+    'Deriv',
+    'Deriv WebSocket API',
     'copy trading',
     'Autopipsz',
   ],

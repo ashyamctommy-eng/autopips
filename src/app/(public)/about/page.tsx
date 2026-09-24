@@ -20,7 +20,7 @@ import { CtaBand } from '@/components/public/cta-band';
 export const metadata: Metadata = {
   title: 'About',
   description:
-    'Autopipsz is managed algorithmic trading infrastructure: a master MT4/MT5 account executes operator-run strategies, mirrored into client-funded investments, with crypto settlement and an append-only audit record.',
+    'Autopipsz is managed algorithmic trading infrastructure: a master Deriv account executes operator-run strategies, mirrored into client-funded investments, with crypto settlement and an append-only audit record.',
   alternates: { canonical: '/about' },
 };
 
@@ -33,7 +33,7 @@ const STACK: readonly StackItem[] = [
   { name: 'Next.js 14 (App Router) + TypeScript', role: 'Server-rendered client area and this public site, with API route handlers for every money path.' },
   { name: 'PostgreSQL + Prisma', role: 'System of record: users, KYC profiles, deposits, withdrawals, investments, trade records and the audit log.' },
   { name: 'Redis', role: 'Rate-limit counters, distributed locks (single-writer bot runtime), replay guards and short-lived credential cache.' },
-  { name: 'MetaApi.cloud SDK', role: 'Broker connectivity to MetaTrader 4/5 — account state, candles, order submission and deal history.' },
+  { name: 'Deriv WebSocket API', role: 'Broker connectivity — account state, candles, order submission and contract settlement.' },
   { name: 'NOWPayments', role: 'Crypto deposit addresses, payout broadcast and signed IPN callbacks.' },
   { name: 'Argon2id + TOTP (speakeasy)', role: 'Password hashing and time-based two-factor authentication.' },
   { name: 'AWS S3 + KMS', role: 'Private storage for identity documents, encrypted at rest, reachable only through short-lived signed links.' },
@@ -42,7 +42,7 @@ const STACK: readonly StackItem[] = [
 ];
 
 const WHAT_IT_IS: readonly string[] = [
-  'A managed trading platform: you allocate capital to a strategy, and a master broker account executes that strategy on MT4/MT5 through MetaApi.cloud.',
+  'A managed trading platform: you allocate capital to a strategy, and a master Deriv account executes that strategy over Deriv\u2019s WebSocket API.',
   'A record-keeping platform: equity follows a published formula over persisted ledger rows, and every money or identity event is written to an append-only audit log.',
   'A crypto-settlement platform: deposits and payouts move through NOWPayments, and deposits are credited only after on-chain confirmation.',
   'A self-service platform: registration, identity submission, funding, allocation, monitoring and withdrawal all happen in your account, not over email.',
@@ -64,7 +64,7 @@ export default function AboutPage() {
           breadcrumb={[{ label: 'Home', href: '/' }, { label: 'About' }]}
           eyebrow="About"
           title="Automated trading infrastructure, operated honestly"
-          description="Autopipsz connects client capital to algorithmic execution on MetaTrader 4 and MT5 accounts. The proposition is narrow and deliberate: real broker execution, real settlement, and a record that shows exactly what happened."
+          description="Autopipsz connects client capital to algorithmic execution on Deriv. The proposition is narrow and deliberate: real broker execution, real settlement, and a record that shows exactly what happened."
         />
       </div>
 

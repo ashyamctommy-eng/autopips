@@ -1,0 +1,868 @@
+import { ApiError } from '@/lib/http';
+import { maskAccount } from '@/lib/crypto/credential-cipher';
+
+import {
+  DERIV_DEFAULT_URL,
+  DerivClient,
+  type DerivErrorPayload,
+} from './deriv.client';
+import type {
+  BrokerAccountState,
+  BrokerAdapter,
+  BrokerDeal,
+  BrokerEnvironment,
+  BrokerEventHandlers,
+  BrokerPosition,
+  Candle,
+  ClosePositionResult,
+  InstrumentInfo,
+  OrderCost,
+  PlaceOrderRequest,
+  PlaceOrderResult,
+  PositionClosure,
+  Quote,
+  SizeDenomination,
+} from './broker.types';
+
+/**
+ * DERIV BROKER ADAPTER.
+ *
+ * One implementation of `BrokerAdapter` over Deriv's WebSocket API — the
+ * replacement for the removed MetaApi/MT4-MT5 bridge. Everything Deriv-specific about
+ * this platform stops here; the bot engine, accounting, API and UI only ever see
+ * `broker.types.ts`.
+ *
+ * WHAT DERIV ACTUALLY IS (and why this adapter is shaped the way it is)
+ *   A Deriv "position" is a CONTRACT: a stake (the buy price), a multiplier, an
+ *   entry spot and an exit spot. There are no lots, no contract size, no tick
+ *   value, no free margin, no swap and no separate commission. So:
+ *
+ *   • `sizeDenomination` is 'stake' — the platform must size orders in account
+ *     currency, not lots. `placeOrder` REFUSES a request that offers only lots:
+ *     converting lots to a stake would mean inventing a contract size the broker
+ *     never published, and that number would then move real money.
+ *   • every MT5-only field is `null`, never 0. `freeMargin: 0` would read as
+ *     "you have no margin left"; `null` reads as "Deriv does not report margin",
+ *     which is the truth.
+ *   • a single-price instrument (Deriv's synthetic indices quote one number)
+ *     yields `bid`/`ask` null plus `quote` set, rather than a fabricated spread.
+ *
+ * MARKET DATA needs no token: candles, quotes and symbol metadata are public.
+ * Trading, balance and portfolio require an authorised token; without one the
+ * adapter boots, streams prices, and fails every authenticated call with a
+ * clear ApiError instead of pretending.
+ *
+ * TIMEFRAMES: Deriv's granularity is seconds and its allowed set covers our
+ * whole UI (1m/5m/15m/30m/1h/4h/1d). The mapping is explicit so a timeframe the
+ * broker cannot serve is rejected here rather than silently bucketed wrong.
+ */
+
+/** Timeframe → Deriv granularity (seconds). Mirrors the candles route's list. */
+const GRANULARITY_SECONDS: Record<string, number> = {
+  '1m': 60,
+  '5m': 300,
+  '15m': 900,
+  '30m': 1_800,
+  '1h': 3_600,
+  '4h': 14_400,
+  '1d': 86_400,
+};
+
+/** Deriv multipliers are quoted per contract type; these are the two we submit. */
+const MULTUP = 'MULTUP';
+const MULTDOWN = 'MULTDOWN';
+
+/** Deriv caps `ticks_history` count; larger requests are split by the API. */
+const MAX_CANDLES = 5_000;
+
+export interface DerivBrokerAdapterConfig {
+  /** Deriv login id (e.g. "CR1234567") when the connection row knows it. */
+  loginId: string | null;
+  appId: string;
+  /** Null = market data only (charts work, trading does not). */
+  token: string | null;
+  url?: string;
+  /** Contract multiplier for MULTUP/MULTDOWN. Defaults to 100. */
+  multiplier?: number;
+  /** Account currency; when absent it is read from the authorised account. */
+  currency?: string | null;
+  connectTimeoutMs?: number;
+}
+
+interface AuthorizedAccount {
+  loginId: string;
+  currency: string;
+  isVirtual: boolean;
+  scopes: string[];
+  balance: number | null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+/** Deriv timestamps are epoch SECONDS; the platform's Candle.time is too. */
+function epochSeconds(value: unknown): number | null {
+  if (isFiniteNumber(value) && value > 0) return Math.floor(value);
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return Math.floor(parsed / 1000);
+  }
+  return null;
+}
+
+export class DerivBrokerAdapter implements BrokerAdapter {
+  public readonly accountId: string;
+  readonly sizeDenomination: SizeDenomination = 'stake';
+
+  private readonly config: DerivBrokerAdapterConfig;
+  private client: DerivClient | null = null;
+  private handlers: BrokerEventHandlers = {};
+
+  private authorized: AuthorizedAccount | null = null;
+  private instruments: Map<string, InstrumentInfo> | null = null;
+  private instrumentsCachedAt = 0;
+
+  /** Symbols we currently stream quotes for, with Deriv's subscription ids. */
+  private readonly tickSubscriptions = new Map<string, { subscriptionId: string | null }>();
+  /** Last portfolio snapshot, for the position-delta diff. */
+  private portfolio = new Map<string, BrokerPosition>();
+  private balanceSubscribed = false;
+  private portfolioSubscribed = false;
+  private lastBalance: number | null = null;
+
+  /** Deriv's active_symbols cache TTL — instrument metadata changes rarely. */
+  private static readonly INSTRUMENT_CACHE_TTL_MS = 300_000;
+
+  constructor(config: DerivBrokerAdapterConfig) {
+    this.config = config;
+    this.accountId = config.loginId?.trim() || `deriv:${config.appId}`;
+  }
+
+  /* ───────────────────────────── connection ────────────────────────────── */
+
+  async connect(handlers: BrokerEventHandlers): Promise<void> {
+    this.handlers = handlers;
+
+    if (!this.client) {
+      this.client = new DerivClient({
+        appId: this.config.appId,
+        ...(this.config.url ? { url: this.config.url } : {}),
+        ...(this.config.connectTimeoutMs ? { connectTimeoutMs: this.config.connectTimeoutMs } : {}),
+        onClose: (reason) => {
+          // Subscriptions die with the socket; drop our bookkeeping so the next
+          // request re-establishes them instead of believing they are live.
+          this.tickSubscriptions.clear();
+          this.balanceSubscribed = false;
+          this.portfolioSubscribed = false;
+          this.portfolio.clear();
+          void this.handlers.onConnectionState?.({
+            connected: false,
+            state: `DISCONNECTED (${reason})`,
+          });
+        },
+      });
+    }
+
+    await this.client.connect();
+    if (this.config.token) await this.authorize();
+
+    await this.subscribeAccountStreams();
+    this.emitConnectionState(true);
+  }
+
+  async disconnect(): Promise<void> {
+    this.tickSubscriptions.clear();
+    this.balanceSubscribed = false;
+    this.portfolioSubscribed = false;
+    this.portfolio.clear();
+    this.authorized = null;
+    this.lastBalance = null;
+    const client = this.client;
+    this.client = null;
+    client?.close();
+  }
+
+  isConnected(): boolean {
+    return this.client?.isConnected() === true;
+  }
+
+  private async clientOrConnect(): Promise<DerivClient> {
+    const client = this.client;
+    if (!client) {
+      throw ApiError.brokerUnavailable('Deriv adapter is not connected.');
+    }
+    if (!client.isConnected()) {
+      // A reconnect drops Deriv-side subscriptions: re-authorise and re-subscribe
+      // so a caller never sees a half-dead connection.
+      await client.connect();
+      if (this.config.token) await this.authorize();
+      await this.subscribeAccountStreams();
+      this.emitConnectionState(true);
+    }
+    return client;
+  }
+
+  private emitConnectionState(connected: boolean): void {
+    void this.handlers.onConnectionState?.({
+      connected,
+      state: connected ? (this.authorized ? 'AUTHORIZED' : 'CONNECTED') : 'DISCONNECTED',
+    });
+  }
+
+  /* ─────────────────────────────── auth ───────────────────────────────── */
+
+  private async authorize(): Promise<AuthorizedAccount> {
+    if (this.authorized) return this.authorized;
+    const client = await this.clientOrConnect();
+
+    const response = await client.request<{ authorize?: Record<string, unknown> }>(
+      { authorize: this.config.token },
+      'authorize',
+    );
+    const raw = asRecord(response.authorize);
+    if (!raw) throw ApiError.brokerUnavailable('Deriv did not return an authorised account.');
+
+    const loginId = typeof raw.loginid === 'string' ? raw.loginid : null;
+    if (!loginId) throw ApiError.brokerUnavailable('Deriv authorised a token with no login id.');
+
+    // A connection row pins the login id: an authorised account that does not
+    // match it means the token belongs to a different account, and trading the
+    // wrong account is worse than not trading at all.
+    if (this.config.loginId && this.config.loginId !== loginId) {
+      throw ApiError.brokerUnavailable(
+        `Deriv token belongs to ${maskAccount(loginId)}, not the configured account.`,
+      );
+    }
+
+    const scopes = asArray(raw.scopes).filter((s): s is string => typeof s === 'string');
+
+    this.authorized = {
+      loginId,
+      currency: typeof raw.currency === 'string' ? raw.currency : (this.config.currency ?? 'USD'),
+      isVirtual: raw.is_virtual === 1 || raw.is_virtual === true,
+      scopes,
+      balance: isFiniteNumber(raw.balance) ? raw.balance : null,
+    };
+    this.lastBalance = this.authorized.balance;
+
+    console.info(
+      `[deriv.adapter] authorised ${maskAccount(loginId)} (${this.authorized.isVirtual ? 'DEMO' : 'LIVE'}, scopes: ${scopes.join(',') || 'none'})`,
+    );
+    return this.authorized;
+  }
+
+  private requireTradingAuth(): AuthorizedAccount {
+    const authorized = this.authorized;
+    if (!authorized) {
+      throw ApiError.brokerUnavailable(
+        'Deriv is not authenticated — set DERIV_API_TOKEN (or the admin console setting) to trade.',
+      );
+    }
+    if (!authorized.scopes.includes('trade')) {
+      throw ApiError.brokerUnavailable(
+        `The Deriv token for ${maskAccount(authorized.loginId)} has no 'trade' scope.`,
+      );
+    }
+    return authorized;
+  }
+
+  /** `balance` and `portfolio` streams, subscribed once per connection. */
+  private async subscribeAccountStreams(): Promise<void> {
+    if (!this.authorized) return;
+    const client = await this.clientOrConnect();
+
+    if (!this.balanceSubscribed) {
+      this.balanceSubscribed = true;
+      await client.subscribe({ balance: 1 }, 'balance', (message) => {
+        const balance = asRecord(message.balance);
+        if (balance && isFiniteNumber(balance.balance)) {
+          this.lastBalance = balance.balance;
+          if (this.authorized) this.authorized.balance = balance.balance;
+        }
+      });
+    }
+
+    if (!this.portfolioSubscribed) {
+      this.portfolioSubscribed = true;
+      await client.subscribe({ portfolio: 1 }, 'portfolio', (message) => {
+        this.handlePortfolio(message);
+      });
+    }
+  }
+
+  private handlePortfolio(message: Record<string, unknown>): void {
+    const raw = asRecord(message.portfolio);
+    const contracts = raw ? asArray(raw.contracts) : [];
+    const next = new Map<string, BrokerPosition>();
+    for (const contract of contracts) {
+      const position = this.mapContract(contract);
+      if (position) next.set(position.positionId, position);
+    }
+
+    for (const [id, position] of next) {
+      const previous = this.portfolio.get(id);
+      if (!previous) void this.handlers.onPositionOpened?.(position);
+      else if (previous.currentPrice !== position.currentPrice) {
+        void this.handlers.onPositionUpdated?.(position);
+      }
+    }
+    for (const [id, previous] of this.portfolio) {
+      if (next.has(id)) continue;
+      // Gone from the portfolio: closed or expired. The settlement detail is
+      // pulled by the sync (proposal_open_contract), exactly as before.
+      void this.handlers.onPositionClosed?.({
+        positionId: id,
+        investmentId: previous.investmentId,
+        deal: null,
+      });
+    }
+
+    this.portfolio = next;
+  }
+
+  /* ───────────────────────────── account state ─────────────────────────── */
+
+  async getAccountState(): Promise<BrokerAccountState> {
+    const authorized = this.config.token ? await this.authorize() : null;
+    const client = await this.clientOrConnect();
+
+    let balance = this.lastBalance ?? authorized?.balance ?? null;
+    if (balance === null) {
+      const response = await client.request<{ balance?: Record<string, unknown> }>(
+        { balance: 1 },
+        'balance',
+      );
+      const raw = asRecord(response.balance);
+      balance = raw && isFiniteNumber(raw.balance) ? raw.balance : null;
+      this.lastBalance = balance;
+    }
+
+    // Equity = balance + broker-reported unrealised profit, both real numbers.
+    // Without a portfolio read there is no equity to report, so it stays null.
+    let equity: number | null = balance;
+    if (authorized) {
+      const positions = await this.getOpenPositions();
+      const floating = positions.reduce((total, position) => total + position.unrealizedPnL, 0);
+      equity = balance === null ? null : Number((balance + floating).toFixed(2));
+    }
+
+    const environment: BrokerEnvironment = authorized?.isVirtual ? 'DEMO' : 'LIVE';
+    const loginId = authorized?.loginId ?? this.config.loginId ?? this.accountId;
+
+    return {
+      accountId: loginId,
+      brokerName: 'Deriv',
+      environment,
+      maskedAccount: maskAccount(loginId),
+      currency: authorized?.currency ?? this.config.currency ?? 'USD',
+      balance: balance ?? 0,
+      equity,
+      // Deriv reports none of these; null means "not reported", not "zero".
+      freeMargin: null,
+      margin: null,
+      leverage: null,
+      isTradingEnabled:
+        authorized !== null && authorized.scopes.includes('trade') && this.isConnected(),
+      status: this.isConnected() ? 'CONNECTED' : 'DISCONNECTED',
+      rawState: authorized ? 'AUTHORIZED' : 'CONNECTED',
+      updatedAt: new Date(),
+    };
+  }
+
+  async ping(): Promise<number | null> {
+    try {
+      const client = await this.clientOrConnect();
+      const startedAt = Date.now();
+      await client.request({ ping: 1 }, 'ping');
+      return Date.now() - startedAt;
+    } catch {
+      return null;
+    }
+  }
+
+  /* ─────────────────────────────── symbols ────────────────────────────── */
+
+  private async loadInstruments(): Promise<Map<string, InstrumentInfo>> {
+    const fresh =
+      this.instruments !== null &&
+      Date.now() - this.instrumentsCachedAt < DerivBrokerAdapter.INSTRUMENT_CACHE_TTL_MS;
+    if (fresh) return this.instruments!;
+
+    const client = await this.clientOrConnect();
+    const response = await client.request<{ active_symbols?: unknown }>(
+      { active_symbols: 'brief' },
+      'active_symbols',
+    );
+
+    const map = new Map<string, InstrumentInfo>();
+    for (const entry of asArray(response.active_symbols)) {
+      const raw = asRecord(entry);
+      const symbol = typeof raw?.symbol === 'string' ? raw.symbol : null;
+      if (!raw || !symbol) continue;
+      map.set(symbol, {
+        symbol,
+        displayName: typeof raw.display_name === 'string' ? raw.display_name : symbol,
+        market: typeof raw.market === 'string' ? raw.market : 'unknown',
+        submarket: typeof raw.submarket === 'string' ? raw.submarket : 'unknown',
+        pipSize: isFiniteNumber(raw.pip) ? raw.pip : 0,
+        isTradable:
+          raw.exchange_is_open === 1 ||
+          raw.exchange_is_open === true ||
+          raw.is_trading_suspended === 0,
+      });
+    }
+
+    this.instruments = map;
+    this.instrumentsCachedAt = Date.now();
+    return map;
+  }
+
+  async getInstrumentInfo(symbol: string): Promise<InstrumentInfo | null> {
+    const instruments = await this.loadInstruments();
+    return instruments.get(symbol) ?? null;
+  }
+
+  async isSymbolTradable(symbol: string): Promise<boolean | null> {
+    const info = await this.getInstrumentInfo(symbol);
+    return info ? info.isTradable : null;
+  }
+
+  /* ───────────────────────────── market data ──────────────────────────── */
+
+  async getHistoricalCandles(symbol: string, timeframe: string, count: number): Promise<Candle[]> {
+    const granularity = GRANULARITY_SECONDS[timeframe];
+    if (!granularity) {
+      throw ApiError.badRequest(`Deriv cannot serve the ${timeframe} timeframe.`);
+    }
+
+    const client = await this.clientOrConnect();
+    const limit = Math.max(1, Math.min(Math.trunc(count), MAX_CANDLES));
+
+    const response = await client.request<{ candles?: unknown }>(
+      {
+        ticks_history: symbol,
+        style: 'candles',
+        granularity,
+        count: limit,
+        end: 'latest',
+      },
+      `ticks_history(${symbol} ${timeframe})`,
+    );
+
+    const candles: Candle[] = [];
+    let skipped = 0;
+    for (const entry of asArray(response.candles)) {
+      const raw = asRecord(entry);
+      const time = epochSeconds(raw?.epoch);
+      if (
+        !raw ||
+        time === null ||
+        !isFiniteNumber(raw.open) ||
+        !isFiniteNumber(raw.high) ||
+        !isFiniteNumber(raw.low) ||
+        !isFiniteNumber(raw.close)
+      ) {
+        skipped += 1;
+        continue;
+      }
+      // No volume: Deriv's candle payload carries none, and a synthesised tick
+      // count would be a made-up number on a chart that shows money.
+      candles.push({ time, open: raw.open, high: raw.high, low: raw.low, close: raw.close });
+    }
+    if (skipped > 0) {
+      console.warn(
+        `[deriv.adapter] ${skipped} candle(s) for ${symbol} ${timeframe} had unusable fields and were dropped.`,
+      );
+    }
+
+    return candles.sort((a, b) => a.time - b.time);
+  }
+
+  /** One-sided ticks (Deriv synthetics quote a single price) are valid here. */
+  private toQuote(symbol: string, tick: Record<string, unknown>): Quote | null {
+    const time = epochSeconds(tick.epoch);
+    if (time === null) return null;
+
+    const bid = isFiniteNumber(tick.bid) ? tick.bid : null;
+    const ask = isFiniteNumber(tick.ask) ? tick.ask : null;
+    const quote = isFiniteNumber(tick.quote) ? tick.quote : null;
+    if (bid === null && ask === null && quote === null) return null;
+
+    return { symbol: typeof tick.symbol === 'string' ? tick.symbol : symbol, bid, ask, quote, time };
+  }
+
+  async getQuote(symbol: string): Promise<Quote | null> {
+    const client = await this.clientOrConnect();
+    const response = await client.request<{ tick?: unknown }>({ ticks: symbol }, `ticks(${symbol})`);
+    const tick = asRecord(response.tick);
+    return tick ? this.toQuote(symbol, tick) : null;
+  }
+
+  async subscribeToMarketData(symbol: string): Promise<Quote | null> {
+    const client = await this.clientOrConnect();
+
+    const existing = this.tickSubscriptions.get(symbol);
+    if (existing) {
+      // Already streaming: still answer with a current price so a newly
+      // interested chart is not left blank until the next terminal push.
+      return this.getQuote(symbol);
+    }
+
+    const { subscriptionId, first } = await client.subscribe(
+      { ticks: symbol },
+      `ticks(${symbol})`,
+      (message) => {
+        const tick = asRecord(message.tick);
+        if (!tick) return;
+        const quote = this.toQuote(symbol, tick);
+        if (quote) void this.handlers.onQuote?.(quote);
+      },
+      (error: DerivErrorPayload) => {
+        // A dropped stream (e.g. symbol trading suspended) must not silently
+        // look like a quiet market.
+        console.warn(`[deriv.adapter] tick stream for ${symbol} ended: ${error.code} ${error.message}`);
+        this.tickSubscriptions.delete(symbol);
+      },
+    );
+
+    this.tickSubscriptions.set(symbol, { subscriptionId });
+
+    const tick = asRecord(first.tick);
+    return tick ? this.toQuote(symbol, tick) : null;
+  }
+
+  async unsubscribeFromMarketData(symbol: string): Promise<void> {
+    const subscription = this.tickSubscriptions.get(symbol);
+    this.tickSubscriptions.delete(symbol);
+    if (!subscription?.subscriptionId) return;
+    await this.client?.forget(subscription.subscriptionId);
+  }
+
+  /* ─────────────────────────────── positions ──────────────────────────── */
+
+  /** Map a Deriv contract (portfolio or proposal_open_contract) to a position. */
+  private mapContract(value: unknown): BrokerPosition | null {
+    const raw = asRecord(value);
+    if (!raw) return null;
+
+    const contractId = raw.contract_id;
+    const id = isFiniteNumber(contractId) ? String(contractId) : null;
+    const symbol = typeof raw.symbol === 'string' ? raw.symbol : null;
+    if (!id || !symbol) return null;
+
+    const contractType = typeof raw.contract_type === 'string' ? raw.contract_type : '';
+    const buyPrice = isFiniteNumber(raw.buy_price) ? raw.buy_price : null;
+    const entry = isFiniteNumber(raw.entry_spot)
+      ? raw.entry_spot
+      : isFiniteNumber(raw.entry_tick)
+        ? raw.entry_tick
+        : null;
+    const current = isFiniteNumber(raw.current_spot)
+      ? raw.current_spot
+      : isFiniteNumber(raw.current_spot_time)
+        ? null
+        : null;
+    const openedAtSeconds = epochSeconds(raw.date_start) ?? epochSeconds(raw.purchase_time);
+
+    return {
+      positionId: id,
+      instrument: symbol,
+      direction: contractType === MULTUP || contractType === 'CALL' ? 'BUY' : 'SELL',
+      // Deriv reports no lot size, and stake is not a lot. Both stay explicit.
+      volume: null,
+      stakeUsd: buyPrice,
+      multiplier: isFiniteNumber(raw.multiplier) ? raw.multiplier : null,
+      entryPrice: entry ?? 0,
+      currentPrice: current ?? entry ?? 0,
+      stopLoss: isFiniteNumber(raw.stop_loss) ? raw.stop_loss : null,
+      takeProfit: isFiniteNumber(raw.take_profit) ? raw.take_profit : null,
+      unrealizedPnL: isFiniteNumber(raw.profit) ? raw.profit : 0,
+      // Deriv reports net profit only — no separate commission or swap.
+      commission: null,
+      swap: null,
+      comment: null,
+      openedAt: openedAtSeconds ? new Date(openedAtSeconds * 1000) : new Date(0),
+      investmentId: null,
+    };
+  }
+
+  async getOpenPositions(): Promise<BrokerPosition[]> {
+    const authorized = this.config.token ? await this.authorize() : null;
+    if (!authorized) return [];
+
+    const client = await this.clientOrConnect();
+    const response = await client.request<{ portfolio?: Record<string, unknown> }>(
+      { portfolio: 1 },
+      'portfolio',
+    );
+    const contracts = asArray(asRecord(response.portfolio)?.contracts);
+
+    const positions: BrokerPosition[] = [];
+    for (const contract of contracts) {
+      const position = this.mapContract(contract);
+      if (position) positions.push(position);
+    }
+    return positions;
+  }
+
+  async getDealsSince(since: Date): Promise<BrokerDeal[]> {
+    const authorized = this.config.token ? await this.authorize() : null;
+    if (!authorized) return [];
+
+    const client = await this.clientOrConnect();
+    const response = await client.request<{ profit_table?: Record<string, unknown> }>(
+      {
+        profit_table: 1,
+        description: 1,
+        limit: 100,
+        date_from: Math.floor(since.getTime() / 1000),
+      },
+      'profit_table',
+    );
+
+    const deals: BrokerDeal[] = [];
+    for (const entry of asArray(asRecord(response.profit_table)?.transactions)) {
+      const raw = asRecord(entry);
+      if (!raw) continue;
+
+      const contractId = raw.contract_id;
+      const id = isFiniteNumber(contractId)
+        ? String(contractId)
+        : typeof raw.transaction_id === 'number'
+          ? String(raw.transaction_id)
+          : null;
+      const symbol = typeof raw.symbol === 'string' ? raw.symbol : null;
+      const profit = isFiniteNumber(raw.profit) ? raw.profit : null;
+      const executedAt = epochSeconds(raw.purchase_time) ?? epochSeconds(raw.sell_time);
+      if (!id || !symbol || profit === null || executedAt === null) continue;
+
+      const contractType = typeof raw.contract_type === 'string' ? raw.contract_type : '';
+      const buyPrice = isFiniteNumber(raw.buy_price) ? raw.buy_price : null;
+
+      deals.push({
+        dealId: id,
+        positionId: id,
+        instrument: symbol,
+        direction: contractType === MULTUP || contractType === 'CALL' ? 'BUY' : 'SELL',
+        volume: null,
+        price: buyPrice ?? 0,
+        // Deriv publishes a single net profit figure for a settled contract.
+        grossPnL: null,
+        commission: null,
+        swap: null,
+        netPnL: profit,
+        executedAt: new Date(executedAt * 1000),
+        comment: typeof raw.shortcode === 'string' ? raw.shortcode : null,
+      });
+    }
+
+    return deals.sort((a, b) => a.executedAt.getTime() - b.executedAt.getTime());
+  }
+
+  async getPositionClosure(positionId: string): Promise<PositionClosure | null> {
+    const authorized = this.config.token ? await this.authorize() : null;
+    if (!authorized) return null;
+
+    const client = await this.clientOrConnect();
+    const contractId = Number(positionId);
+    if (!Number.isInteger(contractId)) return null;
+
+    const response = await client.request<{ proposal_open_contract?: Record<string, unknown> }>(
+      { proposal_open_contract: 1, contract_id: contractId },
+      `proposal_open_contract(${positionId})`,
+    );
+    const raw = asRecord(response.proposal_open_contract);
+    if (!raw) return null;
+
+    const isSold = raw.is_sold === 1 || raw.is_sold === true || raw.status === 'sold';
+    const profit = isFiniteNumber(raw.profit) ? raw.profit : null;
+    if (!isSold || profit === null) return null;
+
+    const exitSpot = isFiniteNumber(raw.exit_tick)
+      ? raw.exit_tick
+      : isFiniteNumber(raw.sell_spot)
+        ? raw.sell_spot
+        : null;
+    const closedAtSeconds = epochSeconds(raw.sell_time) ?? epochSeconds(raw.exit_tick_time);
+
+    return {
+      positionId,
+      exitPrice: exitSpot,
+      closingVolume: null,
+      // Deriv's settled profit is net; it does not itemise the costs.
+      grossPnL: null,
+      commission: null,
+      swap: null,
+      netPnL: profit,
+      closedAt: closedAtSeconds ? new Date(closedAtSeconds * 1000) : null,
+      dealIds: [],
+    };
+  }
+
+  /* ────────────────────────────── execution ───────────────────────────── */
+
+  async getOrderCost(request: {
+    symbol: string;
+    direction: 'BUY' | 'SELL';
+    stake: number;
+    multiplier?: number;
+  }): Promise<OrderCost | null> {
+    const authorized = await this.authorize();
+    const client = await this.clientOrConnect();
+
+    const response = await client.request<{ proposal?: Record<string, unknown> }>(
+      {
+        proposal: 1,
+        amount: request.stake,
+        basis: 'stake',
+        contract_type: request.direction === 'BUY' ? MULTUP : MULTDOWN,
+        currency: authorized.currency,
+        symbol: request.symbol,
+        multiplier: request.multiplier ?? this.config.multiplier ?? 100,
+      },
+      `proposal(${request.symbol})`,
+    );
+
+    const proposal = asRecord(response.proposal);
+    if (!proposal) return null;
+    const cost = isFiniteNumber(proposal.ask_price) ? proposal.ask_price : null;
+    if (cost === null) return null;
+
+    return {
+      cost,
+      currency: authorized.currency,
+      ...(isFiniteNumber(proposal.payout) ? { payout: proposal.payout } : {}),
+    };
+  }
+
+  /**
+   * Open a Deriv contract (MULTUP for BUY, MULTDOWN for SELL).
+   *
+   * A lot-denominated request is REFUSED rather than converted: the platform
+   * would have to invent a contract size to turn 0.10 lots into a stake, and
+   * that invented number would decide how much real money is put at risk.
+   */
+  async placeOrder(request: PlaceOrderRequest): Promise<PlaceOrderResult> {
+    const stake = isFiniteNumber(request.stake) ? request.stake : null;
+    if (stake === null || stake <= 0) {
+      return {
+        ok: false,
+        errorCode: 'STAKE_REQUIRED',
+        brokerMessage:
+          'Deriv orders are denominated in a stake (account currency), not lots. ' +
+          'This request supplied no stake, and converting lots would require a contract ' +
+          'size Deriv does not publish.',
+      };
+    }
+
+    const authorized = this.requireTradingAuth();
+    const client = await this.clientOrConnect();
+    const multiplier = request.multiplier ?? this.config.multiplier ?? 100;
+
+    const proposalResponse = await client.request<{ proposal?: Record<string, unknown> }>(
+      {
+        proposal: 1,
+        amount: stake,
+        basis: 'stake',
+        contract_type: request.direction === 'BUY' ? MULTUP : MULTDOWN,
+        currency: authorized.currency,
+        symbol: request.symbol,
+        multiplier,
+        ...(request.stopLoss !== undefined ? { stop_loss: request.stopLoss } : {}),
+        ...(request.takeProfit !== undefined ? { take_profit: request.takeProfit } : {}),
+      },
+      `proposal(${request.symbol})`,
+    );
+
+    const proposal = asRecord(proposalResponse.proposal);
+    const proposalId = typeof proposal?.id === 'string' ? proposal.id : null;
+    const price = proposal && isFiniteNumber(proposal.ask_price) ? proposal.ask_price : null;
+    if (!proposalId || price === null) {
+      return {
+        ok: false,
+        errorCode: 'PROPOSAL_UNAVAILABLE',
+        brokerMessage: 'Deriv did not return a priced proposal for this contract.',
+      };
+    }
+
+    const buyResponse = await client.request<{ buy?: Record<string, unknown> }>(
+      { buy: proposalId, price },
+      `buy(${request.symbol})`,
+    );
+    const buy = asRecord(buyResponse.buy);
+    const contractId = buy && isFiniteNumber(buy.contract_id) ? String(buy.contract_id) : null;
+    if (!contractId) {
+      return {
+        ok: false,
+        errorCode: 'ORDER_REJECTED',
+        brokerMessage: 'Deriv did not return a contract id for the order.',
+      };
+    }
+
+    return {
+      ok: true,
+      orderId: contractId,
+      positionId: contractId,
+      fillPrice: buy && isFiniteNumber(buy.buy_price) ? buy.buy_price : price,
+      volume: stake,
+      brokerMessage: `Deriv contract ${contractId}`,
+    };
+  }
+
+  /**
+   * Close a contract early (`sell` at market).
+   *
+   * Deriv contracts are not partially closable, so a volume argument is ignored;
+   * the response is settled with a follow-up read because the sell call reports
+   * the amount returned, not the exit spot or the profit.
+   */
+  async closePosition(positionId: string, _volume?: number): Promise<ClosePositionResult> {
+    this.requireTradingAuth();
+    const client = await this.clientOrConnect();
+
+    const contractId = Number(positionId);
+    if (!Number.isInteger(contractId)) {
+      return { ok: false, positionId, errorCode: 'INVALID_CONTRACT_ID', brokerMessage: 'Not a Deriv contract id.' };
+    }
+
+    const response = await client.request<{ sell?: Record<string, unknown> }>(
+      { sell: contractId, price: 0 },
+      `sell(${positionId})`,
+    );
+    const sell = asRecord(response.sell);
+    if (!sell) {
+      return {
+        ok: false,
+        positionId,
+        errorCode: 'SELL_FAILED',
+        brokerMessage: 'Deriv did not confirm the early close.',
+      };
+    }
+
+    // The settled figures come from the contract itself.
+    const closure = await this.getPositionClosure(positionId);
+
+    return {
+      ok: true,
+      positionId,
+      ...(closure?.exitPrice !== null && closure?.exitPrice !== undefined
+        ? { closePrice: closure.exitPrice }
+        : {}),
+      ...(closure ? { netPnL: closure.netPnL } : {}),
+      brokerMessage: `Deriv contract ${positionId} sold`,
+    };
+  }
+}
+
+export { DERIV_DEFAULT_URL };

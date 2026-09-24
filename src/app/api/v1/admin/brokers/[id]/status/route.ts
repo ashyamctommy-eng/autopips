@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
  * GET  /api/v1/admin/brokers/:id/status — live latency probe + stored snapshot
  * POST /api/v1/admin/brokers/:id/status — force one synchronization cycle
  *
- * GET performs a REAL probe (`adapter.ping()` → MetaApi `getServerTime`) and
+ * GET performs a REAL probe (`adapter.ping()` → a Deriv round trip) and
  * records the broker-reported state via `updateBrokerSnapshot`, then returns the
  * refreshed connection row. `latencyMs` is null when the probe could not
  * complete; no latency figure is ever estimated.

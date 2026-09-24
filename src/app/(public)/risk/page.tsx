@@ -113,14 +113,15 @@ const RISKS: readonly RiskSection[] = [
     body: (
       <>
         <p>
-          Autopipsz is not a broker, a bank or a venue. Orders are placed on MetaTrader 4 / MT5
-          accounts held with a third-party broker through MetaApi.cloud, and those accounts are
+          Autopipsz is not a broker, a bank or a venue. Orders are placed on third-party broker
+          accounts through Deriv&rsquo;s WebSocket API, and those accounts are
           subject to the broker&rsquo;s terms. If the broker defaults, becomes insolvent, withdraws
           from a jurisdiction, changes its margin requirements or restricts trading, your capital
           and open positions can be affected, delayed or lost.
         </p>
         <p>
-          The platform also depends on MetaApi.cloud as a connectivity provider between it and the
+          The platform also depends on Deriv as the executing broker and on its WebSocket API as the
+          connectivity path between the
           broker. An outage or an API change at that provider can delay or prevent order placement,
           modification and closure, including the closing of a position you wanted to exit.
         </p>
@@ -219,7 +220,7 @@ const RISKS: readonly RiskSection[] = [
     body: (
       <>
         <p>
-          Automated systems fail. Connectivity between the platform, MetaApi.cloud and the broker can
+          Automated systems fail. Connectivity between the platform, Deriv&rsquo;s API and the broker can
           be interrupted; a strategy can be delayed, skipped or rejected; a scheduled process can
           stop; a deployment can introduce a defect. Order placement and closure depend on
           third-party infrastructure that Autopipsz does not control.

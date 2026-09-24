@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * Historical candles straight from the broker adapter
  * (`BrokerAdapter.getHistoricalCandles`) for an authenticated client.
  *
- * ZERO FABRICATION: this route has exactly one data source — the MetaApi
+ * ZERO FABRICATION: this route has exactly one data source — the Deriv
  * account behind the caller's own trade records. When there is no broker
  * connection for the caller, or the adapter cannot serve the request, the
  * response is an EMPTY candle array with `ok: true` and a `source` that says
@@ -36,7 +36,7 @@ export const dynamic = 'force-dynamic';
 const SYMBOL_PATTERN = /^[A-Z0-9._#+-]{2,24}$/;
 
 /**
- * Timeframes the MetaApi history endpoint accepts. Anything else is rejected
+ * Timeframes the Deriv history endpoint accepts. Anything else is rejected
  * here rather than passed through, so a typo cannot become a broker error.
  */
 const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const;

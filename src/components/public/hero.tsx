@@ -41,7 +41,7 @@ export function Hero({ className }: HeroProps) {
           <div className="mx-auto w-full max-w-[1400px] px-4 pb-16 pt-16 sm:px-6 sm:pb-20 sm:pt-20 lg:px-8">
             <div className="max-w-3xl">
               <Badge variant="brand" className="mb-5">
-                Institutional broker APIs · MetaApi.cloud
+                Broker APIs · Deriv
               </Badge>
 
               <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-base-100 sm:text-4xl lg:text-5xl">
@@ -49,9 +49,9 @@ export function Hero({ className }: HeroProps) {
               </h1>
 
               <p className="mt-5 max-w-2xl text-pretty text-[1rem] leading-relaxed text-muted sm:text-lg">
-                Autopipsz runs operator-configured strategies on a master MetaTrader account and
-                mirrors every position into client-funded investments through MetaApi.cloud. P/L is
-                read back from broker deals, settlements clear in crypto through NOWPayments, and
+                Autopipsz runs operator-configured strategies on a master Deriv account and
+                mirrors every position into client-funded investments over Deriv&rsquo;s WebSocket API. P/L is
+                read back from settled broker contracts, settlements clear in crypto through NOWPayments, and
                 every state change lands in an append-only audit log.
               </p>
 
