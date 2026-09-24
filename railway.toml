@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Railway service config — WEB (Next.js app + REST API + IPN webhook)
+#
+# Point the *web* service at this file:
+#   Railway → service → Settings → Config-as-code → Config File Path
+#   = /railway.toml
+#
+# The realtime + bot runtime is a SEPARATE service using Dockerfile.worker and
+# `railway.worker.toml`. Do not merge them: the bot takes a Redis singleton lock
+# and must be exactly one replica, while the web tier can scale freely.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Migrations run BEFORE the server accepts traffic, so a deploy can never serve
+# a new build against an old schema. `migrate deploy` is idempotent and takes
+# ~1s when there is nothing to apply, so paying it on every boot is cheap
+# insurance. The Prisma CLI is present in this image (see Dockerfile, runner
+# stage) which is what makes this possible without a separate migrate service.
+startCommand = "npx prisma migrate deploy && npm start"
+
+# Railway waits for this to return 2xx before switching traffic to the new
+# deployment. `/api/v1/health` answers 503 while Postgres or Redis is
+# unreachable, so a broken deploy is never promoted.
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 120
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

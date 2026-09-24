@@ -278,10 +278,52 @@ export function isAuthFailure(err: unknown): boolean {
   return /unauth/i.test(message);
 }
 
+/**
+ * Is the configured socket runtime on a DIFFERENT origin than this page?
+ *
+ * This matters because the access cookie is host-only and `SameSite=Lax`: when
+ * the realtime runtime lives on its own host (the normal shape on Railway,
+ * where each service gets its own domain) the browser will NOT attach it to the
+ * handshake. Same-origin deployments behind a reverse proxy do send it, so the
+ * cookie stays the preferred path there.
+ */
+function isCrossOriginRuntime(): boolean {
+  const baseUrl = process.env.NEXT_PUBLIC_WS_URL;
+  if (!baseUrl || typeof window === 'undefined') return false;
+  try {
+    return new URL(baseUrl, window.location.href).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/** Shared in-flight fetch so parallel handshake attempts make one request. */
+let tokenRequest: Promise<string | null> | null = null;
+
+/**
+ * Get a token for the NEXT handshake, fetching if the cached one is gone.
+ *
+ * Deliberately re-fetches rather than caching indefinitely: the socket token is
+ * short-lived (60s by design) and the auth callback runs again on every
+ * reconnect, so reusing an expired token would put the socket into a
+ * permanent reconnect loop.
+ */
+async function ensureSocketToken(): Promise<string | null> {
+  const cached = liveToken();
+  if (cached) return cached;
+  tokenRequest ??= fetchSocketToken().finally(() => {
+    tokenRequest = null;
+  });
+  return tokenRequest;
+}
+
 /* ─────────────────────────────── connect ─────────────────────────────── */
 
 export interface CreateTradingSocketOptions {
-  /** Pre-fetched socket token; omit to use the httpOnly cookie. */
+  /**
+   * Pre-fetched socket token. Ignored when the runtime is same-origin, where the
+   * httpOnly cookie authenticates the handshake instead.
+   */
   token?: string | null;
   autoConnect?: boolean;
 }
@@ -294,8 +336,12 @@ export interface CreateTradingSocketOptions {
  *                               maps `/ws/socket.io` to the runtime.
  *
  * `withCredentials: true` is what makes the httpOnly access cookie travel with
- * the handshake; the server reads it from `handshake.headers.cookie`. The auth
- * callback therefore sends `{}` unless a fallback token was fetched.
+ * the handshake; the server reads it from `handshake.headers.cookie`.
+ *
+ * When `NEXT_PUBLIC_WS_URL` points at a DIFFERENT origin (separate realtime
+ * host, as on Railway) that cookie will not be sent, so the client fetches a
+ * short-lived socket token and presents it as `handshake.auth.token` instead.
+ * Same-origin deployments keep using the cookie.
  *
  * Returns null during SSR (there is no socket on the server).
  */
@@ -310,6 +356,7 @@ export function createTradingSocket(options: CreateTradingSocketOptions = {}): T
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_WS_URL;
+  const crossOrigin = isCrossOriginRuntime();
 
   return runtime(baseUrl ? `${baseUrl}${TRADING_SOCKET_NAMESPACE}` : TRADING_SOCKET_NAMESPACE, {
     path: TRADING_SOCKET_PATH,
@@ -318,8 +365,12 @@ export function createTradingSocket(options: CreateTradingSocketOptions = {}): T
     transports: ['polling', 'websocket'],
     withCredentials: true,
     auth: (cb: (data: object) => void) => {
+      // `auth` runs on every (re)connection attempt, so this is also where an
+      // expired token gets replaced.
       const token = liveToken();
-      cb(token ? { token } : {});
+      if (token) return cb({ token });
+      if (!crossOrigin) return cb({}); // cookie-path deployment
+      void ensureSocketToken().then((fresh) => cb(fresh ? { token: fresh } : {}));
     },
     reconnection: true,
     reconnectionDelay: 500,

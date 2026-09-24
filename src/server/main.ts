@@ -285,16 +285,20 @@ const RUNTIME_SPECS: RuntimeSpec[] = [
     starters: ['startBotRuntime'],
     stoppers: ['stopBotRuntime'],
   },
-  {
-    name: 'broker-sync',
-    modules: [
-      'src/server/modules/broker/broker.sync.ts',
-      'src/server/modules/broker/broker-sync.ts',
-      'dist/server/modules/broker/broker.sync.js',
-    ],
-    starters: ['startBrokerSync', 'startBrokerSyncWorker'],
-    stoppers: ['stopBrokerSync', 'stopBrokerSyncWorker'],
-  },
+  // There is deliberately NO standalone 'broker-sync' runtime registered here.
+  //
+  // `broker.sync.ts` exports `runSyncCycle()` — a ONE-SHOT tick, not a loop — and
+  // `bot.runtime.ts` calls it unconditionally at the top of every cycle. Broker
+  // balances, positions and deal closures therefore sync on
+  // `METAAPI_SYNC_INTERVAL` for as long as the bot runtime is alive, including
+  // when zero strategies are enabled. That is the intended ownership.
+  //
+  // Registering a second, independent sync loop here would run two writers
+  // against the same `TradeRecord`/`Investment` rows on the same cadence and
+  // race the bot, so it is not done. If sync ever needs to survive a stopped bot
+  // runtime, add a `startBrokerSync()` to `broker.sync.ts` behind the SAME
+  // single-writer Redis lock pattern used by `bot.runtime.ts` (SET NX + TTL +
+  // renew + release-if-owned) and list it here — do not just wrap the tick.
 ];
 
 interface ModuleLoadFailure {
@@ -416,6 +420,17 @@ async function closeRedisClients(): Promise<void> {
 
 /* ───────────────────────────── boot ─────────────────────────────── */
 
+/**
+ * Port to bind. Prefers the platform-injected `PORT`, then the configured
+ * `WS_PORT`. An unparseable value is ignored rather than crashing — a bad
+ * `PORT` should not take the realtime tier down outright.
+ */
+function resolveListenPort(env: ServerEnv): number {
+  const injected = Number(process.env.PORT);
+  if (Number.isInteger(injected) && injected > 0 && injected < 65536) return injected;
+  return env.WS_PORT;
+}
+
 async function main(): Promise<void> {
   loadDotEnv();
 
@@ -485,10 +500,18 @@ async function main(): Promise<void> {
   });
   await sockets.ready;
 
-  await listen(httpServer, env.WS_PORT, host);
+  // Managed hosts (Railway, Render, Fly, Heroku) inject the port to bind as
+  // `PORT` and route the public domain to it — ignoring it means the service is
+  // unreachable on the platform's edge. `WS_PORT` remains the local/default
+  // fallback so the documented `npm run dev:ws` behaviour is unchanged.
+  const port = resolveListenPort(env);
+  await listen(httpServer, port, host);
   console.log(
-    `[ws] listening on http://${host}:${env.WS_PORT} — namespace ${TRADING_NAMESPACE}, ` +
+    `[ws] listening on http://${host}:${port} — namespace ${TRADING_NAMESPACE}, ` +
       `path ${DEFAULT_SOCKET_PATH} (${env.NODE_ENV})`,
+  );
+  console.log(
+    `[ws] broker sync is driven by the bot runtime cycle (every ${env.METAAPI_SYNC_INTERVAL}s), not a separate loop.`,
   );
 
   // 4. Runtimes start only once sockets are reachable, so the first activity

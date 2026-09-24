@@ -237,11 +237,24 @@ is safe in CI without infrastructure; when Postgres and Redis are present they r
 
 ## Deployment
 
-See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the full runbook (environment table, secret
-generation, S3/NOWPayments/MetaApi setup, TLS, the required WebSocket proxy rule,
-backups and rollback), **[SECURITY.md](./SECURITY.md)** for the security posture and an
-honest list of what is not yet hardened, and `docker-compose.yml` + `deploy/nginx/` for a
-reference stack.
+**Railway (fastest path to live):** see **[RAILWAY.md](./RAILWAY.md)** — a step-by-step
+runbook for the two services, the managed Postgres/Redis, the exact variable table, and
+the cross-origin realtime wiring.
+
+**Self-hosted / Docker:** **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the full runbook
+(environment table, secret generation, S3/NOWPayments/MetaApi setup, TLS, the required
+WebSocket proxy rule, backups and rollback), **[SECURITY.md](./SECURITY.md)** for the
+security posture and an honest list of what is not yet hardened, and `docker-compose.yml`
++ `deploy/nginx/` for a reference stack.
+
+Two deployment invariants that bite in production:
+
+- **`NEXT_PUBLIC_WS_URL` is inlined at build time.** Changing it requires a **rebuild**,
+  not a restart.
+- **The realtime runtime must be reachable from the browser.** Behind one origin, the
+  proxy must carry the WebSocket upgrade on `/ws/*`. On separate origins (Railway),
+  the client detects the cross-origin runtime and authenticates the handshake with a
+  short-lived token instead of the host-only cookie — no proxy needed.
 
 ---
 

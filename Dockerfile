@@ -111,6 +111,14 @@ RUN npm prune --omit=dev && npm cache clean --force
 COPY --from=deps /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma
 
+# The Prisma CLI is a devDependency, so the prune above removes it — but the
+# container applies migrations on boot (`prisma migrate deploy` in the start
+# command, see railway.toml). Re-add it here so this image is self-sufficient
+# and needs no separate migration service. It is only the CLI; the generated
+# client and its engines came from `deps` and are untouched.
+RUN npm install --no-save --no-audit --no-fund prisma@5.22.0 \
+ && npm cache clean --force
+
 COPY --from=builder --chown=node:node /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
@@ -127,8 +135,12 @@ EXPOSE 3000
 # Liveness probe: the public marketing page (`GET /`). It does not touch the
 # database on a healthy deployment — DB/Redis readiness is probed by the worker
 # (`GET /healthz`) and by Postgres/Redis' own healthchecks in docker-compose.
+# Uses the *bound* port: managed platforms (Railway, Render) inject PORT and
+# the app binds to it, so a hardcoded 3000 here would report unhealthy on a
+# perfectly working deployment. `/api/v1/health` answers 503 while Postgres or
+# Redis is unreachable, and busybox wget exits non-zero on a 5xx.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:3000/ > /dev/null 2>&1 || exit 1
+    CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/v1/health" > /dev/null 2>&1 || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["npm", "start"]
