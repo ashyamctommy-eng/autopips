@@ -117,3 +117,36 @@ export const WS_EVENTS = {
   brokerStatus: 'broker:status',
   error: 'server:error',
 } as const;
+
+/* ─────────────────────────── market data rooms ─────────────────────────── */
+
+/**
+ * Socket room prefix for a watched instrument's live quote feed.
+ *
+ * Ticks themselves are published namespace-wide (a tick is public,
+ * symbol-scoped market data and carries nothing account-specific) — this room is
+ * the DEMAND SIGNAL: joining it tells the socket runtime to ask the broker
+ * terminal to start streaming that symbol, and leaving it releases the upstream
+ * subscription. See `src/server/modules/market/market-stream.service.ts`.
+ */
+export const MARKET_ROOM_PREFIX = 'market:';
+
+/** Symbols a client may watch: letters, digits and common broker separators. */
+export const MARKET_SYMBOL_PATTERN = /^[A-Z0-9._#+-]{2,24}$/;
+
+/** Normalise user input to a broker symbol, or null when it is not one. */
+export function normaliseMarketSymbol(input: string): string | null {
+  const symbol = input.trim().toUpperCase();
+  return MARKET_SYMBOL_PATTERN.test(symbol) ? symbol : null;
+}
+
+/** Room name for a symbol's live feed. */
+export function marketRoom(symbol: string): string {
+  return `${MARKET_ROOM_PREFIX}${symbol}`;
+}
+
+/** Symbol carried by a market room name, or null when `room` is not one. */
+export function parseMarketRoom(room: string): string | null {
+  if (!room.startsWith(MARKET_ROOM_PREFIX)) return null;
+  return normaliseMarketSymbol(room.slice(MARKET_ROOM_PREFIX.length));
+}

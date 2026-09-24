@@ -314,10 +314,8 @@ class MetaApiSyncListener extends SynchronizationListener {
   }
 
   override async onSymbolPriceUpdated(_instanceIndex: string, price: MetatraderSymbolPrice): Promise<void> {
-    if (!isFiniteNumber(price.bid) || !isFiniteNumber(price.ask)) return;
-    const time = toUnixSeconds(price.time);
-    if (time === null) return;
-    const quote: Quote = { symbol: price.symbol, bid: price.bid, ask: price.ask, time };
+    const quote = toQuote(price);
+    if (!quote) return;
     await this.safe('onQuote', () => this.opts.handlers.onQuote?.(quote) ?? undefined);
   }
 
@@ -345,6 +343,24 @@ class MetaApiSyncListener extends SynchronizationListener {
   }
 }
 
+/**
+ * Map a broker symbol price onto the wire `Quote` shape.
+ *
+ * Returns null when the broker did not report both sides or a usable time: a
+ * one-sided or undated price is not publishable as a tick, and inventing the
+ * missing half (mid, previous close, …) is exactly the fabrication this
+ * platform forbids.
+ */
+function toQuote(price: MetatraderSymbolPrice): Quote | null {
+  if (!isFiniteNumber(price.bid) || !isFiniteNumber(price.ask)) return null;
+  const time = toUnixSeconds(price.time);
+  if (time === null) return null;
+  return { symbol: price.symbol, bid: price.bid, ask: price.ask, time };
+}
+
+/** Broker-side quote cadence for a subscribed symbol: one quote per second. */
+const QUOTE_STREAM_INTERVAL_MS = 1000;
+
 export class MetaApiBrokerAdapter implements BrokerAdapter {
   /** Symbol-spec cache TTL. Specs change rarely; quotes and P/L are never cached. */
   private static readonly SPEC_CACHE_TTL_MS = 60_000;
@@ -358,6 +374,8 @@ export class MetaApiBrokerAdapter implements BrokerAdapter {
   private rpc: RpcMetaApiConnectionInstance | null = null;
   private streaming: StreamingMetaApiConnectionInstance | null = null;
   private listener: MetaApiSyncListener | null = null;
+  /** Symbols this adapter currently streams quotes for (upstream subscriptions). */
+  private readonly marketDataSymbols = new Set<string>();
   private handlers: BrokerEventHandlers = {};
   private connected = false;
   private connecting: Promise<void> | null = null;
@@ -430,6 +448,8 @@ export class MetaApiBrokerAdapter implements BrokerAdapter {
 
   async disconnect(): Promise<void> {
     this.connected = false;
+    // Streaming subscriptions live on the connection: dropping it drops them.
+    this.marketDataSymbols.clear();
     const streaming = this.streaming;
     const rpc = this.rpc;
     const listener = this.listener;
@@ -806,6 +826,50 @@ export class MetaApiBrokerAdapter implements BrokerAdapter {
    * Symbol specification. CACHED for `SPEC_CACHE_TTL_MS` (specs only) — nothing else
    * in this adapter is cached, and no cache is ever used to supply a price or P/L.
    */
+  /**
+   * Stream quotes for `symbol` (MetaApi `connection.subscribeToMarketData`).
+   *
+   * `{ type: 'quotes' }` is what drives `onSymbolPriceUpdated` on the listener
+   * bound to this streaming connection, which is what publishes `price:tick`.
+   * The interval is the broker-side cadence; kept at one quote/second, which is
+   * chart-granular without turning the terminal into a firehose.
+   */
+  async subscribeToMarketData(symbol: string): Promise<Quote | null> {
+    const streaming = this.streaming;
+    if (!streaming || !this.connected) {
+      throw ApiError.brokerUnavailable('MetaApi connection is not established for this account.');
+    }
+
+    const price: MetatraderSymbolPrice = await streaming.subscribeToMarketData(
+      symbol,
+      [{ type: 'quotes', intervalInMilliseconds: QUOTE_STREAM_INTERVAL_MS }],
+      this.config.terminalTimeout,
+    );
+    this.marketDataSymbols.add(symbol);
+
+    return toQuote(price);
+  }
+
+  async unsubscribeFromMarketData(symbol: string): Promise<void> {
+    this.marketDataSymbols.delete(symbol);
+    const streaming = this.streaming;
+    if (!streaming || !this.connected) return;
+    try {
+      await streaming.unsubscribeFromMarketData(symbol, [{ type: 'quotes' }]);
+    } catch (err) {
+      // Best-effort: the subscription disappears with the connection, and a
+      // failure here must never propagate into a client-facing request.
+      console.warn(
+        `[metaapi.adapter] could not unsubscribe ${symbol}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  /** Symbols currently streamed by this adapter (observability / admin). */
+  streamedSymbols(): string[] {
+    return Array.from(this.marketDataSymbols).sort();
+  }
+
   async getSymbolSpec(symbol: string): Promise<SymbolSpec | null> {
     const cached = this.specCache.get(symbol);
     if (cached && cached.expiresAt > Date.now()) return cached.spec;

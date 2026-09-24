@@ -24,7 +24,7 @@ import { Server as SocketIoServer, type Namespace, type Socket } from 'socket.io
 import { z } from 'zod';
 import type { Role } from '@prisma/client';
 
-import { WS_EVENTS } from '@/lib/contracts';
+import { MARKET_ROOM_PREFIX, WS_EVENTS, parseMarketRoom } from '@/lib/contracts';
 import { prisma } from '@/lib/prisma';
 import { redisSub } from '@/lib/redis';
 import {
@@ -42,6 +42,11 @@ import {
   userRoom,
   type WsEnvelope,
 } from './event-bus';
+import {
+  acquireMarketSymbol,
+  releaseMarketSymbol,
+  reattachMarketSubscriptions,
+} from '@/server/modules/market/market-stream.service';
 
 /** The namespace path is part of the wire contract — do not change it. */
 export const TRADING_NAMESPACE = '/ws/trading';
@@ -58,6 +63,16 @@ export const MESSAGE_RATE_LIMIT = { max: 30, windowMs: 10_000 } as const;
 
 /** Hard cap on simultaneously joined investment rooms per socket. */
 const MAX_JOINED_ROOMS = 20;
+
+/**
+ * Hard cap on simultaneously WATCHED symbols per socket.
+ *
+ * Each market room costs one upstream broker subscription, so this is the
+ * per-connection share of `MAX_STREAMED_SYMBOLS` in the market-stream service.
+ * A dashboard charts a handful of instruments; a client asking for dozens is
+ * either broken or abusive.
+ */
+const MAX_MARKET_ROOMS = 4;
 
 /** Heartbeat tuned for a trading UI: a dead tab is noticed in ~45s worst case. */
 const DEFAULT_PING_INTERVAL_MS = 20_000;
@@ -86,6 +101,12 @@ export interface SocketData {
   auth: SocketAuth;
   /** room -> allowed. Populated once, at subscribe time. */
   subscriptions: Map<string, boolean>;
+  /**
+   * Market rooms this socket holds. Tracked explicitly because the upstream
+   * broker subscription must be released on disconnect, and socket.io has
+   * already dropped the socket's rooms by the time `disconnect` fires.
+   */
+  marketRooms: Set<string>;
   messageWindow: MessageWindow;
 }
 
@@ -239,7 +260,13 @@ async function authorizeRoom(socket: TradingSocket, room: string): Promise<boole
 
   let allowed = false;
 
-  if (room.startsWith('trading:')) {
+  if (room.startsWith(MARKET_ROOM_PREFIX)) {
+    // A market room carries no account data: the tick feed is namespace-wide
+    // public market data, and the room only signals demand for that symbol.
+    // Nothing to authorize beyond "is this a real symbol name", so any
+    // authenticated socket may ask — and the per-socket cap bounds the cost.
+    allowed = parseMarketRoom(room) !== null;
+  } else if (room.startsWith('trading:')) {
     const investmentId = room.slice('trading:'.length);
     if (!investmentId) {
       allowed = false;
@@ -266,7 +293,7 @@ async function authorizeRoom(socket: TradingSocket, room: string): Promise<boole
 
 function emitSocketError(
   socket: TradingSocket,
-  code: 'BAD_REQUEST' | 'FORBIDDEN' | 'RATE_LIMITED',
+  code: 'BAD_REQUEST' | 'FORBIDDEN' | 'RATE_LIMITED' | 'UNAVAILABLE',
   message: string,
   action: string,
   room?: string,
@@ -331,6 +358,7 @@ export function createTradingSocketServer(
         const auth = await authenticateSocket(socket);
         socket.data.auth = auth;
         socket.data.subscriptions = new Map<string, boolean>();
+        socket.data.marketRooms = new Set<string>();
         socket.data.messageWindow = { startedAt: Date.now(), count: 0 };
         next();
       } catch (err) {
@@ -347,7 +375,15 @@ export function createTradingSocketServer(
   let lastBrokerStatus: unknown = null;
 
   function emitToRooms(env: WsEnvelope): void {
-    if (env.event === WS_EVENTS.brokerStatus) lastBrokerStatus = env.payload;
+    if (env.event === WS_EVENTS.brokerStatus) {
+      lastBrokerStatus = env.payload;
+      const payload = env.payload as { connected?: unknown } | null;
+      if (payload && payload.connected === true) {
+        // MetaApi drops market-data subscriptions with the connection, so a
+        // reconnect must re-issue them or the charts silently freeze.
+        void reattachMarketSubscriptions();
+      }
+    }
     if (env.rooms.length === 0) {
       // No target rooms -> namespace-wide (used by price ticks).
       namespace.emit(env.event, env.payload);
@@ -449,6 +485,33 @@ export function createTradingSocketServer(
           return;
         }
 
+        const marketSymbol = parseMarketRoom(room);
+        if (marketSymbol) {
+          if (socket.data.marketRooms.size >= MAX_MARKET_ROOMS) {
+            emitSocketError(socket, 'FORBIDDEN', 'Market room limit reached.', 'subscribe', room);
+            if (typeof ack === 'function') (ack as (r: unknown) => void)({ ok: false, code: 'FORBIDDEN', room });
+            return;
+          }
+          await socket.join(room);
+          socket.data.marketRooms.add(room);
+
+          // Ask the broker terminal to start streaming this symbol. A refusal is
+          // NOT a failed subscription: the client keeps its REST candles and the
+          // chart shows its empty live state, but it is told why.
+          const streaming = await acquireMarketSymbol(marketSymbol);
+          if (!streaming) {
+            emitSocketError(
+              socket,
+              'UNAVAILABLE',
+              `No live broker feed for ${marketSymbol} right now.`,
+              'subscribe',
+              room,
+            );
+          }
+          if (typeof ack === 'function') (ack as (r: unknown) => void)({ ok: true, room, live: streaming });
+          return;
+        }
+
         await socket.join(room);
         if (typeof ack === 'function') (ack as (r: unknown) => void)({ ok: true, room });
       })();
@@ -480,12 +543,29 @@ export function createTradingSocketServer(
 
         socket.data.subscriptions.delete(room);
         await socket.leave(room);
+
+        const marketSymbol = parseMarketRoom(room);
+        if (marketSymbol && socket.data.marketRooms.delete(room)) {
+          // Last listener for this symbol releases the upstream subscription.
+          await releaseMarketSymbol(marketSymbol);
+        }
+
         if (typeof ack === 'function') (ack as (r: unknown) => void)({ ok: true, room });
       })();
     });
 
     socket.on('disconnect', (reason: unknown) => {
       console.log(`[ws] -${socket.id} (${String(reason)}) sockets=${namespace.sockets.size}`);
+
+      // A closed tab must not keep an upstream broker subscription alive.
+      const held = Array.from(socket.data.marketRooms ?? []);
+      socket.data.marketRooms?.clear();
+      void (async () => {
+        for (const room of held) {
+          const symbol = parseMarketRoom(room);
+          if (symbol) await releaseMarketSymbol(symbol);
+        }
+      })();
     });
   });
 

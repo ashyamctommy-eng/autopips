@@ -162,6 +162,25 @@ export interface BrokerAdapter {
   getQuote(symbol: string): Promise<Quote | null>;
   getSymbolSpec(symbol: string): Promise<SymbolSpec | null>;
 
+  /**
+   * Ask the broker terminal to STREAM quotes for a symbol, so
+   * `BrokerEventHandlers.onQuote` starts firing for it.
+   *
+   * This is the difference between a chart that renders once and a chart that
+   * moves: a MetaApi streaming connection only delivers prices for symbols it
+   * has been told to stream (or that the account holds a position in), so
+   * without this call `onQuote` never fires for a symbol the account is merely
+   * *watching*.
+   *
+   * Returns the price the broker reported at subscription time (the call
+   * answers with the current quote), or null when there was nothing usable to
+   * report yet. Idempotent: subscribing twice costs one upstream subscription.
+   */
+  subscribeToMarketData(symbol: string): Promise<Quote | null>;
+
+  /** Stop streaming quotes for a symbol. Best-effort — closing the connection also releases it. */
+  unsubscribeFromMarketData(symbol: string): Promise<void>;
+
   placeOrder(request: PlaceOrderRequest): Promise<PlaceOrderResult>;
   closePosition(positionId: string, volume?: number): Promise<ClosePositionResult>;
 }
