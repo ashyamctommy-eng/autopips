@@ -3,7 +3,11 @@
 import * as React from 'react';
 import { RefreshCw, Wifi } from 'lucide-react';
 
-import { CandlestickChart } from '@/components/charts/candlestick-chart';
+import {
+  CandlestickChart,
+  OVERLAY_COLORS,
+  type ChartPriceLine,
+} from '@/components/charts/candlestick-chart';
 import { LiveDot, type LiveDotState } from '@/components/shared/live-dot';
 import { SignedUsd, Usd } from '@/components/shared/money';
 import { StatusBadge } from '@/components/shared/status-badge';
@@ -20,11 +24,12 @@ import {
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { useTradingSocket, type TradingSocketStatus } from '@/hooks/use-trading-socket';
-import { tickMid } from '@/lib/socket-client';
+import { applyPositionUpdate, tickMid } from '@/lib/socket-client';
+import { mergeTickIntoSeries } from '@/lib/candle-aggregator';
 import { formatUsd } from '@/lib/money';
 import { relativeTime } from '@/lib/utils';
 import type { Candle } from '@/server/modules/broker/broker.types';
-import type { InvestmentStatusValue } from '@/types/api';
+import type { InvestmentStatusValue, PositionDTO } from '@/types/api';
 
 /**
  * Live trading screen (client component).
@@ -55,6 +60,12 @@ export interface TradingPanelProps {
   instruments: string[];
   /** Investment whose realtime room this panel subscribes to (may be null). */
   investmentId: string | null;
+  /**
+   * Open positions as hydrated by the server, used for the chart's entry / stop
+   * / target overlay. Live deltas from the socket are folded on top, so a moved
+   * stop is drawn where the broker says it is now.
+   */
+  initialPositions: PositionDTO[];
 }
 
 type CandleSource = 'broker' | 'none' | 'unavailable';
@@ -156,7 +167,12 @@ const priceFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 5,
 });
 
-export function TradingPanel({ investments, instruments, investmentId }: TradingPanelProps) {
+export function TradingPanel({
+  investments,
+  instruments,
+  investmentId,
+  initialPositions,
+}: TradingPanelProps) {
   const [roomId, setRoomId] = React.useState<string | null>(investmentId);
   const [symbol, setSymbol] = React.useState<string | null>(instruments[0] ?? null);
   const [timeframe, setTimeframe] = React.useState<string>(TIMEFRAME_OPTIONS[4]);
@@ -166,9 +182,12 @@ export function TradingPanel({ investments, instruments, investmentId }: Trading
   const [isLoading, setIsLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const { status, brokerStatus, ticks, investmentEquity } = useTradingSocket({
+  // The connection is wanted when there is either a room to mirror (position
+  // deltas, equity) or a symbol to watch (live ticks for the chart).
+  const { status, brokerStatus, ticks, investmentEquity, positionUpdates } = useTradingSocket({
     investmentId: roomId,
-    enabled: Boolean(roomId),
+    marketSymbol: symbol,
+    enabled: Boolean(roomId || symbol),
   });
 
   const loadCandles = React.useCallback(
@@ -234,6 +253,63 @@ export function TradingPanel({ investments, instruments, investmentId }: Trading
   const brokerCurrency = brokerStatus?.currency ?? 'account currency';
   const tick = symbol ? ticks[symbol] : undefined;
   const mid = tick ? tickMid(tick) : null;
+
+  /**
+   * The chart's current bar, updated from streamed broker ticks between REST
+   * refreshes. `mergeTickIntoSeries` returns the array unchanged when a tick
+   * carries nothing usable, so a duplicate quote costs no render.
+   */
+  const liveCandles = React.useMemo(() => {
+    if (!symbol) return candles;
+    const latest = ticks[symbol];
+    if (!latest) return candles;
+    return mergeTickIntoSeries(candles, latest, timeframe);
+  }, [candles, ticks, symbol, timeframe]);
+
+  /**
+   * Order overlay for the charted instrument: this account's open positions,
+   * with live deltas applied. Only levels the broker actually reported are
+   * drawn — a position without a stop has no stop line.
+   */
+  const chartedPositions = React.useMemo(() => {
+    if (!symbol) return [];
+    return initialPositions
+      .filter((position) => position.status === 'OPEN' && position.instrument === symbol)
+      .map((position) => {
+        const update = positionUpdates[position.id];
+        return update ? applyPositionUpdate(position, update) : position;
+      });
+  }, [initialPositions, positionUpdates, symbol]);
+
+  const priceLines = React.useMemo<ChartPriceLine[]>(() => {
+    const lines: ChartPriceLine[] = [];
+    for (const position of chartedPositions) {
+      lines.push({
+        price: position.entryPrice,
+        title: `${position.direction} ${position.volume}`,
+        color: OVERLAY_COLORS.entry,
+        lineStyle: 'solid',
+        lineWidth: 2,
+      });
+      if (typeof position.stopLoss === 'number') {
+        lines.push({
+          price: position.stopLoss,
+          title: 'Stop loss',
+          color: OVERLAY_COLORS.stop,
+          lineStyle: 'dashed',
+        });
+      }
+      if (typeof position.takeProfit === 'number') {
+        lines.push({
+          price: position.takeProfit,
+          title: 'Take profit',
+          color: OVERLAY_COLORS.target,
+          lineStyle: 'dashed',
+        });
+      }
+    }
+    return lines;
+  }, [chartedPositions]);
 
   const emptyMessage =
     source === 'none'
@@ -337,7 +413,8 @@ export function TradingPanel({ investments, instruments, investmentId }: Trading
           ) : null}
 
           <CandlestickChart
-            candles={candles}
+            candles={liveCandles}
+            priceLines={priceLines}
             symbol={symbol ?? undefined}
             timeframe={timeframe}
             isLoading={isLoading}

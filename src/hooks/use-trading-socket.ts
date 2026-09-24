@@ -25,7 +25,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { WS_EVENTS } from '@/lib/contracts';
+import { WS_EVENTS, marketRoom, normaliseMarketSymbol } from '@/lib/contracts';
 import {
   applyPositionUpdate,
   createTradingSocket,
@@ -54,6 +54,13 @@ export type TradingSocketStatus = 'idle' | 'connecting' | 'connected' | 'reconne
 export interface UseTradingSocketOptions {
   /** Investment room to mirror. Change it and the hook re-subscribes. */
   investmentId?: string | null;
+  /**
+   * Instrument whose live quotes this hook should demand from the broker
+   * terminal. Joining `market:<SYMBOL>` is what starts the upstream MetaApi
+   * subscription; leaving it (or disconnecting) releases it. Ticks themselves
+   * arrive on the namespace-wide `price:tick` event, filtered here by symbol.
+   */
+  marketSymbol?: string | null;
   /** Set false to keep the hook mounted without a connection (e.g. preview mode). */
   enabled?: boolean;
   /** Activity feed cap. Defaults to 100 entries. */
@@ -126,7 +133,12 @@ function withLifecycleStatus(
 }
 
 export function useTradingSocket(options: UseTradingSocketOptions = {}): UseTradingSocketResult {
-  const { investmentId = null, enabled = true, activityLimit = DEFAULT_ACTIVITY_LIMIT } = options;
+  const {
+    investmentId = null,
+    marketSymbol = null,
+    enabled = true,
+    activityLimit = DEFAULT_ACTIVITY_LIMIT,
+  } = options;
 
   const [socket, setSocket] = useState<TradingSocket | null>(null);
   const [status, setStatus] = useState<TradingSocketStatus>('idle');
@@ -330,6 +342,23 @@ export function useTradingSocket(options: UseTradingSocketOptions = {}): UseTrad
       setJoinedRooms((prev) => prev.filter((entry) => entry !== room));
     };
   }, [socket, status, investmentId]);
+
+  /* ────────────────────────── market room lifecycle ─────────────────────── */
+
+  useEffect(() => {
+    const active = socket;
+    const normalised = marketSymbol ? normaliseMarketSymbol(marketSymbol) : null;
+    if (!active || status !== 'connected' || !normalised) return;
+
+    const room = marketRoom(normalised);
+    active.emit(WS_EVENTS.subscribe, { room });
+    setJoinedRooms((prev) => (prev.includes(room) ? prev : [...prev, room]));
+
+    return () => {
+      if (active.connected) active.emit(WS_EVENTS.unsubscribe, { room });
+      setJoinedRooms((prev) => prev.filter((entry) => entry !== room));
+    };
+  }, [socket, status, marketSymbol]);
 
   /* ─────────────────────────────── actions ─────────────────────────────── */
 

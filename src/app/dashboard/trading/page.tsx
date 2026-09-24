@@ -91,6 +91,7 @@ export default async function DashboardTradingPage() {
         investments={panelInvestments}
         instruments={instruments}
         investmentId={activeInvestment?.id ?? null}
+        initialPositions={openPositions}
       />
 
       <div className="grid gap-4 lg:grid-cols-3">

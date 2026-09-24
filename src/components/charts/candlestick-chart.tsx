@@ -7,7 +7,9 @@ import {
   LineStyle,
   createChart,
   type CandlestickData,
+  type HistogramData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type UTCTimestamp,
 } from 'lightweight-charts';
@@ -37,7 +39,30 @@ const THEME = {
   wickUp: 'rgba(16,185,129,0.75)',
   wickDown: 'rgba(244,63,94,0.75)',
   accent: '#22D3EE',
+  volumeUp: 'rgba(16,185,129,0.45)',
+  volumeDown: 'rgba(244,63,94,0.45)',
 } as const;
+
+/**
+ * Order-overlay palette (brief: entry solid blue, stop dashed red, target
+ * dashed green). Kept next to the chart theme so the overlay cannot drift from
+ * the candles it is drawn over.
+ */
+export const OVERLAY_COLORS = {
+  entry: '#3B82F6',
+  stop: '#EF4444',
+  target: '#10B981',
+} as const;
+
+/** One horizontal level drawn across the chart. */
+export interface ChartPriceLine {
+  price: number;
+  title: string;
+  color: string;
+  lineStyle?: 'solid' | 'dashed';
+  lineWidth?: 1 | 2 | 3 | 4;
+  axisLabelVisible?: boolean;
+}
 
 export interface CandlestickChartProps {
   /**
@@ -50,6 +75,12 @@ export interface CandlestickChartProps {
   symbol?: string;
   timeframe?: string;
   className?: string;
+  /**
+   * Horizontal order levels (entry / stop loss / take profit). Non-finite
+   * prices are skipped — an order with no stop has no stop line, it does not
+   * get one drawn at zero.
+   */
+  priceLines?: ChartPriceLine[];
   /** Shows a spinner overlay while a fetch is in flight. */
   isLoading?: boolean;
   /** Override the "no data" copy. */
@@ -70,12 +101,15 @@ export function CandlestickChart({
   symbol,
   timeframe,
   className,
+  priceLines,
   isLoading = false,
   emptyMessage = 'No verified broker data for this instrument yet.',
 }: CandlestickChartProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const chartRef = React.useRef<IChartApi | null>(null);
   const seriesRef = React.useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = React.useRef<ISeriesApi<'Histogram'> | null>(null);
+  const priceLineRefs = React.useRef<IPriceLine[]>([]);
 
   /* Create + dispose the chart exactly once. */
   React.useEffect(() => {
@@ -109,6 +143,23 @@ export function CandlestickChart({
       handleScale: { mouseWheel: true, pinch: true },
     });
 
+    /*
+     * Volume histogram, added lazily and only ever fed real numbers.
+     *
+     * Broker history carries `tickVolume` for many instruments (see the adapter)
+     * and it is plotted as-is; bars built from streamed ticks have no volume at
+     * all, so they contribute nothing rather than a fabricated "1 trade" bar.
+     * The series is hidden entirely when the loaded history has no volumes.
+     */
+    const volume = chart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    volumeSeriesRef.current = volume;
+
     const series = chart.addCandlestickSeries({
       upColor: THEME.upColor,
       downColor: THEME.downColor,
@@ -134,6 +185,8 @@ export function CandlestickChart({
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      volumeSeriesRef.current = null;
+      priceLineRefs.current = [];
     };
     // `height` is applied in its own effect below, so re-creating the chart is
     // not required when only the size changes.
@@ -169,8 +222,59 @@ export function CandlestickChart({
       .sort((a, b) => (a.time as number) - (b.time as number));
 
     series.setData(data);
+
+    const volume = volumeSeriesRef.current;
+    if (volume) {
+      const volumes: HistogramData<UTCTimestamp>[] = candles
+        .filter(
+          (candle) =>
+            Number.isFinite(candle.time) &&
+            typeof candle.volume === 'number' &&
+            Number.isFinite(candle.volume),
+        )
+        .map((candle) => ({
+          time: candle.time as UTCTimestamp,
+          value: candle.volume as number,
+          color: candle.close >= candle.open ? THEME.volumeUp : THEME.volumeDown,
+        }))
+        .sort((a, b) => (a.time as number) - (b.time as number));
+
+      volume.setData(volumes);
+      // No broker volume for this series: hide the pane rather than draw zeros.
+      volume.applyOptions({ visible: volumes.length > 0 });
+    }
+
     if (data.length > 0) chartRef.current?.timeScale().fitContent();
   }, [candles]);
+
+  /* Draw the order overlay: entry / stop loss / take profit. */
+  React.useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    for (const line of priceLineRefs.current) {
+      try {
+        series.removePriceLine(line);
+      } catch {
+        // Chart already disposed (unmount race) — nothing left to remove.
+      }
+    }
+    priceLineRefs.current = [];
+
+    for (const spec of priceLines ?? []) {
+      if (!Number.isFinite(spec.price)) continue;
+      priceLineRefs.current.push(
+        series.createPriceLine({
+          price: spec.price,
+          color: spec.color,
+          lineWidth: spec.lineWidth ?? 1,
+          lineStyle: spec.lineStyle === 'dashed' ? LineStyle.Dashed : LineStyle.Solid,
+          axisLabelVisible: spec.axisLabelVisible ?? true,
+          title: spec.title,
+        }),
+      );
+    }
+  }, [priceLines]);
 
   const hasData = candles.length > 0;
 
