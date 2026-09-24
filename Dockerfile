@@ -125,6 +125,12 @@ COPY --from=builder /app/next.config.mjs ./next.config.mjs
 # The schema is not needed to *run* a generated client, but keeping it makes the
 # image self-describing for `prisma migrate deploy` debugging on the host.
 COPY --from=builder /app/prisma ./prisma
+# Migration gate + one-time admin bootstrap. `--chown=node:node` because the
+# runner drops to the unprivileged `node` user and both must be executable/readable
+# there. The Prisma CLI these need is installed above (see the npm install).
+COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
+COPY --chown=node:node scripts ./scripts
+RUN chmod +x ./docker-entrypoint.sh
 
 # Non-root. The `node` user (uid 1000) ships with the official image.
 RUN mkdir -p /app/.next/cache && chown -R node:node /app
@@ -142,5 +148,8 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/v1/health" > /dev/null 2>&1 || exit 1
 
-ENTRYPOINT ["dumb-init", "--"]
+# The entrypoint runs `prisma migrate deploy` BEFORE the server accepts traffic
+# (and exits non-zero if it fails), so no replica can ever serve against an
+# un-migrated schema — see docker-entrypoint.sh for the incident this prevents.
+ENTRYPOINT ["dumb-init", "--", "/app/docker-entrypoint.sh"]
 CMD ["npm", "start"]

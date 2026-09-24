@@ -20,7 +20,18 @@ dockerfilePath = "Dockerfile"
 # ~1s when there is nothing to apply, so paying it on every boot is cheap
 # insurance. The Prisma CLI is present in this image (see Dockerfile, runner
 # stage) which is what makes this possible without a separate migrate service.
-startCommand = "npx prisma migrate deploy && npm start"
+#
+# TWO GATES, on purpose (2026-09-24 incident): a config-as-code file is a
+# PLATFORM setting — if Railway does not pick this file up (Config File Path
+# unset, Railpack instead of the Dockerfile, a service created before the file
+# existed), the old single-gate arrangement silently ran `npm start` against an
+# empty database and served a 500 on every page. So:
+#   1. `preDeployCommand` below runs before the new container is promoted, and a
+#      failure FAILS the deployment instead of shipping it;
+#   2. the image entrypoint (docker-entrypoint.sh) migrates on boot regardless of
+#      what Railway is configured to do — that one cannot be skipped.
+preDeployCommand = ["npx prisma migrate deploy"]
+startCommand = "npm start"
 
 # Railway waits for this to return 2xx before switching traffic to the new
 # deployment. `/api/v1/health` answers 503 while Postgres or Redis is
