@@ -115,6 +115,11 @@ export const WS_EVENTS = {
   equity: 'account:equity',
   activity: 'bot:activity',
   brokerStatus: 'broker:status',
+  /**
+   * Platform-wide operating state (kill switch, effective risk limits). Emitted
+   * to the `admin` room only — it is an operator signal, not client data.
+   */
+  systemStatus: 'admin:system_status',
   error: 'server:error',
 } as const;
 

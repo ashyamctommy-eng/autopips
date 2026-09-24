@@ -279,6 +279,9 @@ export interface BrokerAdapter {
   getQuote(symbol: string): Promise<Quote | null>;
   getInstrumentInfo(symbol: string): Promise<InstrumentInfo | null>;
 
+  /** Every instrument the broker currently offers. */
+  listInstruments(): Promise<InstrumentInfo[]>;
+
   /** Whether the broker currently accepts orders for this instrument. */
   isSymbolTradable(symbol: string): Promise<boolean | null>;
 

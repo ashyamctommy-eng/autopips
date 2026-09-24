@@ -544,6 +544,7 @@ const ACTIVITY_TEMPLATES: Record<AuditAction, ActivityTemplate> = {
   PLAN_DEACTIVATED: always('Investment plan deactivated', 'warning'),
   ADMIN_USER_ROLE_CHANGED: always('Account role changed', 'warning'),
   ADMIN_SETTINGS_UPDATED: always('Platform settings updated', 'info'),
+  ADMIN_TRADE_FORCE_CLOSED: always('Trade force-closed by an operator', 'warning'),
 };
 
 function templateFor(action: string): ActivityTemplate {

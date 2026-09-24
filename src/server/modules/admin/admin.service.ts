@@ -23,13 +23,19 @@ import {
 } from '@/server/accounting/ledger';
 import { getPlatformTradingStats, getStrategyStats } from '@/server/accounting/strategy-stats';
 import { AUDIT, listAudit, recordAudit } from '@/server/modules/audit/audit.service';
+import { getBotControlState } from '@/server/modules/bot/bot-control.service';
 import {
   ensureBrokerConnected,
   getAdapterForConnection,
   listBrokerConnections,
   updateBrokerSnapshot,
 } from '@/server/modules/broker/broker.registry';
-import { syncBrokerConnection, type SyncSummary } from '@/server/modules/broker/broker.sync';
+import {
+  applyPositionClosure,
+  supportsPositionClosure,
+  syncBrokerConnection,
+  type SyncSummary,
+} from '@/server/modules/broker/broker.sync';
 import { planInputSchema, planUpdateSchema, type PlanInput, type PlanUpdateInput } from './plan-validation';
 
 /**
@@ -958,6 +964,186 @@ function toActivityEvent(row: AuditRow): ActivityEventDTO {
 }
 
 /** Platform-wide recent audit events, newest first (the admin activity feed). */
+/**
+ * Turn a user's bot on or off for every investment they hold.
+ *
+ * The platform's per-user control IS the investment status: `PAUSED` means the
+ * strategy engine may not open new positions for that investment, which is
+ * exactly what "disable this user's bot" means. Only ACTIVE <-> PAUSED rows are
+ * touched — a MATURED/CLOSED/CANCELLED investment has already settled and is
+ * never re-opened by an operator toggle.
+ *
+ * Returns what actually changed, so the console can say "3 paused, 1 skipped"
+ * instead of claiming a blanket success.
+ */
+export async function setUserBotEnabled(input: {
+  userId: string;
+  enabled: boolean;
+  actorId: string;
+  ip: string | null;
+}): Promise<{ changed: number; skipped: number; investmentIds: string[] }> {
+  const from = input.enabled ? 'PAUSED' : 'ACTIVE';
+  const to = input.enabled ? 'ACTIVE' : 'PAUSED';
+
+  const affected = await prisma.investment.findMany({
+    where: { userId: input.userId, status: from },
+    select: { id: true },
+  });
+
+  const skipped = await prisma.investment.count({
+    where: {
+      userId: input.userId,
+      status: { notIn: ['ACTIVE', 'PAUSED'] },
+    },
+  });
+
+  for (const investment of affected) {
+    await prisma.investment.update({
+      where: { id: investment.id },
+      data: { status: to },
+    });
+    await recordAudit({
+      action: input.enabled ? AUDIT.INVESTMENT_ACTIVATED : AUDIT.INVESTMENT_PAUSED,
+      userId: input.actorId,
+      ipAddress: input.ip,
+      details: {
+        investmentId: investment.id,
+        clientUserId: input.userId,
+        source: 'admin_bot_toggle',
+        status: to,
+      },
+    });
+  }
+
+  return {
+    changed: affected.length,
+    skipped,
+    investmentIds: affected.map((investment) => investment.id),
+  };
+}
+
+/**
+ * Close a booked trade at the broker now.
+ *
+ * Sends a real close request and then settles the row through the SAME path the
+ * periodic sync uses (`applyPositionClosure`), so an admin action cannot invent
+ * a fill price or a P/L the broker did not report. When the sync declines to
+ * settle (for example a contract-broker position with no lot size, whose
+ * exposure model is still undecided), the broker close is still reported
+ * honestly and the row is left for the sync rather than force-written.
+ */
+export async function forceCloseTrade(input: {
+  tradeId: string;
+  actorId: string;
+  ip: string | null;
+}): Promise<{
+  closedAtBroker: boolean;
+  settled: boolean;
+  brokerMessage: string;
+  netPnL: number | null;
+}> {
+  const trade = await prisma.tradeRecord.findUnique({
+    where: { id: input.tradeId },
+    select: {
+      id: true,
+      investmentId: true,
+      brokerId: true,
+      metaApiPositionId: true,
+      instrument: true,
+      status: true,
+    },
+  });
+  if (!trade) throw ApiError.notFound('Trade not found.');
+  if (trade.status !== 'OPEN') {
+    throw ApiError.conflict(`Trade ${trade.id} is ${trade.status}; only an OPEN trade can be force-closed.`);
+  }
+  if (!trade.metaApiPositionId) {
+    throw ApiError.conflict(
+      'This trade has no broker position id, so there is nothing to close at the broker.',
+    );
+  }
+
+  const connection = await prisma.brokerConnection.findUnique({ where: { id: trade.brokerId } });
+  if (!connection) throw ApiError.conflict('The broker connection for this trade is gone.');
+
+  const adapter = await ensureBrokerConnected(await getAdapterForConnection(connection));
+
+  const result = await adapter.closePosition(trade.metaApiPositionId);
+
+  let settled = false;
+  let netPnL: number | null = null;
+
+  if (result.ok && supportsPositionClosure(adapter)) {
+    const closure = await adapter.getPositionClosure(trade.metaApiPositionId);
+    if (closure) {
+      const applied = await applyPositionClosure(connection.id, closure);
+      settled = applied !== null;
+      netPnL = applied?.netPnL ?? null;
+    }
+  }
+
+  await recordAudit({
+    action: result.ok ? AUDIT.ADMIN_TRADE_FORCE_CLOSED : AUDIT.BROKER_ERROR,
+    userId: input.actorId,
+    ipAddress: input.ip,
+    details: {
+      tradeId: trade.id,
+      investmentId: trade.investmentId,
+      instrument: trade.instrument,
+      brokerPositionId: trade.metaApiPositionId,
+      ok: result.ok,
+      settled,
+      netPnL,
+      brokerMessage: result.brokerMessage ?? null,
+    },
+  });
+
+  return {
+    closedAtBroker: result.ok,
+    settled,
+    brokerMessage: result.brokerMessage ?? 'No broker message.',
+    netPnL,
+  };
+}
+
+/**
+ * The bot-control console's read model: kill-switch state, effective limits and
+ * the broker's instrument list.
+ *
+ * Deliberately tolerant: the broker may be unreachable, and the console still has
+ * to be usable then — an operator most needs the emergency stop when the broker
+ * is the thing that is broken. An unavailable instrument list is reported as
+ * such (`symbolsError`) instead of looking like "the broker offers nothing".
+ */
+export async function getBotControlView(): Promise<{
+  killSwitch: Awaited<ReturnType<typeof getBotControlState>>;
+  symbols: Array<{ symbol: string; displayName: string; market: string; isTradable: boolean }>;
+  symbolsError: string | null;
+}> {
+  const killSwitch = await getBotControlState();
+
+  try {
+    const connections = await listBrokerConnections();
+    const connection = connections.find((row) => row.status === 'CONNECTED') ?? connections[0];
+    if (!connection) {
+      return { killSwitch, symbols: [], symbolsError: 'No broker connection is registered yet.' };
+    }
+
+    const adapter = await ensureBrokerConnected(await getAdapterForConnection(connection));
+    const symbols = (await adapter.listInstruments()).map((instrument) => ({
+      symbol: instrument.symbol,
+      displayName: instrument.displayName,
+      market: instrument.market,
+      isTradable: instrument.isTradable,
+    }));
+    return { killSwitch, symbols, symbolsError: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'The broker could not list instruments.';
+    console.warn('[admin] instrument list unavailable:', message);
+    return { killSwitch, symbols: [], symbolsError: message };
+  }
+}
+
 export async function getAdminActivity(take = 25): Promise<ActivityEventDTO[]> {
   const bounded = Math.min(Math.max(1, Math.trunc(take)), MAX_ACTIVITY_TAKE);
   const rows = await listAudit({ take: bounded });

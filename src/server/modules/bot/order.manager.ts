@@ -39,6 +39,7 @@ import type {
   PlaceOrderRequest,
   SymbolSpec,
 } from '../broker/broker.types';
+import { checkTradingAllowed } from './bot-control.service';
 import { allocateAcrossInvestments, MASTER_TO_CLIENT_FORMULA } from './lot.allocator';
 import { evaluatePreTradeRisk, type RiskContextWithFloor } from './risk.engine';
 import type { LotAllocation, OrderOutcome, RiskDecision, TradeSignal } from './bot.types';
@@ -220,6 +221,27 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
   const env = serverEnv();
   const claimKey = signalClaimKey(signal.signalId);
   const configClaim = { signalId: signal.signalId, strategy: signal.strategy, symbol: signal.symbol };
+
+  // Platform gate: the global kill switch, the symbol allow-list and the daily
+  // loss limit. Checked BEFORE the idempotency claim so a halted platform does
+  // not consume the signal — the operator can re-run it after releasing the stop.
+  const gate = await checkTradingAllowed(signal.symbol);
+  if (!gate.allowed) {
+    await recordAudit({
+      action: AUDIT.RISK_KILL_SWITCH,
+      details: { ...configClaim, phase: 'execute_signal', code: gate.code, reason: gate.reason },
+    });
+    await publishActivity(
+      makeActivity(
+        gate.code,
+        `Signal ${signal.signalId} refused: ${gate.reason}`,
+        'error',
+        { ...configClaim, code: gate.code },
+        investmentRooms(null),
+      ),
+    );
+    return { signalId: signal.signalId, status: 'REJECTED', reason: gate.code, allocations: [], outcomes: [] };
+  }
 
   const conn = await prisma.brokerConnection.findUnique({
     where: { metaApiAccountId: signal.brokerAccountId },

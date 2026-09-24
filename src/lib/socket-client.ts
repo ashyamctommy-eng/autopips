@@ -149,6 +149,31 @@ export interface BrokerStatusPayload {
   at?: string;
 }
 
+/**
+ * Platform operating state pushed on `admin:system_status`.
+ *
+ * `enabled: false` means the global kill switch is engaged; `reason` is the
+ * operator's own words. The limits are the EFFECTIVE values the bot enforces.
+ */
+export interface SystemStatusPayload {
+  enabled: boolean;
+  reason: string | null;
+  /** Which store the state was read from; 'unknown' means it could not be read. */
+  source?: 'redis' | 'database' | 'unknown';
+  /** When the state was read, ISO-8601. */
+  checkedAt: string;
+  maxStakeUsd: number;
+  dailyLossLimitUsd: number;
+  minPayoutPercentage: number;
+  allowedSymbols: string[];
+}
+
+export function isSystemStatus(value: unknown): value is SystemStatusPayload {
+  if (typeof value !== 'object' || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.enabled === 'boolean' && typeof entry.checkedAt === 'string';
+}
+
 export interface ServerErrorMessage {
   code: string;
   message: string;
@@ -165,6 +190,7 @@ export type TradingServerToClientEvents = {
   [WS_EVENTS.equity]: (payload: AccountOverview | InvestmentEquityUpdate) => void;
   [WS_EVENTS.activity]: (payload: ActivityEventDTO) => void;
   [WS_EVENTS.brokerStatus]: (payload: BrokerStatusPayload) => void;
+  [WS_EVENTS.systemStatus]: (payload: SystemStatusPayload) => void;
   [WS_EVENTS.error]: (payload: ServerErrorMessage) => void;
 };
 

@@ -49,7 +49,13 @@ export function investmentRoom(investmentId: string): string {
 }
 
 /** Discriminant carried on every envelope. */
-export type WsEnvelopeType = 'trade' | 'tick' | 'equity' | 'activity' | 'broker_status';
+export type WsEnvelopeType =
+  | 'trade'
+  | 'tick'
+  | 'equity'
+  | 'activity'
+  | 'broker_status'
+  | 'system_status';
 
 /**
  * Server -> client events only. The client -> server events
@@ -64,6 +70,7 @@ export const WS_SERVER_EVENTS = [
   WS_EVENTS.equity,
   WS_EVENTS.activity,
   WS_EVENTS.brokerStatus,
+  WS_EVENTS.systemStatus,
 ] as const;
 
 export type WsServerEvent = (typeof WS_SERVER_EVENTS)[number];
@@ -77,6 +84,7 @@ export const WS_EVENT_TYPES = {
   [WS_EVENTS.equity]: 'equity',
   [WS_EVENTS.activity]: 'activity',
   [WS_EVENTS.brokerStatus]: 'broker_status',
+  [WS_EVENTS.systemStatus]: 'system_status',
 } as const satisfies Record<WsServerEvent, WsEnvelopeType>;
 
 export function isWsServerEvent(value: string): value is WsServerEvent {
@@ -291,6 +299,19 @@ export async function publishBrokerStatus(
   rooms: string[] = [ADMIN_ROOM],
 ): Promise<PublishOutcome> {
   return publishEnvelope(envelope(WS_EVENTS.brokerStatus, payload, rooms));
+}
+
+/**
+ * Platform operating state (kill switch + effective risk limits).
+ *
+ * Admin-room only: whether trading is halted is operational information, and
+ * broadcasting it platform-wide would be a business signal nobody asked for.
+ */
+export async function publishSystemStatus(
+  payload: unknown,
+  rooms: string[] = [ADMIN_ROOM],
+): Promise<PublishOutcome> {
+  return publishEnvelope(envelope(WS_EVENTS.systemStatus, payload, rooms));
 }
 
 /**

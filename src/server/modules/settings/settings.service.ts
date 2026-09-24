@@ -40,9 +40,16 @@ export type PlatformSettingKey =
   | 'nowpayments.ipn_secret'
   | 'nowpayments.api_base'
   | 'nowpayments.allowed_currencies'
-  | 'deriv.api_token';
+  | 'deriv.api_token'
+  // ── bot risk controls (Admin → Bot control) ──
+  | 'bot.enabled'
+  | 'bot.disabled_reason'
+  | 'risk.max_stake_usd'
+  | 'risk.daily_loss_limit_usd'
+  | 'risk.allowed_symbols'
+  | 'risk.min_payout_percentage';
 
-type SettingKind = 'secret' | 'url' | 'list';
+type SettingKind = 'secret' | 'url' | 'list' | 'symbols' | 'number' | 'boolean' | 'text';
 
 interface SettingDefinition {
   key: PlatformSettingKey;
@@ -111,6 +118,70 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     defaultValue: '',
     inputHint: 'api.deriv.com → API token (read + trade scopes)',
   },
+
+  // ── bot risk controls ─────────────────────────────────────────────────────
+  // These live in Admin → Bot control. `bot.enabled` is ALSO mirrored into Redis
+  // (see bot-control.service.ts) because a kill switch has to take effect in the
+  // worker process immediately, not on the settings cache's TTL.
+  {
+    key: 'bot.enabled',
+    envName: 'BOT_ENABLED',
+    label: 'Bot trading enabled',
+    description:
+      'The global kill switch. false rejects every new order immediately, in every process, and pauses the bot runtime.',
+    kind: 'boolean',
+    defaultValue: 'true',
+    inputHint: 'true or false',
+  },
+  {
+    key: 'bot.disabled_reason',
+    envName: 'BOT_DISABLED_REASON',
+    label: 'Kill switch reason',
+    description: 'Why trading was stopped. Shown in the console and written to the audit log with the state change.',
+    kind: 'text',
+    defaultValue: '',
+    inputHint: 'e.g. broker incident, risk review',
+  },
+  {
+    key: 'risk.max_stake_usd',
+    envName: 'RISK_MAX_STAKE_USD',
+    label: 'Maximum stake per order (USD)',
+    description:
+      'Upper bound on the stake of a single contract. 0 disables the cap. A contract broker sizes orders by stake, so the cap is enforced where the stake is known — when an order is priced.',
+    kind: 'number',
+    defaultValue: '0',
+    inputHint: 'e.g. 250',
+  },
+  {
+    key: 'risk.daily_loss_limit_usd',
+    envName: 'RISK_DAILY_LOSS_LIMIT_USD',
+    label: 'Daily realised-loss limit (USD)',
+    description:
+      'New orders are refused once realised P/L for the UTC day is at or below minus this amount. 0 disables the limit.',
+    kind: 'number',
+    defaultValue: '0',
+    inputHint: 'e.g. 500',
+  },
+  {
+    key: 'risk.min_payout_percentage',
+    envName: 'RISK_MIN_PAYOUT_PERCENTAGE',
+    label: 'Minimum payout percentage',
+    description:
+      'A contract whose quoted payout is below this percentage of its cost is refused. 0 disables the check. Only meaningful for contracts that quote a payout.',
+    kind: 'number',
+    defaultValue: '0',
+    inputHint: 'e.g. 90',
+  },
+  {
+    key: 'risk.allowed_symbols',
+    envName: 'RISK_ALLOWED_SYMBOLS',
+    label: 'Tradable symbols (allow-list)',
+    description:
+      'Comma-separated broker symbols the bot may trade. Empty means no restriction. Symbols are case-sensitive. Charting is never restricted — this gates orders only.',
+    kind: 'symbols',
+    defaultValue: '',
+    inputHint: 'e.g. frxXAUUSD,R_100',
+  },
 ] as const;
 
 const DEFINITIONS_BY_KEY = new Map<string, SettingDefinition>(
@@ -146,6 +217,49 @@ function validateValue(def: SettingDefinition, value: string): string {
       throw ApiError.badRequest(`${def.label} must use http(s).`);
     }
     return trimmed.replace(/\/+$/, '');
+  }
+
+  if (def.kind === 'boolean') {
+    const normalised = trimmed.toLowerCase();
+    if (normalised !== 'true' && normalised !== 'false') {
+      throw ApiError.badRequest(`${def.label} must be true or false.`);
+    }
+    return normalised;
+  }
+
+  if (def.kind === 'text') {
+    if (trimmed.length > 500) {
+      throw ApiError.badRequest(`${def.label} is limited to 500 characters.`);
+    }
+    return trimmed;
+  }
+
+  if (def.kind === 'number') {
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      throw ApiError.badRequest(`${def.label} must be a number.`);
+    }
+    if (parsed < 0) {
+      throw ApiError.badRequest(`${def.label} cannot be negative.`);
+    }
+    return String(parsed);
+  }
+
+  if (def.kind === 'symbols') {
+    // Broker symbols are case-sensitive (Deriv uses `frxXAUUSD`, `R_100`), so
+    // this list is NOT lower-cased.
+    const symbols = trimmed
+      .split(',')
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const bad = symbols.find((token) => !/^[A-Za-z0-9._#+-]{2,32}$/.test(token));
+    if (bad) {
+      throw ApiError.badRequest(
+        `${def.label}: "${bad}" is not a valid broker symbol.`,
+      );
+    }
+    // An empty list is meaningful: "no restriction" — the console clears the row.
+    return Array.from(new Set(symbols)).join(',');
   }
 
   // list
@@ -250,6 +364,29 @@ export function getSetting(key: PlatformSettingKey): string {
 export function isOverridden(key: PlatformSettingKey): boolean {
   const override = overrides.get(key);
   return typeof override === 'string' && override.length > 0;
+}
+
+/**
+ * A numeric setting, with the definition's default when unset or unparsable.
+ * Never NaN: a bad row degrades to the default instead of disabling a limit.
+ */
+export function getSettingNumber(key: PlatformSettingKey): number {
+  const raw = getSetting(key).trim();
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    const fallback = Number(DEFINITIONS_BY_KEY.get(key)?.defaultValue ?? '0');
+    console.warn(`[settings] "${key}" holds a non-numeric value; using the default ${fallback}.`);
+    return Number.isFinite(fallback) ? fallback : 0;
+  }
+  return parsed;
+}
+
+/** A case-preserving symbol allow-list. Empty array = no restriction. */
+export function getSettingSymbols(key: PlatformSettingKey): string[] {
+  return getSetting(key)
+    .split(',')
+    .map((symbol) => symbol.trim())
+    .filter(Boolean);
 }
 
 /** The accepted-deposit currency list, honouring a console override. */

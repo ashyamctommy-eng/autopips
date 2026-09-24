@@ -10,6 +10,7 @@ import {
   Users,
   ArrowUpFromLine,
   Layers,
+  Power,
   Settings,
 } from 'lucide-react';
 
@@ -27,6 +28,7 @@ export const ADMIN_NAV: NavItem[] = [
   { label: 'Plans', href: '/admin/plans', icon: Layers },
   { label: 'Broker Connections', href: '/admin/brokers', icon: Plug },
   { label: 'Withdrawals', href: '/admin/withdrawals', icon: ArrowUpFromLine },
+  { label: 'Bot Control', href: '/admin/bot-control', icon: Power },
   { label: 'Audit Logs', href: '/admin/audit', icon: ScrollText },
   { label: 'Platform Settings', href: '/admin/settings', icon: Settings },
 ];

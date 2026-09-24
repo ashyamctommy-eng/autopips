@@ -46,9 +46,32 @@ export async function requireSession(): Promise<ActiveSession> {
   return session;
 }
 
+/**
+ * Role gate backed by PostgreSQL, not by the token.
+ *
+ * The access token carries the role it was MINTED with, so a demotion would
+ * otherwise keep working until the token expired (ACCESS_TOKEN_TTL, 15 minutes)
+ * — an unacceptable window for a route that can enable/disable trading. The
+ * claim is therefore treated as a cheap pre-filter and the authoritative role is
+ * re-read from the database.
+ *
+ * Fails closed: no row, or a row whose role is not in the allowed set, is a 403.
+ */
 export async function requireRole(...roles: Role[]): Promise<ActiveSession> {
   const session = await requireSession();
   if (!roles.includes(session.role)) throw ApiError.forbidden();
+
+  const row = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { role: true },
+  });
+  if (!row || !roles.includes(row.role)) {
+    console.warn(
+      `[auth] role gate refused user=${session.userId}: token says ${session.role}, database says ${row?.role ?? 'no such user'}.`,
+    );
+    throw ApiError.forbidden();
+  }
+
   return session;
 }
 

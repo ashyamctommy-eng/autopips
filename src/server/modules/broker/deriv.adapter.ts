@@ -1,5 +1,6 @@
 import { ApiError } from '@/lib/http';
 import { maskAccount } from '@/lib/crypto/credential-cipher';
+import { getSettingNumber } from '@/server/modules/settings/settings.service';
 
 import {
   DERIV_DEFAULT_URL,
@@ -56,6 +57,42 @@ import type {
  * whole UI (1m/5m/15m/30m/1h/4h/1d). The mapping is explicit so a timeframe the
  * broker cannot serve is rejected here rather than silently bucketed wrong.
  */
+
+/**
+ * Platform risk controls that only exist where a stake does.
+ *
+ * The stake cap and the payout floor are enforced HERE, in the pricing path,
+ * because this is the only place where the stake and the proposal are both
+ * known: the lot allocator upstream produces lots, and a contract broker has
+ * none. A violation is a REFUSAL, never a silent clamp — shrinking a stake to
+ * fit a cap would change the trade the operator asked for.
+ */
+function assertStakeWithinPlatformCap(stake: number): void {
+  const cap = getSettingNumber('risk.max_stake_usd');
+  if (cap > 0 && stake > cap) {
+    throw ApiError.badRequest(
+      `Stake ${stake} exceeds the platform cap of ${cap} (Admin → Bot control).`,
+    );
+  }
+}
+
+function assertPayoutAboveFloor(cost: number, payout: number | null): void {
+  const floor = getSettingNumber('risk.min_payout_percentage');
+  if (floor <= 0) return;
+  if (payout === null) {
+    throw ApiError.badRequest(
+      'This contract quotes no payout, so the platform minimum payout percentage cannot be evaluated. ' +
+        'Set the payout floor to 0 or use a contract type that quotes one.',
+    );
+  }
+  if (cost <= 0) return;
+  const percentage = (payout / cost) * 100;
+  if (percentage < floor) {
+    throw ApiError.badRequest(
+      `Quoted payout ${percentage.toFixed(2)}% of cost is below the platform floor of ${floor}%.`,
+    );
+  }
+}
 
 /** Timeframe → Deriv granularity (seconds). Mirrors the candles route's list. */
 const GRANULARITY_SECONDS: Record<string, number> = {
@@ -433,6 +470,12 @@ export class DerivBrokerAdapter implements BrokerAdapter {
     return instruments.get(symbol) ?? null;
   }
 
+  /** Every instrument the broker offers, sorted by symbol. */
+  async listInstruments(): Promise<InstrumentInfo[]> {
+    const instruments = await this.loadInstruments();
+    return Array.from(instruments.values()).sort((a, b) => a.symbol.localeCompare(b.symbol));
+  }
+
   async isSymbolTradable(symbol: string): Promise<boolean | null> {
     const info = await this.getInstrumentInfo(symbol);
     return info ? info.isTradable : null;
@@ -738,11 +781,15 @@ export class DerivBrokerAdapter implements BrokerAdapter {
     if (!proposal) return null;
     const cost = isFiniteNumber(proposal.ask_price) ? proposal.ask_price : null;
     if (cost === null) return null;
+    const payout = isFiniteNumber(proposal.payout) ? proposal.payout : null;
+
+    assertStakeWithinPlatformCap(request.stake);
+    assertPayoutAboveFloor(cost, payout);
 
     return {
       cost,
       currency: authorized.currency,
-      ...(isFiniteNumber(proposal.payout) ? { payout: proposal.payout } : {}),
+      ...(payout === null ? {} : { payout }),
     };
   }
 
@@ -795,6 +842,14 @@ export class DerivBrokerAdapter implements BrokerAdapter {
         brokerMessage: 'Deriv did not return a priced proposal for this contract.',
       };
     }
+
+    // Re-checked at the moment of purchase: the cap may have been lowered while
+    // the proposal was in flight.
+    assertStakeWithinPlatformCap(stake);
+    assertPayoutAboveFloor(
+      price,
+      proposal && isFiniteNumber(proposal.payout) ? proposal.payout : null,
+    );
 
     const buyResponse = await client.request<{ buy?: Record<string, unknown> }>(
       { buy: proposalId, price },
