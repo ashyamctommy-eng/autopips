@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { serverEnv } from '@/lib/env';
+import { getSetting } from '@/server/modules/settings/settings.service';
 import { ApiError } from '@/lib/http';
 import { redis, rkey } from '@/lib/redis';
 import { D, type Decimal } from '@/lib/money';
@@ -215,12 +216,13 @@ function scrub(input: string): string {
 }
 
 function apiKey(): string {
-  // serverEnv() fails fast at boot if the key is missing.
-  return serverEnv().NOWPAYMENTS_API_KEY;
+  // Admin console → Settings wins; serverEnv() is the fallback and still fails
+  // fast at boot when neither a console row nor the env var is present.
+  return getSetting('nowpayments.api_key') || serverEnv().NOWPAYMENTS_API_KEY;
 }
 
 function apiBase(): string {
-  return serverEnv().NOWPAYMENTS_API_BASE.replace(/\/+$/, '');
+  return getSetting('nowpayments.api_base').replace(/\/+$/, '');
 }
 
 type QueryValue = string | number | boolean | undefined;

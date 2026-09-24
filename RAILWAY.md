@@ -116,8 +116,26 @@ re-entered in `/admin/brokers`.
 
 6. **Settings → Networking** → **Generate Domain**, then attach your custom
    domain `autopips.pro` (+ `www`) and add the CNAME Railway shows you.
-7. Deploy. The start command runs `prisma migrate deploy` **before** `npm start`,
-   so the initial migration is applied on this first deploy.
+7. Deploy. Migrations are applied by **two independent gates**, so a deploy can
+   never serve a new build against an old (or empty) schema:
+
+   1. `railway.toml` → `preDeployCommand = ["npx prisma migrate deploy"]` runs
+      before the new container is promoted, and a failure FAILS the deployment;
+   2. the image entrypoint (`docker-entrypoint.sh`) runs the same command on
+      every boot, before `next start` — this one cannot be skipped, because it
+      does not depend on any Railway setting being picked up.
+
+   > **Why two.** Until 2026-09-24 migrations lived only in
+   > `deploy.startCommand`. When Railway did not pick the config file up, the
+   > container ran the Dockerfile `CMD` (`npm start`) against an empty database:
+   > the app booted, `/api/v1/health` answered `db: ok` (it only ran `SELECT 1`)
+   > and the deployment was promoted — while every page that touches Postgres
+   > returned a 500 carrying a Next.js error digest. The entrypoint removes the
+   > platform from the critical path; the health check now also reports
+   > `schema` to make the same mistake impossible to miss.
+
+   After a successful boot, `/api/v1/health` reports `db`, `redis` **and**
+   `schema` — `schema: "error"` means the platform tables are missing.
 
 ---
 
@@ -187,7 +205,25 @@ body — the route verifies an HMAC over the **raw** body text.
 Do these in order; each one depends on the previous.
 
 1. `GET /api/v1/health` returns 200.
-2. Create your admin account via `POST /api/v1/auth/register`, then promote it:
+2. Make sure you have an administrator. Two ways:
+
+   **Recommended — environment variables** (no SQL, works on a fresh database).
+   Add these to the web service and redeploy:
+
+   | Variable | Value |
+   | --- | --- |
+   | `BOOTSTRAP_ADMIN_EMAIL` | your admin address, e.g. `ceo@autopips.pro` |
+   | `BOOTSTRAP_ADMIN_PASSWORD` | the initial password (8+ chars) |
+   | `BOOTSTRAP_ADMIN_NAME` | optional, defaults to "Platform Administrator" |
+   | `BOOTSTRAP_ADMIN_COUNTRY` | optional, defaults to `KE` |
+
+   On boot the entrypoint runs `scripts/bootstrap-admin.mjs`, which creates that
+   account as `ADMIN` + `kycStatus APPROVED` **only if it does not exist yet**.
+   It is idempotent and never overwrites an existing password, so a password you
+   change in the console is not reverted by the next deploy. Then:
+   **remove `BOOTSTRAP_ADMIN_PASSWORD` from the service variables** (see §11).
+
+   **Manual fallback — SQL**, if you would rather register normally:
    ```bash
    railway connect Postgres      # or use the Railway dashboard's Data tab
    UPDATE "User" SET role = 'ADMIN', "kycStatus" = 'APPROVED' WHERE email = 'you@example.com';
@@ -210,6 +246,7 @@ Do these in order; each one depends on the previous.
 | --- | --- | --- |
 | Deploy fails: `Environment variable not found: DATABASE_URL` | Variable missing on that service | Add the reference. `prisma validate`/`migrate` need it at build and boot. |
 | Deploy fails at `prisma migrate deploy` | Missing `DATABASE_URL`, or the DB is not up | Check the Postgres plugin status; confirm the variable is a reference, not a hardcoded URL. |
+| Site renders, but every DB-backed page throws and shows `reference: <digits>` | The database has no schema — the migration never ran. `reference` is a Next.js error digest, not an app id. | Check `/api/v1/health`: `schema: "error"` with `db: "ok"` is this exact state. Apply migrations (`railway run npx prisma migrate deploy`) and confirm the image entrypoint is used (Deployment → Logs shows `[entrypoint] applying database migrations`). |
 | Web boots, `/api/v1/health` returns 503 | Postgres or Redis unreachable | Check the plugin is green and `REDIS_URL` is set on the **web** service too. |
 | Site loads but realtime never connects | `NEXT_PUBLIC_WS_URL` wrong, or `NEXT_PUBLIC_APP_URL` does not match the browser origin | Fix the variables, then **rebuild** the web service (clear build cache). |
 | Socket connects then immediately disconnects | Worker rejected the handshake | Check worker logs for `[ws] unauthorized`. Usually a CORS origin mismatch or an expired token — the client re-fetches one per attempt. |
@@ -240,3 +277,67 @@ build. Note that **migrations are forward-only** — there are no down migration
 If a release included a destructive schema change, rolling the code back does not
 roll the schema back; restore from a Postgres backup instead
 (**Postgres service → Backups**, and enable them before you need them).
+
+---
+
+## 11. Operator reference: admin credentials & platform settings
+
+### Signing in as an administrator
+
+An administrator is created either by the boot-time bootstrap (§7.2) or by
+promoting a registered account with SQL. Registration itself can only ever create
+`CLIENT` rows — there is no public route to an admin account.
+
+### Changing the admin password
+
+Two places, same API (`POST /api/v1/auth/password`), and both require the current
+password even though you are already signed in:
+
+- **Admin → Platform settings → "Your administrator password"** (the console), and
+- **Dashboard → Profile & security → "Change password"** (for client accounts).
+
+The new password must satisfy the platform policy: **12+ characters with an
+uppercase letter, a lowercase letter, a number and a symbol.** If the account was
+created from `BOOTSTRAP_ADMIN_PASSWORD`, change it here and then delete that
+variable from the service — an environment variable is not a password store.
+
+### What can be changed without a redeploy (Admin → Platform settings)
+
+Payment provider and broker credentials, editable by an `ADMIN`:
+
+| Setting | Overrides |
+| --- | --- |
+| NOWPayments API key | `NOWPAYMENTS_API_KEY` |
+| NOWPayments IPN secret | `NOWPAYMENTS_IPN_SECRET` |
+| NOWPayments API base URL | `NOWPAYMENTS_API_BASE` |
+| Accepted deposit currencies | `NOWPAYMENTS_ALLOWED_CURRENCIES` |
+| MetaApi token (platform fallback) | `METAAPI_TOKEN` |
+
+Rules that hold for every one of them:
+
+- a value saved in the console **overrides** the environment variable; the env
+  variable remains the fallback and the default, so a deployment is never broken
+  by a missing row;
+- **"Revert to service variable"** deletes the row and puts the env value back;
+- secrets are stored **AES-256-GCM encrypted** (`CREDENTIAL_ENCRYPTION_KEY`) and
+  are only ever shown masked — in the console and in the audit log, which records
+  the key and the action but never the value;
+- an encrypted row that cannot be decrypted (e.g. after rotating
+  `CREDENTIAL_ENCRYPTION_KEY`) is skipped with a warning and the env value is
+  used, so a broken row cannot take payments down;
+- other replicas of the web tier pick a change up within ~30s (the in-process
+  cache TTL); the replica that served the write applies it immediately.
+
+Deliberately **not** editable there, because rotating them invalidates live
+sessions, stored credentials or the running deployment itself: `JWT_SECRET`,
+`CREDENTIAL_ENCRYPTION_KEY`, `DATABASE_URL`, `REDIS_URL`, the AWS/KYC
+credentials, and the risk limits the bot enforces. Those stay in service
+variables.
+
+### The realtime / bot runtime is a SEPARATE service
+
+The web service serves pages, REST and the IPN webhook. The Socket.IO + trading
+runtime is the **worker** service (§2). With only the web service deployed the
+site works and deposits can still credit, but the dashboard's bot status stays
+disconnected, realtime pushes do not arrive and no strategy trades. That is a
+missing service, not a bug.

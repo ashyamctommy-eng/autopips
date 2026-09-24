@@ -38,6 +38,7 @@ import { prisma } from '@/lib/prisma';
 import { redis, rkey } from '@/lib/redis';
 import { decryptCredential, encryptCredential } from '@/lib/crypto/credential-cipher';
 import { toPrismaDecimal } from '@/lib/money';
+import { getSetting } from '../settings/settings.service';
 import { WS_EVENTS } from '@/lib/contracts';
 import {
   ADMIN_ROOM,
@@ -111,7 +112,9 @@ export async function getAdapterForConnection(conn: BrokerConnection): Promise<B
 
   const env = serverEnv();
   const stored = await loadBrokerToken(conn.metaApiAccountId);
-  const token = stored ?? env.METAAPI_TOKEN;
+  // Per-account token first, then the platform token: admin console → Settings,
+  // then the METAAPI_TOKEN environment variable.
+  const token = stored ?? (getSetting('metaapi.token') || env.METAAPI_TOKEN);
   if (!token) {
     throw ApiError.brokerUnavailable(`No MetaApi token available for account ${conn.metaApiAccountId}.`);
   }

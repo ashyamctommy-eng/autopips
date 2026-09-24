@@ -251,6 +251,14 @@ explicitly after a release that adds migrations:
 `npm run prisma:deploy` / `npx prisma migrate deploy` is the only deploy-time
 migration command.
 
+**The web image also migrates itself on boot.** `docker-entrypoint.sh` runs
+`prisma migrate deploy` before `next start` (and exits non-zero if it fails), so a
+bare `docker run` of the web image cannot come up against an un-migrated schema.
+In compose this is a harmless second pass — the one-shot `migrate` service above
+still runs first. On managed platforms (Railway) it is what guarantees the schema
+exists even if the platform ignores the config file that declares a pre-deploy
+step.
+
 ---
 
 ## 5. TLS, DNS and the WebSocket proxy

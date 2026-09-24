@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { prisma, type Prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
-import { allowedCurrencies, serverEnv } from '@/lib/env';
+import { serverEnv } from '@/lib/env';
+import { resolvedAllowedCurrencies } from '@/server/modules/settings/settings.service';
 import { D, toPrismaDecimal, usd, type Decimal, type Numeric } from '@/lib/money';
 import { claimOnce } from '@/lib/rate-limit';
 import { assetMeta } from '@/lib/contracts';
@@ -107,7 +108,7 @@ function assertUsdAmount(
 
 function assertAllowedCurrency(cryptoCurrency: string): string {
   const currency = cryptoCurrency.trim().toLowerCase();
-  const allowed = allowedCurrencies();
+  const allowed = resolvedAllowedCurrencies();
   if (!allowed.includes(currency)) {
     throw ApiError.badRequest(
       `Unsupported settlement currency "${cryptoCurrency}". Allowed: ${allowed.join(', ')}.`,
@@ -1064,7 +1065,7 @@ export interface SupportedCurrenciesResult {
  * so the UI can warn and the backend can refuse to quote them.
  */
 export async function listSupportedCurrencies(): Promise<SupportedCurrenciesResult> {
-  const allowList = allowedCurrencies();
+  const allowList = resolvedAllowedCurrencies();
 
   let advertised: string[] | null = null;
   try {

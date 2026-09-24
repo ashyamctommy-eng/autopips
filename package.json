@@ -21,10 +21,11 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "node scripts/bootstrap-admin.mjs",
+    "bootstrap:admin": "node scripts/bootstrap-admin.mjs"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "node scripts/bootstrap-admin.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.699.0",

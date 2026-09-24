@@ -236,3 +236,24 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
 }
+
+/// Operator-editable platform configuration (admin console → Settings).
+///
+/// A stored row OVERRIDES the service environment variable of the same meaning;
+/// the env var stays the fallback/default, so a deployment is never dead just
+/// because a console row is absent, and a key can be rotated from the console
+/// without a redeploy.
+///
+/// Secret values (`isSecret`) are persisted as AES-256-GCM envelopes produced by
+/// src/lib/crypto/credential-cipher.ts — never as plaintext. Non-secret values
+/// are stored verbatim so the console can display them.
+model PlatformSetting {
+  key       String   @id
+  value     String
+  isSecret  Boolean  @default(false)
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}

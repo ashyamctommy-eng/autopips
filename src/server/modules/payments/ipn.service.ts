@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { serverEnv } from '@/lib/env';
+import { getSetting } from '@/server/modules/settings/settings.service';
 import { ApiError } from '@/lib/http';
 import { D, type Decimal } from '@/lib/money';
 import type { PaymentStatusValue } from '@/types/api';
@@ -110,7 +111,10 @@ export function verifyIpnSignature(input: VerifyIpnSignatureInput): IpnVerificat
     return { valid: false, reason: 'PAYLOAD_NOT_OBJECT' };
   }
 
-  const secret = serverEnv().NOWPAYMENTS_IPN_SECRET;
+  // Admin console → Settings wins, so a rotated IPN secret can be applied
+  // without a redeploy. NOTE: keeping this in step with the NOWPayments
+  // dashboard is what makes deposits creditable at all.
+  const secret = getSetting('nowpayments.ipn_secret') || serverEnv().NOWPAYMENTS_IPN_SECRET;
   const computed = crypto
     .createHmac('sha512', secret)
     .update(canonicalizeForSignature(parsed), 'utf8')

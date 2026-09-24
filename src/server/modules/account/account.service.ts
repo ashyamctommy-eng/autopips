@@ -444,6 +444,7 @@ const ACTIVITY_TEMPLATES: Record<AuditAction, ActivityTemplate> = {
   AUTH_2FA_CHALLENGE_FAILED: always('Two-factor verification failed', 'warning'),
   AUTH_TOKEN_REFRESHED: always('Session refreshed', 'info'),
   AUTH_PASSWORD_CHANGED: always('Password changed', 'warning'),
+  AUTH_PASSWORD_CHANGE_FAILED: always('Password change rejected', 'warning'),
 
   // kyc
   KYC_SUBMITTED: always('Identity documents submitted', 'info'),

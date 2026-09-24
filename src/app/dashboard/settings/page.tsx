@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Info, ShieldCheck, UserCog } from 'lucide-react';
 
+import { ChangePasswordForm } from '@/components/dashboard/change-password-form';
 import { SignOutButton } from '@/components/dashboard/sign-out-button';
 import { TwoFactorSetup } from '@/components/dashboard/two-factor-setup';
 import { PageHeader } from '@/components/shared/page-header';
@@ -10,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { PASSWORD_POLICY } from '@/server/modules/auth/password.service';
 import { requireSessionUser } from '@/server/modules/auth/session';
 
 /**
@@ -99,6 +101,8 @@ export default async function DashboardSettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <ChangePasswordForm policy={PASSWORD_POLICY} />
 
       <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">
         <Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />

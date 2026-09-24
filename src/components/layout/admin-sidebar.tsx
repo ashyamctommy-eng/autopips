@@ -10,6 +10,7 @@ import {
   Users,
   ArrowUpFromLine,
   Layers,
+  Settings,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -27,6 +28,7 @@ export const ADMIN_NAV: NavItem[] = [
   { label: 'Broker Connections', href: '/admin/brokers', icon: Plug },
   { label: 'Withdrawals', href: '/admin/withdrawals', icon: ArrowUpFromLine },
   { label: 'Audit Logs', href: '/admin/audit', icon: ScrollText },
+  { label: 'Platform Settings', href: '/admin/settings', icon: Settings },
 ];
 
 export interface AdminSidebarProps extends Omit<React.HTMLAttributes<HTMLElement>, 'children'> {
