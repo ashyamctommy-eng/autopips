@@ -7,6 +7,11 @@ const nextConfig = {
   // payment or broker credentials.
   env: {},
   experimental: {
+    // Next 14 requires the flag: loads src/instrumentation.ts once per server
+    // process so the environment contract is validated BEFORE traffic. Without
+    // it, a missing variable only surfaces on whichever route needs it first —
+    // see the incident note in src/instrumentation.ts.
+    instrumentationHook: true,
     serverComponentsExternalPackages: [
       '@prisma/client',
       'ws',

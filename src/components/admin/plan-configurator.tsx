@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { CircleOff, Layers, Pencil, Plus, TriangleAlert } from 'lucide-react';
+import { CircleOff, FileJson, Layers, Pencil, Plus, TriangleAlert } from 'lucide-react';
 import type { ZodIssue } from 'zod';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -42,7 +42,12 @@ import type { TradingPlanDTO } from '@/types/api';
 // so the create/update schemas are shared verbatim with the server instead of
 // being re-implemented here. Client-side validation therefore cannot drift from
 // what `admin.service.createPlan/updatePlan` will accept.
-import { planInputSchema, planUpdateSchema } from '@/server/modules/admin/plan-validation';
+import {
+  PLAN_EXAMPLE,
+  PLAN_FIELD_GUIDE,
+  planInputSchema,
+  planUpdateSchema,
+} from '@/server/modules/admin/plan-validation';
 
 const RISK_LABEL: Record<RiskLevel, string> = {
   LOW: 'Low',
@@ -104,6 +109,24 @@ function formFromPlan(plan: TradingPlanDTO): PlanFormState {
 }
 
 /** `''` becomes NaN, which the shared zod schema rejects as "must be a number". */
+/** The illustrative plan, as form strings (every numeric input is controlled text). */
+function formFromExample(): PlanFormState {
+  return {
+    name: PLAN_EXAMPLE.name,
+    description: PLAN_EXAMPLE.description,
+    minInvestment: String(PLAN_EXAMPLE.minInvestment),
+    maxInvestment: String(PLAN_EXAMPLE.maxInvestment),
+    durationDays: String(PLAN_EXAMPLE.durationDays),
+    targetReturnMin: String(PLAN_EXAMPLE.targetReturnMin),
+    targetReturnMax: String(PLAN_EXAMPLE.targetReturnMax),
+    riskLevel: PLAN_EXAMPLE.riskLevel,
+    performanceFee: String(PLAN_EXAMPLE.performanceFee),
+    managementFee: String(PLAN_EXAMPLE.managementFee),
+    maxDrawdown: String(PLAN_EXAMPLE.maxDrawdown),
+    isActive: PLAN_EXAMPLE.isActive,
+  };
+}
+
 function toNumber(value: string): number {
   const trimmed = value.trim();
   return trimmed === '' ? Number.NaN : Number(trimmed);
@@ -141,6 +164,65 @@ const fieldClass = (errors: FieldErrors, field: keyof PlanFormState | string): s
 function FieldError({ errors, field }: { errors: FieldErrors; field: string }) {
   if (!(field in errors)) return null;
   return <p className="text-xs text-loss-400">{errors[field]}</p>;
+}
+
+/**
+ * Format reference shown while CREATING a plan.
+ *
+ * The example is `PLAN_EXAMPLE` from the plan contract itself, so the field
+ * names, units and ranges here are the ones the API accepts — a test asserts the
+ * example against `planInputSchema` so it cannot drift. The button fills the form
+ * with it, which is the quickest honest answer to "what shape do you want?".
+ */
+function ExampleFormatPanel({ onUse }: { onUse: () => void }) {
+  const [showFields, setShowFields] = React.useState(false);
+
+  return (
+    <div className="rounded-lg border border-line bg-base-800/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <FileJson aria-hidden className="size-4 text-brand-400" />
+          <span className="text-sm font-medium text-base-100">Example format</span>
+          <Badge variant="outline">illustrative values</Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setShowFields((value) => !value)}
+          >
+            {showFields ? 'Hide field rules' : 'Show field rules'}
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={onUse}>
+            Use this example
+          </Button>
+        </div>
+      </div>
+
+      <p className="mt-2 text-xs text-muted">
+        The exact payload the API accepts. Amounts are USD; returns, fees and drawdown are
+        percentages. Target returns are an indicative range, not a promise of performance.
+      </p>
+
+      {showFields ? (
+        <ul className="mt-3 flex flex-col gap-1.5">
+          {PLAN_FIELD_GUIDE.map((entry) => (
+            <li key={entry.field} className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
+              <code className="shrink-0 font-mono text-xs text-brand-300 sm:w-44">
+                {entry.field}
+              </code>
+              <span className="text-xs text-muted">{entry.rule}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <pre className="mt-3 max-h-56 overflow-auto rounded-md border border-line bg-base-900 p-3 font-mono text-xs leading-relaxed text-base-200">
+        {JSON.stringify(PLAN_EXAMPLE, null, 2)}
+      </pre>
+    </div>
+  );
 }
 
 export interface PlanConfiguratorProps {
@@ -473,6 +555,16 @@ export function PlanConfigurator({ initialPlans, canManage }: PlanConfiguratorPr
               re-validates every field and rejects a maximum investment below the minimum.
             </DialogDescription>
           </DialogHeader>
+
+          {!editing ? (
+            <ExampleFormatPanel
+              onUse={() => {
+                setForm(formFromExample());
+                setErrors({});
+                setFormError(null);
+              }}
+            />
+          ) : null}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5 sm:col-span-2">

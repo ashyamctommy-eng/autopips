@@ -132,3 +132,61 @@ export const planUpdateSchema = z
 export type PlanInput = z.infer<typeof planInputSchema>;
 /** Validated update patch. */
 export type PlanUpdateInput = z.infer<typeof planUpdateSchema>;
+
+/**
+ * A COMPLETE, VALID example of the create payload — the format an operator can
+ * copy into the console (or into a support ticket) instead of guessing which
+ * field names, units and ranges the API accepts.
+ *
+ * It lives next to the schema, not in the UI, for one reason: it is asserted
+ * against `planInputSchema` by `tests/plan-example.test.ts`, so the example can
+ * never drift from the contract it documents. An example that the API would
+ * reject is worse than no example at all.
+ *
+ * The figures are ILLUSTRATIVE — a mid-risk, mid-duration shape that exercises
+ * every field and its bounds. They are not a recommendation, a forecast, or an
+ * offer: target returns are the indicative range a plan may seek and are always
+ * rendered with the non-guarantee disclaimer.
+ */
+export const PLAN_EXAMPLE: PlanInput = {
+  name: 'Example — Balanced Momentum 30',
+  description:
+    'Illustrative plan shape for a 30-day cycle: positions are sized from a fixed risk budget per trade, entries need trend confirmation, and every position carries a verified stop. Replace this text with how the strategy actually trades.',
+  minInvestment: 100,
+  maxInvestment: 25_000,
+  durationDays: 30,
+  // An indicative RANGE, never a single guaranteed figure.
+  targetReturnMin: 4,
+  targetReturnMax: 12,
+  riskLevel: 'MEDIUM',
+  performanceFee: 20,
+  managementFee: 2,
+  maxDrawdown: 25,
+  isActive: true,
+};
+
+/**
+ * Field-by-field legend for the example above: what each key means and the rule
+ * the API enforces on it. Shown in the admin console beside the example so an
+ * operator does not have to read the schema to fill the form in correctly.
+ */
+export const PLAN_FIELD_GUIDE: ReadonlyArray<{ field: keyof PlanInput; rule: string }> = [
+  { field: 'name', rule: '3–120 characters. Shown to clients on the plan card.' },
+  { field: 'description', rule: '10–2000 characters. Say how the strategy trades.' },
+  { field: 'minInvestment', rule: 'USD, greater than 0. The smallest amount a client may deploy.' },
+  { field: 'maxInvestment', rule: 'USD, greater than 0. Must exceed minInvestment.' },
+  { field: 'durationDays', rule: 'Whole days, 1–3650. The cycle length.' },
+  { field: 'targetReturnMin', rule: 'Percent, 0–100. Lower end of the indicative range.' },
+  {
+    field: 'targetReturnMax',
+    rule: 'Percent, 0–100. Must be greater than or equal to targetReturnMin.',
+  },
+  { field: 'riskLevel', rule: 'LOW, MEDIUM or HIGH.' },
+  { field: 'performanceFee', rule: 'Percent, 0–100, of profit.' },
+  { field: 'managementFee', rule: 'Percent, 0–100, of deployed capital.' },
+  {
+    field: 'maxDrawdown',
+    rule: 'Percent, greater than 0 and at most 100. The stop the engine enforces.',
+  },
+  { field: 'isActive', rule: 'Optional, defaults to true. false keeps the plan hidden.' },
+];
