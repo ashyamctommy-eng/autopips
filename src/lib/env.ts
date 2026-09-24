@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+import {
+  DERIV_PUBLIC_WS_URL,
+  DERIV_REST_BASE_URL,
+  isRetiredDerivHost,
+} from '@/server/modules/broker/deriv.endpoints';
+
 /**
  * Server-side environment contract.
  *
@@ -64,7 +70,25 @@ const schema = z.object({
    * settings, which is why boot does not fail on it.
    */
   DERIV_API_TOKEN: z.string().min(1).optional().or(z.literal('')),
-  DERIV_API_URL: z.string().url().default('wss://ws.derivws.com/websockets/v3'),
+  /**
+   * Public market-data socket. Defaults to Deriv's current endpoint; the
+   * legacy ws.derivws.com host is REFUSED below rather than left to fail as a
+   * Cloudflare 520 at trade time.
+   */
+  DERIV_API_URL: z
+    .string()
+    .url()
+    .default(DERIV_PUBLIC_WS_URL)
+    .refine(
+      (value) => !isRetiredDerivHost(value),
+      {
+        message:
+          'Deriv retired this endpoint (ws.derivws.com / ws.binaryws.com: every request answers Cloudflare 520). ' +
+          `Set DERIV_API_URL to ${DERIV_PUBLIC_WS_URL}, or remove the variable to use that default.`,
+      },
+    ),
+  /** REST base for Deriv account/trading calls (OTP for an authenticated socket). */
+  DERIV_REST_URL: z.string().url().default(DERIV_REST_BASE_URL),
   /** Contract multiplier for MULTUP/MULTDOWN orders. */
   DERIV_MULTIPLIER: z.coerce.number().positive().default(100),
   /** Broker sync cadence, in seconds. */

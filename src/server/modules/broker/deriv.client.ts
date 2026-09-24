@@ -30,10 +30,23 @@ import { ApiError } from '@/lib/http';
  */
 
 /** Deriv's own default; the app_id is appended as a query parameter. */
-export const DERIV_DEFAULT_URL = 'wss://ws.derivws.com/websockets/v3';
+// Endpoint constants live in a dependency-free leaf module: `env.ts` needs them
+// for its defaults and its retired-host guard, and env.ts must not import `ws`
+// indirectly (that cycle once made every default evaluate to undefined).
+import {
+  DERIV_PUBLIC_WS_URL,
+  DERIV_REST_BASE_URL,
+  DERIV_RETIRED_HOSTS,
+  isRetiredDerivHost,
+} from './deriv.endpoints';
+
+export { DERIV_PUBLIC_WS_URL, DERIV_REST_BASE_URL, DERIV_RETIRED_HOSTS, isRetiredDerivHost };
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+
+/** @deprecated Use {@link DERIV_PUBLIC_WS_URL}; the old host is retired. */
+export const DERIV_DEFAULT_URL = DERIV_PUBLIC_WS_URL;
 
 export interface DerivErrorPayload {
   code: string;

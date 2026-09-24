@@ -94,8 +94,12 @@ function assertPayoutAboveFloor(cost: number, payout: number | null): void {
   }
 }
 
-/** Timeframe → Deriv granularity (seconds). Mirrors the candles route's list. */
-const GRANULARITY_SECONDS: Record<string, number> = {
+/**
+ * Timeframe → Deriv granularity (seconds). Mirrors the candles route's list.
+ * Exported because the PUBLIC market-data client reads the same vocabulary: one
+ * list, so a timeframe the route accepts can never be one the broker refuses.
+ */
+export const GRANULARITY_SECONDS: Record<string, number> = {
   '1m': 60,
   '5m': 300,
   '15m': 900,
@@ -104,6 +108,39 @@ const GRANULARITY_SECONDS: Record<string, number> = {
   '4h': 14_400,
   '1d': 86_400,
 };
+
+/**
+ * Deriv `candles` payload → the platform's Candle, dropping anything unusable.
+ *
+ * Pure and exported so the public market-data client maps identically: a bar the
+ * authorised socket would refuse cannot slip in through the public one.
+ *
+ * No volume is ever produced. Deriv's candle payload carries none, and a
+ * synthesised tick count would be a made-up number on a chart that shows money.
+ */
+export function mapDerivCandles(payload: unknown): { candles: Candle[]; skipped: number } {
+  const candles: Candle[] = [];
+  let skipped = 0;
+
+  for (const entry of asArray(payload)) {
+    const raw = asRecord(entry);
+    const time = epochSeconds(raw?.epoch);
+    if (
+      !raw ||
+      time === null ||
+      !isFiniteNumber(raw.open) ||
+      !isFiniteNumber(raw.high) ||
+      !isFiniteNumber(raw.low) ||
+      !isFiniteNumber(raw.close)
+    ) {
+      skipped += 1;
+      continue;
+    }
+    candles.push({ time, open: raw.open, high: raw.high, low: raw.low, close: raw.close });
+  }
+
+  return { candles: candles.sort((a, b) => a.time - b.time), skipped };
+}
 
 /** Deriv multipliers are quoted per contract type; these are the two we submit. */
 const MULTUP = 'MULTUP';
@@ -503,33 +540,14 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       `ticks_history(${symbol} ${timeframe})`,
     );
 
-    const candles: Candle[] = [];
-    let skipped = 0;
-    for (const entry of asArray(response.candles)) {
-      const raw = asRecord(entry);
-      const time = epochSeconds(raw?.epoch);
-      if (
-        !raw ||
-        time === null ||
-        !isFiniteNumber(raw.open) ||
-        !isFiniteNumber(raw.high) ||
-        !isFiniteNumber(raw.low) ||
-        !isFiniteNumber(raw.close)
-      ) {
-        skipped += 1;
-        continue;
-      }
-      // No volume: Deriv's candle payload carries none, and a synthesised tick
-      // count would be a made-up number on a chart that shows money.
-      candles.push({ time, open: raw.open, high: raw.high, low: raw.low, close: raw.close });
-    }
+    const { candles, skipped } = mapDerivCandles(response.candles);
     if (skipped > 0) {
       console.warn(
         `[deriv.adapter] ${skipped} candle(s) for ${symbol} ${timeframe} had unusable fields and were dropped.`,
       );
     }
 
-    return candles.sort((a, b) => a.time - b.time);
+    return candles;
   }
 
   /** One-sided ticks (Deriv synthetics quote a single price) are valid here. */

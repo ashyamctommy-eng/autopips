@@ -1,35 +1,33 @@
 import { z } from 'zod';
 
 import { handler, ok } from '@/lib/http';
-import { prisma } from '@/lib/prisma';
 import { requireSessionUser } from '@/server/modules/auth/session';
-import {
-  ensureBrokerConnected,
-  getAdapterForConnection,
-} from '@/server/modules/broker/broker.registry';
+import { getPublicCandles } from '@/server/modules/market/public-market.service';
 import type { Candle } from '@/server/modules/broker/broker.types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/v1/market/candles?symbol=XAUUSD&timeframe=1h&limit=300
+ * GET /api/v1/market/candles?symbol=frxXAUUSD&timeframe=1h&limit=300
  *
- * Historical candles straight from the broker adapter
- * (`BrokerAdapter.getHistoricalCandles`) for an authenticated client.
+ * Historical candles from Deriv's PUBLIC market feed, for an authenticated
+ * client. Prices are public: they never needed an account, and this route no
+ * longer pretends they do.
  *
- * ZERO FABRICATION: this route has exactly one data source — the Deriv
- * account behind the caller's own trade records. When there is no broker
- * connection for the caller, or the adapter cannot serve the request, the
- * response is an EMPTY candle array with `ok: true` and a `source` that says
- * why. The chart renders its empty state; nothing is interpolated, resampled or
- * filled in.
+ * It used to read through the broker connection behind the caller's own trades,
+ * so a client with no trades got `source: 'none'` and an empty chart — while the
+ * broker had the data the whole time. Only ACCOUNT data (balance, positions,
+ * orders) requires a registered connection.
+ *
+ * ZERO FABRICATION is unchanged: one source, every bar off the wire, unusable
+ * bars dropped rather than repaired. A failure yields an EMPTY array, never a
+ * synthesised series.
  *
  * The response is `{ symbol, timeframe, candles, source }`, where `source` is:
- *   'broker'      — the broker answered (candles may still be empty for an
- *                   instrument it has never traded);
- *   'none'        — the caller has no broker connection to read from;
- *   'unavailable' — the connection exists but the broker call failed.
+ *   'broker'      — the feed answered (an instrument with no history in the
+ *                   requested window is legitimately empty);
+ *   'unavailable' — the market-data feed could not be reached.
  */
 
 /** Symbols the bridge can be asked for: letters, digits and common separators. */
@@ -53,23 +51,6 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_CANDLES).default(300),
 });
 
-/**
- * The broker connection that serves this client.
- *
- * `BrokerConnection` is a platform-level master account and has no `userId`, so
- * the link is derived from the caller's own trade records: the connection that
- * actually executed their trades. A client with no trades has no connection to
- * read history from, and gets the empty response.
- */
-async function resolveConnectionId(userId: string): Promise<string | null> {
-  const trade = await prisma.tradeRecord.findFirst({
-    where: { investment: { userId } },
-    orderBy: { openedAt: 'desc' },
-    select: { brokerId: true },
-  });
-  return trade?.brokerId ?? null;
-}
-
 /** Keep only candles whose OHLC fields are all real numbers. */
 function verified(candle: Candle): boolean {
   return (
@@ -91,27 +72,19 @@ export const GET = handler(async (request: Request) => {
     limit: url.searchParams.get('limit') ?? undefined,
   });
 
-  const empty = (source: 'none' | 'unavailable') => ({
+  const empty = (source: 'unavailable') => ({
     symbol: query.symbol,
     timeframe: query.timeframe,
     candles: [] as Candle[],
     source,
   });
 
-  const connectionId = await resolveConnectionId(user.id);
-  if (!connectionId) return ok(empty('none'));
-
-  const connection = await prisma.brokerConnection.findUnique({ where: { id: connectionId } });
-  if (!connection) return ok(empty('none'));
+  // `user` is read for the authentication boundary only: market data is public,
+  // but an anonymous caller has no reason to consume this platform's feed.
+  void user;
 
   try {
-    const adapter = await getAdapterForConnection(connection);
-    await ensureBrokerConnected(adapter);
-    const candles = await adapter.getHistoricalCandles(
-      query.symbol,
-      query.timeframe,
-      query.limit,
-    );
+    const candles = await getPublicCandles(query.symbol, query.timeframe, query.limit);
 
     return ok({
       symbol: query.symbol,
@@ -120,10 +93,10 @@ export const GET = handler(async (request: Request) => {
       source: 'broker' as const,
     });
   } catch (err) {
-    // The connection exists but the broker did not answer. Report an empty
-    // series and the reason; never a synthesised one.
+    // The feed did not answer. Report an empty series and the reason; never a
+    // synthesised one.
     console.error(
-      '[market/candles] broker history request failed:',
+      '[market/candles] market-data request failed:',
       err instanceof Error ? err.message : err,
     );
     return ok(empty('unavailable'));

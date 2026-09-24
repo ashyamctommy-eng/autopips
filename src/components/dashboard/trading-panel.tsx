@@ -69,7 +69,12 @@ export interface TradingPanelProps {
   initialPositions: PositionDTO[];
 }
 
-type CandleSource = 'broker' | 'none' | 'unavailable';
+/**
+ * Where the candles came from. Market data is PUBLIC on Deriv, so there is no
+ * "no connection" case any more: either the feed answered (`broker`) or it could
+ * not be reached (`unavailable`).
+ */
+type CandleSource = 'broker' | 'unavailable';
 
 interface CandlesPayload {
   symbol: string;
@@ -129,8 +134,7 @@ function parseCandlesEnvelope(body: unknown): CandlesPayload | null {
   const symbol = typeof data.symbol === 'string' ? data.symbol : null;
   const timeframe = typeof data.timeframe === 'string' ? data.timeframe : null;
   const source =
-    data.source === 'broker' || data.source === 'unavailable' || data.source === 'none'
-      ? data.source
+    data.source === 'broker' || data.source === 'unavailable' ? data.source
       : null;
   if (!symbol || !timeframe || !source) return null;
 
@@ -313,11 +317,9 @@ export function TradingPanel({
   }, [chartedPositions]);
 
   const emptyMessage =
-    source === 'none'
-      ? 'No broker connection is linked to this account yet, so no verified candles are available.'
-      : source === 'unavailable'
-        ? 'The broker connection could not serve candles for this instrument right now.'
-        : 'No verified broker data for this instrument yet.';
+    source === 'unavailable'
+      ? 'The market-data feed could not be reached just now — no candles are being shown rather than a filled-in guess.'
+      : 'The broker returned no candles for this instrument in the selected window.';
 
   return (
     <div className="grid gap-4 lg:grid-cols-3">
@@ -327,8 +329,8 @@ export function TradingPanel({
             <div>
               <CardTitle>Live chart</CardTitle>
               <p className="mt-1 text-xs leading-relaxed text-muted">
-                Candles come from the broker bridge. Symbols you have never traded are not offered,
-                and an empty series is shown as such rather than filled in.
+                Candles come from the broker&apos;s public market feed. An empty series is shown as
+                empty — never filled in, interpolated or approximated.
               </p>
             </div>
             <div className="flex items-center gap-2">
