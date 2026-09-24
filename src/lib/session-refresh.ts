@@ -107,12 +107,28 @@ export async function retryAfterRefresh(
  */
 export function useSessionKeepAlive(intervalMs = 10 * 60 * 1000): void {
   React.useEffect(() => {
-    const tick = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        void refreshSession();
-      }
+    let timer: number | undefined;
+
+    const schedule = () => {
+      // Jitter, because two tabs of the same session are two timers: a shared
+      // instant of rotation would present the SAME token twice, and the server
+      // reads that as a replay and revokes the session family. The visibility
+      // check below already means only one tab per browser refreshes at a time
+      // in practice (background tabs are hidden); the spread closes the window
+      // where two visible windows would otherwise collide.
+      const spread = intervalMs * 0.15;
+      const delay = intervalMs + (Math.random() * 2 - 1) * spread;
+      timer = window.setTimeout(() => {
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+          void refreshSession();
+        }
+        schedule();
+      }, delay);
     };
-    const id = window.setInterval(tick, intervalMs);
-    return () => window.clearInterval(id);
+
+    schedule();
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [intervalMs]);
 }
