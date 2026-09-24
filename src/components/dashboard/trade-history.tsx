@@ -21,6 +21,7 @@ import { cn, relativeTime } from '@/lib/utils';
 // browser bundle. `TradeDTO` is the wire shape `listTrades` returns and is
 // declared next to the service that produces it.
 import type { TradeDTO } from '@/server/modules/account/account.service';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Trade history table (client component).
@@ -143,7 +144,7 @@ export function TradeHistory({
     try {
       const params = new URLSearchParams({ take: String(PAGE_SIZE), cursor: nextCursor });
       if (status) params.set('status', status);
-      const response = await fetch(`/api/v1/account/trades?${params.toString()}`, {
+      const response = await apiFetch(`/api/v1/account/trades?${params.toString()}`, {
         credentials: 'include',
         cache: 'no-store',
       });

@@ -2,9 +2,153 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * AUTOPIPSZ DESIGN TOKENS
+ * =======================
+ * tailwind.config.ts maps these variables onto utilities (`bg-base-850`,
+ * `text-muted`, `border-line`, …), so the palette can be swapped per surface
+ * without touching a single component.
+ *
+ *   :root                     → the dark trading surface (public site + /dashboard)
+ *   html:has(.theme-admin)    → the light executive console (/admin/*)
+ *
+ * The dark block below holds the exact literals the Tailwind config used to
+ * hard-code, so the default rendering is unchanged.
+ *
+ * Note the scope: the override sits on `html`, not on the admin wrapper, because
+ * Radix portals (dialogs, selects, tooltips) mount on document.body — OUTSIDE the
+ * wrapper — and would keep the dark palette. Nothing in the light block is
+ * reached through JavaScript, so there is no theme flash and no layout shift.
+ */
 @layer base {
   :root {
     color-scheme: dark;
+
+    /* Surfaces */
+    --c-base: 11 14 20;
+    --c-base-50: 245 247 250;
+    --c-base-100: 230 234 242;
+    --c-base-700: 26 31 43;
+    --c-base-800: 20 24 34;
+    --c-base-850: 16 20 28;
+    --c-base-900: 11 14 20;
+    --c-base-950: 7 9 16;
+
+    /* Brand accent — cyan */
+    --c-brand: 34 211 238;
+    --c-brand-50: 236 254 255;
+    --c-brand-100: 207 250 254;
+    --c-brand-300: 103 232 249;
+    --c-brand-400: 34 211 238;
+    --c-brand-500: 6 182 212;
+    --c-brand-600: 8 145 178;
+    --c-brand-700: 14 116 144;
+
+    /* Semantic */
+    --c-profit: 16 185 129;
+    --c-profit-400: 52 211 153;
+    --c-profit-500: 16 185 129;
+    --c-profit-600: 5 150 105;
+    --c-loss: 244 63 94;
+    --c-loss-400: 251 113 133;
+    --c-loss-500: 244 63 94;
+    --c-loss-600: 225 29 72;
+    --c-warn: 245 158 11;
+    --c-warn-400: 251 191 36;
+    --c-warn-500: 245 158 11;
+    --c-warn-600: 217 119 6;
+
+    /* Hairlines and muted text keep a default alpha; `/60` scales it. */
+    --c-line: 148 163 184;
+    --c-line-a: 0.14;
+    --c-muted: 148 163 184;
+    --c-muted-a: 0.65;
+
+    /* Primary call-to-action and the text that sits on a filled accent */
+    --c-cta: 6 182 212;
+    --c-on-accent: 7 9 16;
+    --c-knob: 7 9 16;
+
+    /* Modal / drawer backdrop — dark in both palettes */
+    --c-scrim: 7 9 16;
+    --c-scrim-a: 0.8;
+
+    --shadow-card: 0 1px 0 0 rgba(148, 163, 184, 0.06) inset, 0 8px 32px -12px rgba(0, 0, 0, 0.8);
+    --shadow-cta: 0 0 32px -8px rgba(34, 211, 238, 0.45);
+    --shadow-glow-cyan: 0 0 32px -8px rgba(34, 211, 238, 0.45);
+    --shadow-glow-emerald: 0 0 32px -8px rgba(16, 185, 129, 0.45);
+
+    --bg-grid:
+      linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(34, 211, 238, 0.18) 0%, rgba(11, 14, 20, 0) 100%);
+    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(16, 185, 129, 0.16) 0%, rgba(11, 14, 20, 0) 100%);
+  }
+
+  /*
+   * EXECUTIVE LIGHT PALETTE — /admin/*
+   *
+   * Slate-50 page, white cards, slate-900 text, slate-500 muted, deep-navy
+   * primary action. Same tokens, same primitives, different values: the console
+   * is a back office, and a back office read on a white surface at 9am is a
+   * different job from reading candles at midnight.
+   */
+  html:has(.theme-admin) {
+    color-scheme: light;
+
+    --c-base: 248 250 252;
+    --c-base-50: 248 250 252;
+    --c-base-100: 15 23 42; /* primary text — slate-900 */
+    --c-base-700: 241 245 249; /* badge container — slate-100 */
+    --c-base-800: 241 245 249; /* nested surface / secondary button */
+    --c-base-850: 255 255 255; /* cards — pure white */
+    --c-base-900: 248 250 252; /* page — slate-50 */
+    --c-base-950: 241 245 249; /* rails, code blocks — slate-100 */
+
+    /* Accents are darkened so they hold contrast on white. */
+    --c-brand: 8 145 178;
+    --c-brand-300: 14 116 144;
+    --c-brand-400: 8 145 178;
+    --c-brand-500: 6 182 212;
+    --c-brand-600: 21 94 117;
+    --c-brand-700: 22 78 99;
+
+    --c-profit: 5 150 105;
+    --c-profit-400: 4 120 87;
+    --c-profit-500: 5 150 105;
+    --c-profit-600: 6 95 70;
+    --c-loss: 225 29 72;
+    --c-loss-400: 190 18 60;
+    --c-loss-500: 225 29 72;
+    --c-loss-600: 159 18 57;
+    --c-warn: 217 119 6;
+    --c-warn-400: 180 83 9;
+    --c-warn-500: 217 119 6;
+    --c-warn-600: 146 64 14;
+
+    --c-line: 226 232 240; /* slate-200 */
+    --c-line-a: 1;
+    --c-muted: 100 116 139; /* subtext — slate-500 */
+    --c-muted-a: 1;
+
+    /* Solid deep navy primary action, white label (per the console spec). */
+    --c-cta: 15 23 42;
+    --c-on-accent: 255 255 255;
+    --c-knob: 255 255 255;
+
+    --c-scrim: 15 23 42;
+    --c-scrim-a: 0.45;
+
+    --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 12px 32px -16px rgba(15, 23, 42, 0.18);
+    --shadow-cta: 0 10px 24px -14px rgba(15, 23, 42, 0.55);
+    --shadow-glow-cyan: 0 0 24px -10px rgba(8, 145, 178, 0.35);
+    --shadow-glow-emerald: 0 0 24px -10px rgba(5, 150, 105, 0.3);
+
+    --bg-grid:
+      linear-gradient(rgba(15, 23, 42, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(15, 23, 42, 0.045) 1px, transparent 1px);
+    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(8, 145, 178, 0.1) 0%, rgba(248, 250, 252, 0) 100%);
+    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(5, 150, 105, 0.1) 0%, rgba(248, 250, 252, 0) 100%);
   }
 
   * {
@@ -17,7 +161,9 @@
   }
 
   body {
-    @apply bg-base-900 text-slate-200;
+    /* `text-base-100`, not a literal slate: this is the default body colour, so
+       it has to follow the active palette. */
+    @apply bg-base-900 text-base-100;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 
@@ -48,10 +194,22 @@
   :focus-visible {
     @apply outline-none ring-2 ring-brand/70 ring-offset-2 ring-offset-base-900;
   }
+
+  /* ── Light-console refinements (only reachable under .theme-admin) ── */
+  html:has(.theme-admin) ::selection {
+    background-color: rgb(var(--c-brand) / 0.18);
+    color: rgb(var(--c-base-100));
+  }
+  html:has(.theme-admin) ::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+  }
+  html:has(.theme-admin) ::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+  }
 }
 
 @layer components {
-  /* The signature surface: a hairline-bordered panel on the dark base. */
+  /* The signature surface: a hairline-bordered panel on the base. */
   .surface {
     @apply rounded-xl border border-line bg-base-850/70 shadow-card backdrop-blur-sm;
   }

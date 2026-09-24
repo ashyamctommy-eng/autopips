@@ -19,15 +19,24 @@ export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const hasSessionCookie = Boolean(request.cookies.get(ACCESS_COOKIE)?.value);
 
+  /*
+   * `/admin/login` is deliberately NEITHER an auth page nor a private one:
+   *   - signed out, an operator must reach it (a private-area redirect would
+   *     send them to the client sign-in instead);
+   *   - signed in as a CLIENT, they must still reach it to switch to a staff
+   *     account (redirecting them away would bounce /admin → /dashboard).
+   * The page itself decides, with the role read from the database.
+   */
+  const isAdminLogin = pathname === '/admin/login';
   const isDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard/');
-  const isAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
+  const isAdmin = !isAdminLogin && (pathname === '/admin' || pathname.startsWith('/admin/'));
   const isAuthPage = pathname === '/login' || pathname === '/register';
 
-  // Unauthenticated visitors hitting a private area → sign in, preserving where
-  // they were headed. Admin has its own entry point.
+  // Unauthenticated visitors hitting a private area → the sign-in for THAT area,
+  // preserving where they were headed.
   if (!hasSessionCookie && (isDashboard || isAdmin)) {
     const url = request.nextUrl.clone();
-    url.pathname = '/login';
+    url.pathname = isAdmin ? '/admin/login' : '/login';
     url.search = '';
     url.searchParams.set('next', `${pathname}${search}`);
     return NextResponse.redirect(url);

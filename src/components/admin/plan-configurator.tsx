@@ -218,7 +218,7 @@ function ExampleFormatPanel({ onUse }: { onUse: () => void }) {
         </ul>
       ) : null}
 
-      <pre className="mt-3 max-h-56 overflow-auto rounded-md border border-line bg-base-900 p-3 font-mono text-xs leading-relaxed text-base-200">
+      <pre className="mt-3 max-h-56 overflow-auto rounded-md border border-line bg-base-900 p-3 font-mono text-xs leading-relaxed text-base-100">
         {JSON.stringify(PLAN_EXAMPLE, null, 2)}
       </pre>
     </div>

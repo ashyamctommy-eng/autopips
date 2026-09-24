@@ -24,13 +24,13 @@ export const buttonVariants = cva(
       variant: {
         default: 'border border-line bg-base-700 text-base-100 hover:bg-base-700/70',
         primary:
-          'border border-brand/40 bg-brand-500 font-semibold text-base-950 hover:bg-brand-400 shadow-glow-cyan',
+          'border border-cta/40 bg-cta font-semibold text-on-accent hover:bg-cta/90 shadow-cta',
         secondary: 'border border-line bg-base-800 text-base-100 hover:bg-base-700',
         outline:
           'border border-line bg-transparent text-base-100 hover:border-brand/40 hover:bg-base-800',
         ghost: 'border border-transparent bg-transparent text-base-100 hover:bg-base-800',
-        destructive: 'border border-loss/40 bg-loss-500 font-semibold text-base-950 hover:bg-loss-400',
-        success: 'border border-profit/40 bg-profit-500 font-semibold text-base-950 hover:bg-profit-400',
+        destructive: 'border border-loss/40 bg-loss-500 font-semibold text-on-accent hover:bg-loss-400',
+        success: 'border border-profit/40 bg-profit-500 font-semibold text-on-accent hover:bg-profit-400',
         link: 'border border-transparent bg-transparent p-0 text-brand-400 underline-offset-4 hover:underline',
       },
       size: {

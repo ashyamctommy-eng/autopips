@@ -30,6 +30,7 @@ import { formatUsd } from '@/lib/money';
 import { relativeTime } from '@/lib/utils';
 import type { Candle } from '@/server/modules/broker/broker.types';
 import type { InvestmentStatusValue, PositionDTO } from '@/types/api';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Live trading screen (client component).
@@ -205,7 +206,7 @@ export function TradingPanel({
           timeframe,
           limit: String(CANDLE_LIMIT),
         });
-        const response = await fetch(`/api/v1/market/candles?${params.toString()}`, {
+        const response = await apiFetch(`/api/v1/market/candles?${params.toString()}`, {
           credentials: 'include',
           cache: 'no-store',
           signal,

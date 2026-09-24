@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Change your own password (client component).
@@ -92,7 +93,7 @@ export function ChangePasswordForm({ policy, description }: ChangePasswordFormPr
       setBusy(true);
       setError(null);
       try {
-        const response = await fetch('/api/v1/auth/password', {
+        const response = await apiFetch('/api/v1/auth/password', {
           method: 'POST',
           credentials: 'include',
           headers: { 'content-type': 'application/json', accept: 'application/json' },

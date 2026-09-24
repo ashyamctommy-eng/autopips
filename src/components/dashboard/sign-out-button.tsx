@@ -7,6 +7,7 @@ import { LogOut } from 'lucide-react';
 import { Button, type ButtonProps } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { Spinner } from '@/components/ui/spinner';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Sign out (client component).
@@ -35,7 +36,7 @@ export function SignOutButton({
     setPending(true);
     void (async () => {
       try {
-        const response = await fetch('/api/v1/auth/logout', {
+        const response = await apiFetch('/api/v1/auth/logout', {
           method: 'POST',
           credentials: 'include',
           headers: { accept: 'application/json' },

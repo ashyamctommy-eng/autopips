@@ -55,3 +55,26 @@ export function safeNextPath(
     return fallback;
   }
 }
+
+export const DEFAULT_POST_LOGIN_CONSOLE_PATH = '/admin';
+
+/**
+ * `?next=` handling for the CONSOLE sign-in page.
+ *
+ * Same allow-list as {@link safeNextPath}, with one extra rule: the destination
+ * must be inside the console. A staff member who followed a link to
+ * `/admin/login?next=/dashboard` should end up in the console, not in the client
+ * workspace — and `/admin/login` itself is dropped, because signing in and being
+ * returned to the sign-in page is a loop rather than a hop.
+ */
+export function safeConsolePath(
+  raw: string | null | undefined,
+  fallback: string = DEFAULT_POST_LOGIN_CONSOLE_PATH,
+): string {
+  const path = safeNextPath(raw, fallback);
+  if (!path.startsWith('/admin')) return fallback;
+  if (path === '/admin/login' || path.startsWith('/admin/login?') || path.startsWith('/admin/login#')) {
+    return fallback;
+  }
+  return path;
+}

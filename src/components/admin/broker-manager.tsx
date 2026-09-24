@@ -67,7 +67,7 @@ interface SyncReport {
 }
 
 function emptyForm(): AddFormState {
-  return { metaApiAccountId: '', brokerName: '', environment: 'DEMO', token: '' };
+  return { metaApiAccountId: '', brokerName: 'Deriv', environment: 'DEMO', token: '' };
 }
 
 function liveStateFor(status: string): LiveDotState {
@@ -472,21 +472,30 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
                 id="broker-account-id"
                 value={form.metaApiAccountId}
                 onChange={(event) => setForm({ ...form, metaApiAccountId: event.target.value })}
-                placeholder="e.g. 9f2c1d6e-…"
+                placeholder="e.g. CR1234567 (live) or VRTC1234567 (demo)"
                 autoComplete="off"
                 spellCheck={false}
               />
+              <p className="text-xs leading-relaxed text-muted">
+                The loginid from the Deriv account this platform may trade on — shown in the Deriv
+                dashboard and in the account switcher. It is the account identifier, not the email
+                address.
+              </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="broker-name">Broker name</Label>
+              <Label htmlFor="broker-name">Connection label</Label>
               <Input
                 id="broker-name"
                 value={form.brokerName}
                 onChange={(event) => setForm({ ...form, brokerName: event.target.value })}
-                placeholder="e.g. ICMarkets"
+                placeholder="e.g. Deriv live account"
                 autoComplete="off"
               />
+              <p className="text-xs leading-relaxed text-muted">
+                How this connection is labelled in the console. It appears in the audit trail, so a
+                name that distinguishes DEMO from LIVE is worth the ten seconds.
+              </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -524,9 +533,10 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
                 data-lpignore="true"
               />
               <p className="text-xs leading-relaxed text-muted">
-                Encrypted server-side before storage and never returned by the API or written to the
-                audit trail. It stays in this form&apos;s memory only — not in localStorage, not in
-                the URL, not in a log.
+                Create it at Deriv → Settings → API token, with <strong>Read</strong> and{' '}
+                <strong>Trade</strong> enabled. Encrypted server-side before storage and never
+                returned by the API or written to the audit trail. It stays in this form&apos;s
+                memory only — not in localStorage, not in the URL, not in a log.
               </p>
             </div>
 

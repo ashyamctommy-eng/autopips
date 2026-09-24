@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { toast } from '@/components/ui/use-toast';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Two-factor authentication management (client component).
@@ -79,7 +80,7 @@ export function TwoFactorSetup({ enabled }: TwoFactorSetupProps) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch('/api/v1/auth/2fa/setup', {
+      const response = await apiFetch('/api/v1/auth/2fa/setup', {
         credentials: 'include',
         cache: 'no-store',
         headers: { accept: 'application/json' },
@@ -122,7 +123,7 @@ export function TwoFactorSetup({ enabled }: TwoFactorSetupProps) {
       setBusy(true);
       setError(null);
       try {
-        const response = await fetch(`/api/v1/auth/2fa/${action}`, {
+        const response = await apiFetch(`/api/v1/auth/2fa/${action}`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'content-type': 'application/json', accept: 'application/json' },

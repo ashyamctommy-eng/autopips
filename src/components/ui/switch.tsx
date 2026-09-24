@@ -29,7 +29,7 @@ export const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitive.R
     <SwitchPrimitive.Root ref={ref} className={cn(switchRootVariants({ size }), className)} {...props}>
       <SwitchPrimitive.Thumb
         className={cn(
-          'pointer-events-none block rounded-full bg-base-950 shadow-card ring-0 transition-transform',
+          'pointer-events-none block rounded-full bg-knob shadow-card ring-0 transition-transform',
           size === 'sm' && 'size-3 data-[state=checked]:translate-x-3 data-[state=unchecked]:translate-x-0.5',
           (size === 'default' || size === undefined) &&
             'size-4 data-[state=checked]:translate-x-[1.15rem] data-[state=unchecked]:translate-x-0.5',

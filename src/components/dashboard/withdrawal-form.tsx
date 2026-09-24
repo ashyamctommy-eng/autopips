@@ -27,6 +27,7 @@ import { assetMeta } from '@/lib/contracts';
 import { formatUsd } from '@/lib/money';
 import { relativeTime, truncateMiddle } from '@/lib/utils';
 import type { WithdrawalDTO } from '@/types/api';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Withdrawal request form (client component).
@@ -187,7 +188,7 @@ export function WithdrawalForm({
 
     setSubmitting(true);
     try {
-      const response = await fetch('/api/v1/payments/withdrawals', {
+      const response = await apiFetch('/api/v1/payments/withdrawals', {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json', accept: 'application/json' },

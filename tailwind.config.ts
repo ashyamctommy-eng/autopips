@@ -2,7 +2,13 @@ import type { Config } from 'tailwindcss';
 
 /**
  * Autopipsz design system.
- * Dark-mode fintech: #0B0E14 base, cyan / emerald accents.
+ *
+ * Dark-by-default fintech: #0B0E14 base, cyan / emerald accents — the public
+ * site and the client trading workspace. The admin console runs a light
+ * "executive" palette from the same tokens (see `globals.css`, `.theme-admin`),
+ * so both surfaces share one set of primitives.
+ *
+ * The literal palette lives in `src/app/globals.css` as CSS variables.
  */
 const config: Config = {
   darkMode: ['class'],
@@ -19,66 +25,94 @@ const config: Config = {
     },
     extend: {
       colors: {
-        // Core surfaces
+        /*
+         * Every colour is a CSS VARIABLE, not a literal.
+         *
+         * The dark values in `src/app/globals.css` under `:root` are exactly the
+         * literals this file used to hard-code, so the default rendering is
+         * unchanged — but the palette can now be swapped per surface. The admin
+         * console does that (`html:has(.theme-admin)`), and it is what makes a
+         * user-facing light/dark toggle a one-block change instead of a sweep
+         * through every component.
+         *
+         * Channel triples (`11 14 20`) rather than hex, so Tailwind's opacity
+         * modifiers keep working: `bg-base-900/40` must stay 40% of the SURFACE
+         * colour, in whichever theme is active.
+         */
         base: {
-          DEFAULT: '#0B0E14',
-          50: '#F5F7FA',
-          100: '#E6EAF2',
-          700: '#1A1F2B',
-          800: '#141822',
-          850: '#10141C',
-          900: '#0B0E14',
-          950: '#070910',
+          DEFAULT: 'rgb(var(--c-base) / <alpha-value>)',
+          50: 'rgb(var(--c-base-50) / <alpha-value>)',
+          100: 'rgb(var(--c-base-100) / <alpha-value>)',
+          700: 'rgb(var(--c-base-700) / <alpha-value>)',
+          800: 'rgb(var(--c-base-800) / <alpha-value>)',
+          850: 'rgb(var(--c-base-850) / <alpha-value>)',
+          900: 'rgb(var(--c-base-900) / <alpha-value>)',
+          950: 'rgb(var(--c-base-950) / <alpha-value>)',
         },
-        // Brand accent — cyan
         brand: {
-          DEFAULT: '#22D3EE',
-          50: '#ECFEFF',
-          100: '#CFFAFE',
-          300: '#67E8F9',
-          400: '#22D3EE',
-          500: '#06B6D4',
-          600: '#0891B2',
-          700: '#0E7490',
+          DEFAULT: 'rgb(var(--c-brand) / <alpha-value>)',
+          50: 'rgb(var(--c-brand-50) / <alpha-value>)',
+          100: 'rgb(var(--c-brand-100) / <alpha-value>)',
+          300: 'rgb(var(--c-brand-300) / <alpha-value>)',
+          400: 'rgb(var(--c-brand-400) / <alpha-value>)',
+          500: 'rgb(var(--c-brand-500) / <alpha-value>)',
+          600: 'rgb(var(--c-brand-600) / <alpha-value>)',
+          700: 'rgb(var(--c-brand-700) / <alpha-value>)',
         },
-        // Profit / positive — emerald
         profit: {
-          DEFAULT: '#10B981',
-          400: '#34D399',
-          500: '#10B981',
-          600: '#059669',
+          DEFAULT: 'rgb(var(--c-profit) / <alpha-value>)',
+          400: 'rgb(var(--c-profit-400) / <alpha-value>)',
+          500: 'rgb(var(--c-profit-500) / <alpha-value>)',
+          600: 'rgb(var(--c-profit-600) / <alpha-value>)',
         },
         loss: {
-          DEFAULT: '#F43F5E',
-          400: '#FB7185',
-          500: '#F43F5E',
-          600: '#E11D48',
+          DEFAULT: 'rgb(var(--c-loss) / <alpha-value>)',
+          400: 'rgb(var(--c-loss-400) / <alpha-value>)',
+          500: 'rgb(var(--c-loss-500) / <alpha-value>)',
+          600: 'rgb(var(--c-loss-600) / <alpha-value>)',
         },
         warn: {
-          DEFAULT: '#F59E0B',
-          400: '#FBBF24',
-          500: '#F59E0B',
-          600: '#D97706',
+          DEFAULT: 'rgb(var(--c-warn) / <alpha-value>)',
+          400: 'rgb(var(--c-warn-400) / <alpha-value>)',
+          500: 'rgb(var(--c-warn-500) / <alpha-value>)',
+          600: 'rgb(var(--c-warn-600) / <alpha-value>)',
         },
-        line: 'rgba(148, 163, 184, 0.14)',
-        muted: 'rgba(148, 163, 184, 0.65)',
+        /*
+         * The primary call-to-action. Its own token pair rather than `brand`:
+         * a cyan fill with near-black text is right on the dark trading surface,
+         * and unreadable in a light back office, where the same button is deep
+         * navy with white text. One primitive, two palettes.
+         */
+        cta: {
+          DEFAULT: 'rgb(var(--c-cta) / <alpha-value>)',
+        },
+        'on-accent': 'rgb(var(--c-on-accent) / <alpha-value>)',
+        /* Switch thumb: needs contrast against BOTH palettes' tracks. */
+        knob: 'rgb(var(--c-knob) / <alpha-value>)',
+        /* Modal / drawer backdrop. Must stay dark in BOTH themes. */
+        scrim: 'rgb(var(--c-scrim) / var(--c-scrim-a))',
+        /*
+         * Hairlines and muted text carry a DEFAULT alpha, so `border-line/60`
+         * must scale it rather than replace it: `calc(0.14 * 0.6)`.
+         */
+        line: 'rgb(var(--c-line) / calc(var(--c-line-a) * <alpha-value>))',
+        muted: 'rgb(var(--c-muted) / calc(var(--c-muted-a) * <alpha-value>))',
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       backgroundImage: {
-        'grid-dark':
-          'linear-gradient(rgba(148,163,184,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.06) 1px, transparent 1px)',
-        'glow-cyan':
-          'radial-gradient(60% 60% at 50% 0%, rgba(34,211,238,0.18) 0%, rgba(11,14,20,0) 100%)',
-        'glow-emerald':
-          'radial-gradient(60% 60% at 50% 0%, rgba(16,185,129,0.16) 0%, rgba(11,14,20,0) 100%)',
+        // Textures are themeable: a near-black grid is invisible on white.
+        'grid-dark': 'var(--bg-grid)',
+        'glow-cyan': 'var(--bg-glow-cyan)',
+        'glow-emerald': 'var(--bg-glow-emerald)',
       },
       boxShadow: {
-        card: '0 1px 0 0 rgba(148,163,184,0.06) inset, 0 8px 32px -12px rgba(0,0,0,0.8)',
-        'glow-cyan': '0 0 32px -8px rgba(34,211,238,0.45)',
-        'glow-emerald': '0 0 32px -8px rgba(16,185,129,0.45)',
+        card: 'var(--shadow-card)',
+        cta: 'var(--shadow-cta)',
+        'glow-cyan': 'var(--shadow-glow-cyan)',
+        'glow-emerald': 'var(--shadow-glow-emerald)',
       },
       keyframes: {
         'accordion-down': {

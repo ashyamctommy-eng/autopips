@@ -4,6 +4,7 @@ import * as React from 'react';
 import { X } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useSessionKeepAlive } from '@/lib/session-refresh';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/toaster';
@@ -60,6 +61,10 @@ export function AppShell({
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
+  // Mounted once for both dashboards: the access token expires after 15 minutes,
+  // and until this existed nothing in the browser ever renewed it.
+  useSessionKeepAlive();
+
   React.useEffect(() => {
     if (!mobileOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -78,7 +83,16 @@ export function AppShell({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className={cn('relative min-h-screen bg-base text-base-100', className)}>
+      <div
+        className={cn(
+          'relative min-h-screen bg-base text-base-100',
+          // The console runs the light executive palette. The class scopes the
+          // token override in globals.css — `html:has(.theme-admin)`, so Radix
+          // portals rendered onto <body> get it too.
+          variant === 'admin' && 'theme-admin',
+          className,
+        )}
+      >
         {/* Design-system background: subtle grid + top glow. */}
         <div
           aria-hidden
@@ -101,7 +115,7 @@ export function AppShell({
                 type="button"
                 aria-label="Close navigation"
                 onClick={() => setMobileOpen(false)}
-                className="absolute inset-0 bg-base-950/80 backdrop-blur-sm"
+                className="absolute inset-0 bg-scrim backdrop-blur-sm"
               />
               <div
                 role="dialog"

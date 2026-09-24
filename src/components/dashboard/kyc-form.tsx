@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import type { KycProfileDTO } from '@/types/api';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Manual KYC submission form (client component).
@@ -262,7 +263,7 @@ export function KycForm({ initial }: KycFormProps) {
       form.append('proofOfAddress', files.proofOfAddress);
       form.append('selfie', files.selfie);
 
-      const uploadResponse = await fetch('/api/v1/kyc/upload', {
+      const uploadResponse = await apiFetch('/api/v1/kyc/upload', {
         method: 'POST',
         body: form,
         credentials: 'include',
@@ -284,7 +285,7 @@ export function KycForm({ initial }: KycFormProps) {
       }
 
       const keys = uploadData.data;
-      const submitResponse = await fetch('/api/v1/kyc/submit', {
+      const submitResponse = await apiFetch('/api/v1/kyc/submit', {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json', accept: 'application/json' },

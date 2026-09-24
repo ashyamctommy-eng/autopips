@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/layout/app-shell';
 import type { TopbarNotification, TopbarUser } from '@/components/layout/topbar';
 import type { KycStatusValue } from '@/types/api';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Thin client boundary around {@link AppShell}.
@@ -44,7 +45,7 @@ export function DashboardShell({
     setSigningOut(true);
     void (async () => {
       try {
-        await fetch('/api/v1/auth/logout', {
+        await apiFetch('/api/v1/auth/logout', {
           method: 'POST',
           credentials: 'include',
           headers: { accept: 'application/json' },

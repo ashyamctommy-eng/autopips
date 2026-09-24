@@ -1,3 +1,4 @@
+import { retryAfterRefresh } from '@/lib/session-refresh';
 import type { ApiEnvelope, ApiErrorEnvelope } from '@/types/api';
 
 /**
@@ -13,6 +14,10 @@ import type { ApiEnvelope, ApiErrorEnvelope } from '@/types/api';
  *
  * It never touches localStorage and never logs a request body — admin request
  * bodies can carry a broker API token.
+ *
+ * It also repairs an expired session before reporting failure: see
+ * `src/lib/session-refresh.ts` for why a 401 from the console was almost always
+ * a 15-minute access token rather than a permissions problem.
  */
 
 export interface AdminApiErrorInit {
@@ -67,17 +72,27 @@ export async function adminRequest<T>(
 ): Promise<T> {
   const hasBody = options.body !== undefined;
 
-  const response = await fetch(path, {
-    method: options.method ?? 'GET',
-    headers: {
-      accept: 'application/json',
-      ...(hasBody ? { 'content-type': 'application/json' } : {}),
-    },
-    body: hasBody ? JSON.stringify(options.body) : undefined,
-    cache: 'no-store',
-    credentials: 'same-origin',
-    signal: options.signal,
-  });
+  const send = () =>
+    fetch(path, {
+      method: options.method ?? 'GET',
+      headers: {
+        accept: 'application/json',
+        ...(hasBody ? { 'content-type': 'application/json' } : {}),
+      },
+      body: hasBody ? JSON.stringify(options.body) : undefined,
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal: options.signal,
+    });
+
+  /*
+   * A 401 here is usually a stale access token, not a missing role: the token
+   * lives 15 minutes and the console is used for longer than that. Rotate the
+   * session once and replay the request — re-issuing is safe because the handler
+   * rejected it before doing anything. If the refresh also fails, the 401 stands
+   * and the operator sees the API's own message.
+   */
+  const response = await retryAfterRefresh(await send(), send);
 
   let payload: ApiEnvelope<T> | ApiErrorEnvelope | null = null;
   try {

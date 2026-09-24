@@ -27,6 +27,7 @@ import { assetMeta } from '@/lib/contracts';
 import { formatUsd } from '@/lib/money';
 import { relativeTime } from '@/lib/utils';
 import type { DepositDTO } from '@/types/api';
+import { apiFetch } from '@/lib/session-refresh';
 
 /**
  * Deposit creation + settlement panel (client component).
@@ -318,7 +319,7 @@ export function DepositForm({ currencies, providerReachable, initialDeposit }: D
   const refreshDeposit = React.useCallback(async (id: string) => {
     setRefreshing(true);
     try {
-      const response = await fetch(`/api/v1/payments/deposits/${id}`, {
+      const response = await apiFetch(`/api/v1/payments/deposits/${id}`, {
         credentials: 'include',
         cache: 'no-store',
         headers: { accept: 'application/json' },
@@ -377,7 +378,7 @@ export function DepositForm({ currencies, providerReachable, initialDeposit }: D
 
     setSubmitting(true);
     try {
-      const response = await fetch('/api/v1/payments/deposits', {
+      const response = await apiFetch('/api/v1/payments/deposits', {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json', accept: 'application/json' },

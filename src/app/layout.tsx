@@ -61,7 +61,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable} dark`} suppressHydrationWarning>
-      <body className="min-h-screen bg-base-900 font-sans text-slate-200">
+      <body className="min-h-screen bg-base-900 font-sans text-base-100">
         <AppProviders>{children}</AppProviders>
       </body>
     </html>
