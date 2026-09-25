@@ -58,6 +58,7 @@ export function BotRiskPanel({ initial, instruments, instrumentsError }: BotRisk
   const [maxStake, setMaxStake] = React.useState(String(initial.maxStakeUsd));
   const [dailyLoss, setDailyLoss] = React.useState(String(initial.dailyLossLimitUsd));
   const [minPayout, setMinPayout] = React.useState(String(initial.minPayoutPercentage));
+  const [riskPerTrade, setRiskPerTrade] = React.useState(String(initial.riskPerTradePct));
   const [restrictSymbols, setRestrictSymbols] = React.useState(initial.allowedSymbols.length > 0);
   const [selected, setSelected] = React.useState<Set<string>>(new Set(initial.allowedSymbols));
   const [search, setSearch] = React.useState('');
@@ -101,6 +102,7 @@ export function BotRiskPanel({ initial, instruments, instrumentsError }: BotRisk
           max_stake_limit: Number(maxStake) || 0,
           daily_loss_limit: Number(dailyLoss) || 0,
           min_payout_percentage: Number(minPayout) || 0,
+          risk_per_trade_pct: Number(riskPerTrade) || 0,
           allowed_symbols: restrictSymbols ? Array.from(selected) : [],
         }),
       });
@@ -132,7 +134,7 @@ export function BotRiskPanel({ initial, instruments, instrumentsError }: BotRisk
     } finally {
       setBusy(false);
     }
-  }, [dailyLoss, maxStake, minPayout, restrictSymbols, selected]);
+  }, [dailyLoss, maxStake, minPayout, riskPerTrade, restrictSymbols, selected]);
 
   return (
     <Card>
@@ -194,6 +196,25 @@ export function BotRiskPanel({ initial, instruments, instrumentsError }: BotRisk
             />
             <p className="text-xs text-muted">
               0 = no floor. A contract type that quotes no payout is refused while a floor is set.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="risk-per-trade">Risk per trade (% of capital)</Label>
+            <Input
+              id="risk-per-trade"
+              type="number"
+              min={0}
+              step="0.1"
+              value={riskPerTrade}
+              onChange={(event) => setRiskPerTrade(event.target.value)}
+              disabled={busy}
+            />
+            <p className="text-xs leading-relaxed text-muted">
+              How much of an investment&apos;s capital one contract may put at risk. On a Deriv
+              multiplier the stake <em>is</em> the maximum loss, so this is the loss budget for a
+              single order — the exposure it opens (stake × multiplier) is derived from it, not the
+              other way round. 0 refuses every stake-sized order.
             </p>
           </div>
         </div>

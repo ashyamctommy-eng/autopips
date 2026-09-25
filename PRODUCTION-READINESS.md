@@ -184,7 +184,7 @@ None of it has been tested live; that is stated plainly rather than assumed away
 | 6 | **Hosting + TLS + DNS** | `autopips.pro` pointed at the host, certificates issued, **and the `/ws/` location proxied with WebSocket upgrade support** — without it the real-time tier silently falls back and never connects. |
 | 7 | **Container images** | No Docker daemon exists in the build sandbox, so the Dockerfiles and compose file are reasoned and syntax-validated but **never built**. First `docker compose build` should be treated as the first real test. |
 | 8 | **Compliance sign-off** | The platform deliberately makes no regulatory claim. Whoever operates `autopips.pro` must confirm their own licensing position, terms of service, and privacy policy for the jurisdictions they accept clients from. |
-| 9 | **Deriv contract/exposure model** | The ledger computes open exposure as `volume × entryPrice` (MT5 lots); Deriv exposure is **stake × multiplier** and Deriv reports no lots, no contract size, no tick value and no free margin. This model must be decided and reworked before positions can be booked to `TradeRecord`. Until then the bot refuses to place Deriv trades. |
+| 9 | **Deriv contract/exposure model** | **SETTLED 2026-09-25** — see `HANDOVER.md` §Exposure model. Risk is sized in dollars at risk (the STAKE, which is the maximum loss on a multiplier contract), `TradeRecord.notional` stores `stake × multiplier` explicitly, and `getOpenExposure()` prefers it over `volume × entryPrice`. Implemented in `src/server/modules/bot/stake.allocator.ts` + the `'stake'` branch of `order.manager.ts`; 13 unit tests. No order has been placed yet: that needs the worker deployed (see HANDOVER.md §7). |
 
 ---
 

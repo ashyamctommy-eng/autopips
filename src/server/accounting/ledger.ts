@@ -315,13 +315,32 @@ export async function getRealizedPnlToday(): Promise<Decimal> {
 }
 
 /** Open market exposure: notional value of positions currently open. */
+/**
+ * Open market exposure, in USD.
+ *
+ * Prefers the broker's OWN notional when the row carries one. That matters for
+ * stake-denominated contracts: a Deriv multiplier's exposure is stake ×
+ * multiplier, while `volume` holds the stake, so `volume × entryPrice` would
+ * overstate it by a factor of the entry price (a $100 stake on gold at 4270
+ * reads as $427,000 instead of the $10,000 it is at 100×).
+ *
+ * Falls back to volume × entryPrice, which is exactly right for a
+ * lot-denominated broker — so both shapes are represented honestly instead of
+ * one being coerced into the other.
+ */
 export async function getOpenExposure(): Promise<{ notional: Decimal; positions: number }> {
   const open = await prisma.tradeRecord.findMany({
     where: { status: 'OPEN' },
-    select: { volume: true, entryPrice: true },
+    select: { volume: true, entryPrice: true, notional: true },
   });
 
-  const notional = sum(open.map((p) => D(p.volume).times(D(p.entryPrice))));
+  const notional = sum(
+    open.map((p) =>
+      p.notional === null || p.notional === undefined
+        ? D(p.volume).times(D(p.entryPrice))
+        : D(p.notional),
+    ),
+  );
 
   return { notional: usd(notional), positions: open.length };
 }

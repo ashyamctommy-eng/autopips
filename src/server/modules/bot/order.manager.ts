@@ -39,10 +39,18 @@ import type {
   PlaceOrderRequest,
   SymbolSpec,
 } from '../broker/broker.types';
+import { getSettingNumber } from '@/server/modules/settings/settings.service';
 import { checkTradingAllowed } from './bot-control.service';
 import { allocateAcrossInvestments, MASTER_TO_CLIENT_FORMULA } from './lot.allocator';
 import { evaluatePreTradeRisk, type RiskContextWithFloor } from './risk.engine';
-import type { LotAllocation, OrderOutcome, RiskDecision, TradeSignal } from './bot.types';
+import { allocateStake } from './stake.allocator';
+import type {
+  LotAllocation,
+  OrderOutcome,
+  RiskDecision,
+  SignalAllocation,
+  TradeSignal,
+} from './bot.types';
 
 /** Signals already handled by this platform (idempotency guard). */
 function signalClaimKey(signalId: string): string {
@@ -62,7 +70,7 @@ export interface SignalExecutionResult {
   status: 'REJECTED' | 'NO_CONNECTION' | 'NO_ALLOCATIONS' | 'EXECUTED';
   reason?: string;
   decision?: RiskDecision;
-  allocations: LotAllocation[];
+  allocations: SignalAllocation[];
   outcomes: OrderOutcome[];
 }
 
@@ -279,7 +287,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'ACCOUNT_STATE_UNAVAILABLE', allocations: [], outcomes: [] };
   }
 
-  if (!isLotDenominated(adapter)) {
+  if (adapter.sizeDenomination !== 'lots' && adapter.sizeDenomination !== 'stake') {
     const reason = 'BROKER_SIZE_DENOMINATION_UNSUPPORTED';
     await recordAudit({
       action: AUDIT.RISK_CHECK_FAILED,
@@ -295,7 +303,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     await publishActivity(
       makeActivity(
         'SIGNAL_REFUSED',
-        `Signal ${signal.signalId} refused: this broker denominates size in ${adapter.sizeDenomination}, and the lot-based sizing path cannot price it without inventing a contract size.`,
+        `Signal ${signal.signalId} refused: this broker denominates size in ${adapter.sizeDenomination}, which neither the lot nor the stake sizing path can price without inventing a contract size.`,
         'warning',
         { ...configClaim, reason, sizeDenomination: adapter.sizeDenomination },
         investmentRooms(null),
@@ -408,38 +416,96 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     await redis.set(masterPeakEquityKey(conn.derivAccountId), masterNow.toString());
   }
 
-  if (!spec) {
-    // Unreachable when the risk gate passed (SYMBOL_NOT_TRADABLE would have fired),
-    // but the pipeline must not continue without a real specification.
-    return { signalId: signal.signalId, status: 'NO_ALLOCATIONS', reason: 'NO_SYMBOL_SPEC', decision, allocations: [], outcomes: [] };
-  }
+  let allocations: SignalAllocation[];
 
-  if (account.equity === null) {
-    // Sizing scales client lots against master equity; without a figure that is
-    // not a scale factor, it is a division by an unknown.
-    if (claimed !== null) await redis.del(claimKey);
-    return {
-      signalId: signal.signalId,
-      status: 'NO_CONNECTION',
-      reason: 'MASTER_EQUITY_UNREPORTED',
-      allocations: [],
-      outcomes: [],
-    };
-  }
+  if (adapter.sizeDenomination === 'stake') {
+    /*
+     * Stake sizing. The client's own capital and the plan's drawdown stop are the
+     * inputs — NOT the master account's lot size or equity, which describe the
+     * broker account rather than the money being risked. A symbol spec is
+     * therefore not required here: Deriv publishes none for contracts, and
+     * demanding one was what used to refuse every contract order.
+     */
+    const riskPerTradePct = getSettingNumber('risk.risk_per_trade_pct');
+    const platformCapUsd = getSettingNumber('risk.max_stake_usd');
+    const multiplier = adapter.stakeMultiplier ?? 0;
 
-  const allocations = allocateAcrossInvestments({
-    masterVolume: signal.masterVolume,
-    masterEquity: account.equity,
-    symbolSpec: spec,
-    minClientCapitalUsd: env.RISK_MIN_CLIENT_CAPITAL_USD,
-    investments: investments.map((investment) => ({
-      investmentId: investment.id,
-      capitalUsd: investment.capitalUsd,
-    })),
-  });
+    allocations = investments.map((investment) => {
+      const sized = allocateStake({
+        capitalUsd: investment.capitalUsd,
+        currentValUsd: investment.currentValUsd,
+        maxDrawdownPct: investment.maxDrawdownPct,
+        riskPerTradePct,
+        platformCapUsd,
+        multiplier,
+      });
+      const stake = sized.stake ?? 0;
+      return {
+        denomination: 'stake' as const,
+        investmentId: investment.id,
+        stake,
+        notional: sized.notional ?? 0,
+        ratio:
+          investment.capitalUsd !== null && investment.capitalUsd > 0
+            ? stake / investment.capitalUsd
+            : 0,
+        skipped: sized.skipped,
+        ...(sized.skipReason ? { skipReason: sized.skipReason } : {}),
+        bounds: sized.bounds,
+      };
+    });
+  } else {
+    if (!spec) {
+      // Unreachable when the risk gate passed (SYMBOL_NOT_TRADABLE would have fired),
+      // but the pipeline must not continue without a real specification.
+      return { signalId: signal.signalId, status: 'NO_ALLOCATIONS', reason: 'NO_SYMBOL_SPEC', decision, allocations: [], outcomes: [] };
+    }
+
+    if (account.equity === null) {
+      // Sizing scales client lots against master equity; without a figure that is
+      // not a scale factor, it is a division by an unknown.
+      if (claimed !== null) await redis.del(claimKey);
+      return {
+        signalId: signal.signalId,
+        status: 'NO_CONNECTION',
+        reason: 'MASTER_EQUITY_UNREPORTED',
+        allocations: [],
+        outcomes: [],
+      };
+    }
+
+    allocations = allocateAcrossInvestments({
+      masterVolume: signal.masterVolume,
+      masterEquity: account.equity,
+      symbolSpec: spec,
+      minClientCapitalUsd: env.RISK_MIN_CLIENT_CAPITAL_USD,
+      investments: investments.map((investment) => ({
+        investmentId: investment.id,
+        capitalUsd: investment.capitalUsd,
+      })),
+    }).map((allocation) => ({ denomination: 'lots' as const, ...allocation }));
+  }
 
   // Audit every allocation (including the skipped ones) before touching the broker.
   for (const allocation of allocations) {
+    if (allocation.denomination === 'stake') {
+      await recordAudit({
+        action: AUDIT.STAKE_ALLOCATED,
+        details: {
+          ...configClaim,
+          investmentId: allocation.investmentId,
+          stake: allocation.stake,
+          notional: allocation.notional,
+          multiplier: adapter.stakeMultiplier ?? null,
+          ratioOfCapital: allocation.ratio,
+          skipped: allocation.skipped,
+          skipReason: allocation.skipReason ?? null,
+          bounds: allocation.bounds,
+        },
+      });
+      continue;
+    }
+
     await recordAudit({
       action: AUDIT.LOT_ALLOCATED,
       details: {
@@ -477,7 +543,11 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     const request: PlaceOrderRequest = {
       symbol: signal.symbol,
       direction: signal.direction,
-      volume: allocation.clientVolume,
+      // One or the other, never both: a request carrying a lot size to a stake
+      // broker is refused by the adapter rather than converted.
+      ...(allocation.denomination === 'stake'
+        ? { stake: allocation.stake }
+        : { volume: allocation.clientVolume }),
       ...(signal.stopLoss !== undefined ? { stopLoss: signal.stopLoss } : {}),
       ...(signal.takeProfit !== undefined ? { takeProfit: signal.takeProfit } : {}),
       comment: clientOrderId,
@@ -492,7 +562,8 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
         clientOrderId,
         symbol: request.symbol,
         direction: request.direction,
-        volume: request.volume,
+        volume: request.volume ?? null,
+        stake: request.stake ?? null,
         stopLoss: request.stopLoss ?? null,
         takeProfit: request.takeProfit ?? null,
       },
@@ -576,7 +647,15 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
             derivContractId: result.positionId,
             instrument: request.symbol,
             direction: request.direction,
-            volume: toPrismaDecimal(result.volume ?? allocation.clientVolume, 5),
+            volume: toPrismaDecimal(
+              result.volume ??
+                (allocation.denomination === 'stake' ? allocation.stake : allocation.clientVolume),
+              5,
+            ),
+            notional:
+              result.notional === undefined || result.notional === null
+                ? null
+                : toPrismaDecimal(result.notional, 2),
             entryPrice: toPrismaDecimal(result.fillPrice, 5),
             stopLoss: request.stopLoss === undefined ? null : toPrismaDecimal(request.stopLoss, 5),
             takeProfit: request.takeProfit === undefined ? null : toPrismaDecimal(request.takeProfit, 5),

@@ -80,6 +80,37 @@ export interface RiskContext {
   symbolTradable: boolean;
 }
 
+/**
+ * A sized order for a stake-denominated broker.
+ *
+ * `stake` is the money at risk; `notional` is the exposure it opens
+ * (stake × multiplier). Kept apart from `LotAllocation` rather than reusing
+ * `clientVolume`, because the two numbers mean different things and collapsing
+ * them is exactly how a stake ends up being treated as a lot.
+ */
+export interface StakeAllocationRecord {
+  investmentId: string;
+  /** Money at risk, USD. Zero when skipped (audited with the reason). */
+  stake: number;
+  /** Exposure the order opens: stake × multiplier. */
+  notional: number;
+  /** Stake ÷ capital — the fraction of the client's capital being risked. */
+  ratio: number;
+  skipped: boolean;
+  skipReason?: string;
+  /** The bounds the decision was made against, for the audit trail. */
+  bounds: {
+    riskBudgetUsd: number | null;
+    drawdownBudgetUsd: number | null;
+    platformCapUsd: number | null;
+  };
+}
+
+/** Per-investment sizing result, tagged with the denomination that produced it. */
+export type SignalAllocation =
+  | ({ denomination: 'lots' } & LotAllocation)
+  | ({ denomination: 'stake' } & StakeAllocationRecord);
+
 export interface LotAllocation {
   investmentId: string;
   /** Client lot size after scaling and spec rounding. */

@@ -57,6 +57,8 @@ export interface BotControlState {
   maxStakeUsd: number;
   dailyLossLimitUsd: number;
   minPayoutPercentage: number;
+  /** Percent of an investment's capital a single contract may put at risk. */
+  riskPerTradePct: number;
   /** Empty = every broker symbol the connection offers. */
   allowedSymbols: string[];
 }
@@ -111,6 +113,7 @@ function effectiveLimits() {
     maxStakeUsd: getSettingNumber('risk.max_stake_usd'),
     dailyLossLimitUsd: getSettingNumber('risk.daily_loss_limit_usd'),
     minPayoutPercentage: getSettingNumber('risk.min_payout_percentage'),
+    riskPerTradePct: getSettingNumber('risk.risk_per_trade_pct'),
     allowedSymbols: getSettingSymbols('risk.allowed_symbols'),
   };
 }

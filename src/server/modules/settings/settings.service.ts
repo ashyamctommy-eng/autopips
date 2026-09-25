@@ -45,6 +45,7 @@ export type PlatformSettingKey =
   | 'bot.enabled'
   | 'bot.disabled_reason'
   | 'risk.max_stake_usd'
+  | 'risk.risk_per_trade_pct'
   | 'risk.daily_loss_limit_usd'
   | 'risk.allowed_symbols'
   | 'risk.min_payout_percentage';
@@ -161,6 +162,16 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     kind: 'number',
     defaultValue: '0',
     inputHint: 'e.g. 500',
+  },
+  {
+    key: 'risk.risk_per_trade_pct',
+    envName: 'RISK_PER_TRADE_PCT',
+    label: 'Risk per trade (% of capital)',
+    description:
+      'How much of an investment\'s capital a single trade may put at risk. On a Derive multiplier contract the stake IS the maximum loss, so this is the loss budget for one order — the notional it opens is derived from it. 0 refuses every stake-sized order.',
+    kind: 'number',
+    defaultValue: '1',
+    inputHint: 'e.g. 1',
   },
   {
     key: 'risk.min_payout_percentage',

@@ -178,8 +178,18 @@ export interface PlaceOrderResult {
   positionId?: string;
   /** Filled/dealt price as reported by the broker. */
   fillPrice?: number;
-  /** Lots for MT5; the stake for Deriv. Null when the broker reported neither. */
+  /**
+   * Lots for a lot-denominated broker; the STAKE (money at risk, and the maximum
+   * loss) for a stake-denominated one. Null when the broker reported neither.
+   */
   volume?: number | null;
+  /**
+   * Notional exposure the position opened, in account currency, when the broker
+   * defines one. For a Deriv multiplier contract this is stake × multiplier and
+   * is NOT `volume × price` — the ledger stores it so the exposure metric does
+   * not have to guess which meaning `volume` carries.
+   */
+  notional?: number | null;
   brokerMessage?: string;
   errorCode?: string;
 }
@@ -257,6 +267,13 @@ export interface BrokerEventHandlers {
 }
 
 export interface BrokerAdapter {
+  /**
+   * Contract multiplier a stake-denominated broker will use when a request omits
+   * one. Exposed so the SIZING path can report the exposure it is opening
+   * without duplicating the adapter's default — two copies of "100" is how a
+   * notional silently stops matching the broker's.
+   */
+  readonly stakeMultiplier?: number;
   readonly accountId: string;
 
   /** Establish streaming + RPC connectivity. Idempotent. */

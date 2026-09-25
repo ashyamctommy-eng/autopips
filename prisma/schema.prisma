@@ -210,7 +210,16 @@ model TradeRecord {
   derivContractId   String?
   instrument        String // e.g. "XAUUSD"
   direction         String // "BUY" | "SELL"
-  volume            Decimal          @db.Decimal(18, 5) // Lot size
+  /// Lots for a lot-denominated broker; for a STAKE-denominated broker (Deriv
+  /// multipliers) this is the STAKE — the money at risk and the maximum loss.
+  volume            Decimal          @db.Decimal(18, 5)
+  /// Broker notional exposure in USD, when the broker defines one.
+  ///
+  /// For a multiplier contract the exposure is stake × multiplier, and
+  /// `volume` (the stake) × entryPrice is NOT it — leaving this NULL makes the
+  /// open-exposure metric fall back to volume × price, which is correct for lots
+  /// and would be wrong by a factor of the price for a stake.
+  notional          Decimal?         @db.Decimal(18, 2)
   entryPrice        Decimal          @db.Decimal(18, 5)
   exitPrice         Decimal?         @db.Decimal(18, 5)
   stopLoss          Decimal?         @db.Decimal(18, 5)

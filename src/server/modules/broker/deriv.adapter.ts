@@ -202,6 +202,9 @@ export function mapDerivActiveSymbols(payload: unknown): InstrumentInfo[] {
   return instruments;
 }
 
+/** Deriv's default multiplier when neither the order nor the config sets one. */
+export const DEFAULT_DERIV_MULTIPLIER = 100;
+
 /** Deriv multipliers are quoted per contract type; these are the two we submit. */
 const MULTUP = 'MULTUP';
 const MULTDOWN = 'MULTDOWN';
@@ -265,6 +268,9 @@ export class DerivBrokerAdapter implements BrokerAdapter {
   public readonly accountId: string;
   readonly sizeDenomination: SizeDenomination = 'stake';
 
+  /** The multiplier this adapter opens contracts with (config, else Deriv's default). */
+  readonly stakeMultiplier: number;
+
   private readonly config: DerivBrokerAdapterConfig;
   private client: DerivClient | null = null;
   private handlers: BrokerEventHandlers = {};
@@ -287,6 +293,7 @@ export class DerivBrokerAdapter implements BrokerAdapter {
 
   constructor(config: DerivBrokerAdapterConfig) {
     this.config = config;
+    this.stakeMultiplier = config.multiplier ?? DEFAULT_DERIV_MULTIPLIER;
     this.accountId = config.loginId?.trim() || `deriv:${config.appId}`;
   }
 
@@ -1009,7 +1016,7 @@ export class DerivBrokerAdapter implements BrokerAdapter {
 
     const authorized = await this.requireTradingAuth();
     const client = await this.clientOrConnect();
-    const multiplier = request.multiplier ?? this.config.multiplier ?? 100;
+    const multiplier = request.multiplier ?? this.stakeMultiplier;
 
     const proposalResponse = await client.request<{ proposal?: Record<string, unknown> }>(
       {
@@ -1064,7 +1071,12 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       orderId: contractId,
       positionId: contractId,
       fillPrice: buy && isFiniteNumber(buy.buy_price) ? buy.buy_price : price,
+      // The stake is the money at risk (and the maximum loss) on a multiplier
+      // contract: that is what `volume` carries for this broker.
       volume: stake,
+      // And this is the exposure the contract actually opened: stake × multiplier.
+      // Both are reported, so the ledger never has to derive one from the other.
+      notional: Number((stake * multiplier).toFixed(2)),
       brokerMessage: `Deriv contract ${contractId}`,
     };
   }

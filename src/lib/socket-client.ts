@@ -165,6 +165,8 @@ export interface SystemStatusPayload {
   maxStakeUsd: number;
   dailyLossLimitUsd: number;
   minPayoutPercentage: number;
+  /** Percent of an investment's capital a single stake-sized order may risk. */
+  riskPerTradePct: number;
   allowedSymbols: string[];
 }
 

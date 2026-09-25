@@ -75,6 +75,13 @@ export const AUDIT = {
   BOT_STARTED: 'BOT_STARTED',
   BOT_STOPPED: 'BOT_STOPPED',
   LOT_ALLOCATED: 'LOT_ALLOCATED',
+  /**
+   * One per investment on every stake-sized signal, including the skipped ones.
+   * Separate from LOT_ALLOCATED because the numbers mean different things: a
+   * stake is money at risk, a lot is a size, and an audit trail that blurs them
+   * cannot answer "how much was put at risk".
+   */
+  STAKE_ALLOCATED: 'STAKE_ALLOCATED',
 
   // admin
   PLAN_CREATED: 'PLAN_CREATED',
