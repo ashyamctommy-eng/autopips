@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import {
   Ban,
   CircleCheck,
-  Clock,
   ExternalLink,
   FileWarning,
   Loader2,
@@ -40,7 +39,7 @@ import {
   KYC_STATUS_TABS,
   ageFromIsoDate,
   type KycDetailView,
-  type KycDocumentUrlEntry,
+  type KycDocumentEntry,
 } from '@/components/admin/types';
 import { cn, relativeTime } from '@/lib/utils';
 import type { KycReviewRow, KycStatusValue } from '@/types/api';
@@ -59,20 +58,12 @@ function idTypeLabel(idType: string): string {
   return KYC_ID_TYPE_LABELS[idType] ?? idType;
 }
 
-/** A pre-signed S3 path is a PDF when the object key ends in `.pdf`. */
-function looksLikePdf(url: string): boolean {
-  try {
-    return new URL(url).pathname.toLowerCase().endsWith('.pdf');
-  } catch {
-    return url.toLowerCase().includes('.pdf');
-  }
-}
-
-function formatCountdown(msRemaining: number): string {
-  const total = Math.max(0, Math.floor(msRemaining / 1000));
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+/** Human-readable byte size, e.g. `1.4 MB` / `820 KB`. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
 }
 
 /** The declared fields a reviewer compares against the documents. */
@@ -98,23 +89,24 @@ function declaredRows(detail: KycDetailView): DeclaredRow[] {
 }
 
 /**
- * One signed document.
+ * One document slot, streamed on demand.
  *
- * The URL comes from `GET /api/v1/admin/kyc/:id/files` — a pre-signed S3 GET
- * capped at 300 seconds. Nothing here can reach the private bucket directly and
- * the raw object key is never part of the payload, so it cannot leak into a
- * screenshot, a copy/paste or a devtools panel.
+ * `entry.url` comes from `GET /api/v1/admin/kyc/:id/files` — a same-origin,
+ * cookie-authenticated path to the audited stream route
+ * (`GET /api/v1/admin/kyc/:id/documents/:kind`). There is no bearer credential
+ * to hand out and nothing to expire: an ADMIN session is required for every
+ * fetch, and the bytes are decrypted from the platform's own encrypted store only
+ * while serving it. No storage key exists to leak into a screenshot or devtools
+ * panel.
  */
 function DocumentCard({
   kind,
   entry,
   uploaded,
-  expired,
 }: {
   kind: string;
-  entry: KycDocumentUrlEntry | undefined;
+  entry: KycDocumentEntry | undefined;
   uploaded: boolean;
-  expired: boolean;
 }) {
   const [broken, setBroken] = React.useState(false);
   const label = KYC_DOCUMENT_LABELS[kind] ?? kind;
@@ -136,7 +128,9 @@ function DocumentCard({
     return (
       <div className="flex flex-col gap-1 rounded-lg border border-line bg-base-900/40 p-4">
         <span className="text-sm text-base-100">{label}</span>
-        <span className="text-xs text-muted">Uploaded — use “Refresh links” to open it.</span>
+        <span className="text-xs text-muted">
+          Stored — the document manifest did not load. Reopen the submission to try again.
+        </span>
       </div>
     );
   }
@@ -149,20 +143,7 @@ function DocumentCard({
           {label}
         </span>
         <span className="text-xs text-muted">
-          {entry.error ?? 'No signed URL is available for this document.'} The stored object key was
-          never exposed to the browser.
-        </span>
-      </div>
-    );
-  }
-
-  if (expired) {
-    return (
-      <div className="flex flex-col gap-1 rounded-lg border border-line bg-base-900/40 p-4">
-        <span className="text-sm text-base-100">{label}</span>
-        <span className="text-xs text-warn-400">
-          The signed link expired. Refresh to mint a new 5-minute link — that also writes a fresh
-          KYC_DOCUMENT_VIEWED audit entry.
+          No stream is available for this slot. Nothing was read from the encrypted store.
         </span>
       </div>
     );
@@ -171,7 +152,12 @@ function DocumentCard({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-line bg-base-900/40 p-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm text-base-100">{label}</span>
+        <span className="flex flex-col">
+          <span className="text-sm text-base-100">{label}</span>
+          {entry.byteLength !== null ? (
+            <span className="text-xs tabular-nums text-muted">{formatBytes(entry.byteLength)}</span>
+          ) : null}
+        </span>
         <a
           href={entry.url}
           target="_blank"
@@ -183,7 +169,7 @@ function DocumentCard({
         </a>
       </div>
 
-      {looksLikePdf(entry.url) ? (
+      {entry.contentType === 'application/pdf' ? (
         <object
           data={entry.url}
           type="application/pdf"
@@ -199,7 +185,7 @@ function DocumentCard({
           Inline preview unavailable for this file type. Use “Open in new tab”.
         </p>
       ) : (
-        /* eslint-disable-next-line @next/next/no-img-element -- a short-lived signed URL cannot go through the image optimiser */
+        /* eslint-disable-next-line @next/next/no-img-element -- the stream route is cookie-authenticated, so it is not a public URL the Next.js image optimiser could fetch */
         <img
           src={entry.url}
           alt={`${label} submitted for identity verification`}
@@ -217,13 +203,15 @@ function DocumentCard({
  * Workflow:
  *   1. the queue tab calls `GET /api/v1/admin/kyc?status=…` (oldest first),
  *   2. opening a row calls `GET /api/v1/admin/kyc/:id` for the declared profile,
- *   3. documents come from `GET /api/v1/admin/kyc/:id/files`, which mints
- *      300-second signed URLs and writes KYC_DOCUMENT_VIEWED for the fetch,
+ *   3. the document manifest comes from `GET /api/v1/admin/kyc/:id/files`, and
+ *      the bytes for one slot come from
+ *      `GET /api/v1/admin/kyc/:id/documents/:kind`. Both routes are ADMIN-only
+ *      and both write KYC_DOCUMENT_VIEWED (phases 'manifest' and 'download'),
  *   4. the decision posts to `/api/v1/admin/kyc/:id/decision`.
  *
- * No document bytes pass through this bundle, no S3 key is received, and the
- * reviewer is told — inside the dialog — that opening documents is an audited
- * act.
+ * No document bytes pass through this bundle, no storage key exists to receive,
+ * and the reviewer is told — inside the dialog — that opening documents is an
+ * audited act.
  */
 export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReviewerProps) {
   const router = useRouter();
@@ -238,26 +226,15 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState<string | null>(null);
 
-  const [files, setFiles] = React.useState<KycDocumentUrlEntry[] | null>(null);
+  const [files, setFiles] = React.useState<KycDocumentEntry[] | null>(null);
   const [filesLoading, setFilesLoading] = React.useState(false);
   const [filesError, setFilesError] = React.useState<string | null>(null);
-  const [expiresAt, setExpiresAt] = React.useState<number | null>(null);
-  const [now, setNow] = React.useState<number>(0);
 
   const [reason, setReason] = React.useState('');
   const [decisionError, setDecisionError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState<Decision | null>(null);
 
   const open = selected !== null;
-  const expired = expiresAt !== null && now > 0 && now >= expiresAt;
-
-  // 1-second tick for the signed-link countdown; runs only while a dialog is open.
-  React.useEffect(() => {
-    if (!open || expiresAt === null) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [open, expiresAt]);
 
   const loadQueue = React.useCallback(async (nextStatus: KycStatusValue) => {
     setListLoading(true);
@@ -279,22 +256,21 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
     setFilesLoading(true);
     setFilesError(null);
     try {
-      const data = await adminRequest<KycDocumentUrlEntry[]>(
+      const data = await adminRequest<KycDocumentEntry[]>(
         `/api/v1/admin/kyc/${encodeURIComponent(profileId)}/files`,
       );
       setFiles(data);
-      // Every entry carries the server's TTL; the shortest one governs the countdown.
-      const ttl = data.reduce((min, entry) => Math.min(min, entry.expiresInSeconds || 300), 300);
-      setExpiresAt(Date.now() + ttl * 1000);
-      setNow(Date.now());
+      // This fetch itself is audited (KYC_DOCUMENT_VIEWED, phase 'manifest'), so
+      // the reviewer is told each time the manifest is read that the act is on
+      // the record. Streaming a document writes a second, 'download' entry.
       toast({
         variant: 'info',
-        title: 'Signed links issued',
-        description: `Valid for ${ttl} seconds. This fetch was recorded as KYC_DOCUMENT_VIEWED against your admin id.`,
+        title: 'Document manifest loaded',
+        description:
+          'Documents are streamed from the platform’s own encrypted store. Opening one is recorded in the audit trail against your admin id.',
       });
     } catch (error) {
       setFiles(null);
-      setExpiresAt(null);
       setFilesError(errorMessage(error));
     } finally {
       setFilesLoading(false);
@@ -307,7 +283,6 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
     setDetailError(null);
     setFiles(null);
     setFilesError(null);
-    setExpiresAt(null);
     setReason('');
     setDecisionError(null);
     setDetailLoading(true);
@@ -330,7 +305,6 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
     setDetailError(null);
     setFiles(null);
     setFilesError(null);
-    setExpiresAt(null);
     setReason('');
     setDecisionError(null);
   };
@@ -441,7 +415,7 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
   const documentRows = (detail?.documents ?? []).map((doc) => ({
     kind: doc.kind,
     uploaded: doc.uploaded,
-    signed: files?.find((entry) => entry.kind === doc.kind),
+    entry: files?.find((file) => file.kind === doc.kind),
   }));
 
   return (
@@ -524,7 +498,7 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
           {detailLoading ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted">
               <Loader2 aria-hidden className="size-4 animate-spin" />
-              Loading the declared profile and the signed document links…
+              Loading the declared profile and the document manifest…
             </div>
           ) : null}
 
@@ -586,40 +560,23 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
               <div className="flex flex-col gap-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-base-100">Documents</h3>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        'inline-flex items-center gap-1 text-xs tabular-nums',
-                        expired ? 'text-loss-400' : 'text-muted',
-                      )}
-                    >
-                      <Clock aria-hidden className="size-3" />
-                      {expiresAt === null
-                        ? 'no signed links'
-                        : expired
-                          ? 'links expired'
-                          : `expires in ${formatCountdown(expiresAt - now)}`}
+                  {filesLoading ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted">
+                      <Loader2 aria-hidden className="size-3 animate-spin" />
+                      Loading the manifest…
                     </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={filesLoading}
-                      onClick={() => void loadDocuments(detail.id)}
-                    >
-                      <RefreshCw aria-hidden className={cn(filesLoading && 'animate-spin')} />
-                      Refresh links
-                    </Button>
-                  </div>
+                  ) : null}
                 </div>
 
                 <Alert variant="info" icon={ShieldCheck}>
                   <AlertTitle>Document access is logged</AlertTitle>
                   <AlertDescription>
-                    Identity documents live in a private bucket and are readable only through
-                    short-lived signed links (5 minutes maximum). Every fetch writes a{' '}
+                    Identity documents are encrypted and stored by the platform itself, and are
+                    readable only through an internal, ADMIN-only route. Reading this manifest and
+                    streaming a document each write a{' '}
                     <code className="font-mono text-xs">KYC_DOCUMENT_VIEWED</code> entry against your
-                    admin id, the document kinds returned, the expiry and your IP address. The stored
-                    object key is never sent to this page.
+                    admin id, with the document kinds, the phase and your IP address. No storage key
+                    and no bearer credential exists for this page to leak.
                   </AlertDescription>
                 </Alert>
 
@@ -636,8 +593,7 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
                       key={doc.kind}
                       kind={doc.kind}
                       uploaded={doc.uploaded}
-                      entry={doc.signed}
-                      expired={expired}
+                      entry={doc.entry}
                     />
                   ))}
                 </div>
@@ -660,7 +616,7 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
                   id="kyc-decision-reason"
                   value={reason}
                   onChange={(event) => setReason(event.target.value)}
-                  placeholder="e.g. The proof of address is dated more than 3 months ago — please upload a recent utility bill."
+                  placeholder="e.g. The reverse side of the ID is missing — please upload a clear photo of the back of the document."
                   rows={3}
                 />
               </div>

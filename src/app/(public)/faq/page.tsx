@@ -71,14 +71,13 @@ const FAQ_ITEMS: readonly FaqItem[] = [
         </p>
         <p>Accepted documents:</p>
         <ul className="ml-4 list-disc space-y-1">
-          <li>Identity: passport, national identity card or driving licence (front, and back where the document has one).</li>
-          <li>Proof of address (a recent utility bill, bank statement or similar document).</li>
-          <li>A selfie, to tie the document to the person submitting it.</li>
+          <li>Identity: passport, national identity card or driving licence — the front, and the back where the document has one (a passport is single-sided).</li>
         </ul>
         <p>
           Files may be JPEG, PNG, WebP or PDF, up to 10 MB each. You must be at least 18 years old.
-          Documents are stored in a private, encrypted bucket and leave it only as short-lived signed
-          links minted for the reviewer — and minting one is itself audited.
+          Documents are encrypted at rest with AES-256-GCM and stored inside the platform; a reviewer
+          opens them through an administrator-only route that is written to the audit log, and you are
+          never able to read an uploaded file back yourself.
         </p>
       </>
     ),
@@ -224,8 +223,9 @@ const FAQ_ITEMS: readonly FaqItem[] = [
           deposits, withdrawals and audit entries.
         </p>
         <p>
-          Identity documents are held in a private bucket, encrypted at rest, and are readable only
-          through short-lived signed links issued to a signed-in reviewer. You are never shown
+          Identity documents are encrypted at rest with AES-256-GCM and held inside the platform.
+          They are readable only by a signed-in administrator through an audited route, and never by
+          you once uploaded — your portal reports only which slots are on file. You are never shown
           another client&rsquo;s data, and document access events are logged. Sessions are carried in
           httpOnly cookies — no access token is placed in browser storage.
         </p>

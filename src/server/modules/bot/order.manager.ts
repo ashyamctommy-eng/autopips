@@ -349,11 +349,37 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
   // broker cannot size lots" and the allocator skips instead of guessing.
   const spec: SymbolSpec | null = null;
 
-  // No MT5 margin RPC exists any more: a contract broker prices an order from a
-  // proposal (`getOrderCost`), which the gate above routes to the stake path.
-  // Null therefore means "no margin figure was reported", and the risk engine
-  // fails that check closed rather than assuming headroom.
-  const requiredMargin: number | null = null;
+  /*
+   * The margin check, per denomination.
+   *
+   * LOTS (an MT5-shaped broker): no margin RPC exists any more, so the figure is
+   * unknown and the check fails closed. No such broker is reachable today —
+   * `placeOrder` refuses any denomination it cannot price without inventing a
+   * contract size, and the only configured adapter is a stake broker.
+   *
+   * STAKE (Deriv multipliers): a stake IS the maximum loss on the contract, and
+   * Deriv reports no free margin at all. The honest solvency question is
+   * therefore "does the money this signal puts at risk fit inside what the master
+   * account holds?" — the per-signal stake budget is
+   * `capitalUsd x riskPerTradePct / 100` (the same budget the stake allocator
+   * spends), measured against the BROKER-reported equity. Both inputs are real;
+   * nothing is invented, and an unreported equity still fails closed because the
+   * engine only accepts a finite number.
+   *
+   * CURRENCY: the budget is USD (the platform's ledger unit) and the broker
+   * reports equity in the ACCOUNT's currency. Comparing them without a conversion
+   * would be wrong by the FX rate, and there is no rate source on this path — so
+   * the check runs only when the account reports USD and fails closed otherwise
+   * (the operator sees the margin check fail and fixes the account currency).
+   */
+  const stakeDenominated = adapter.sizeDenomination === 'stake';
+  const currencyComparable = !stakeDenominated || account.currency === 'USD';
+  const requiredMargin: number | null = stakeDenominated
+    ? (capitalUsd.toNumber() * getSettingNumber('risk.risk_per_trade_pct')) / 100
+    : null;
+  const freeMarginForGate: number | null = stakeDenominated
+    ? (currencyComparable ? (account.freeMargin ?? account.equity) : null)
+    : account.freeMargin;
 
   const symbolTradable = (await adapter.isSymbolTradable(signal.symbol)) === true;
 
@@ -369,7 +395,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     maxLotPerOrder: env.RISK_MAX_LOT_PER_ORDER,
     minClientCapitalUsd: env.RISK_MIN_CLIENT_CAPITAL_USD,
     duplicate,
-    freeMargin: account.freeMargin,
+    freeMargin: freeMarginForGate,
     requiredMargin,
     symbolTradable,
     masterEquityFloorUsd: env.RISK_MASTER_EQUITY_FLOOR_USD,

@@ -108,10 +108,10 @@ export default async function AdminSettingsPage() {
         <AlertTitle>What is deliberately not editable here</AlertTitle>
         <AlertDescription>
           <span className="block">
-            JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY, DATABASE_URL, REDIS_URL and the AWS/KYC
-            credentials stay in the service variables, because rotating them invalidates live
-            sessions, stored credentials or the running deployment itself — they belong to a
-            deploy, not a form. The same is true for the risk limits the bot enforces.
+            JWT_SECRET, CREDENTIAL_ENCRYPTION_KEY, DATABASE_URL, REDIS_URL stay in the service
+            variables, because rotating them invalidates live sessions, stored credentials or the
+            running deployment itself — they belong to a deploy, not a form. The same is true for
+            the risk limits the bot enforces.
           </span>
         </AlertDescription>
       </Alert>

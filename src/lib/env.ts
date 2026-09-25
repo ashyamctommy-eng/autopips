@@ -45,13 +45,8 @@ const schema = z.object({
   // Credential encryption at rest
   CREDENTIAL_ENCRYPTION_KEY: z.string().min(32),
 
-  // S3
-  AWS_REGION: z.string().min(1),
-  AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
-  AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
-  AWS_KYC_BUCKET: z.string().min(1),
-  AWS_KMS_KEY_ID: z.string().optional().or(z.literal('')),
-  KYC_SIGNED_URL_TTL: z.coerce.number().int().positive().default(300),
+  // KYC documents are stored INSIDE the platform (encrypted, in Postgres) —
+  // there is no object-storage configuration and no external KYC provider.
 
   // NOWPayments
   NOWPAYMENTS_API_KEY: z.string().min(1),

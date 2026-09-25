@@ -121,8 +121,9 @@ const COLUMNS: readonly Column[] = [
           <>
             Every state change that touches money, identity or the broker is written to an
             append-only audit log with a namespaced action, the details of the change and the actor.
-            Identity documents live in a private bucket and leave it only as short-lived pre-signed
-            links minted for a signed-in reviewer — and every mint is itself audited.
+            Identity documents are encrypted at rest with AES-256-GCM and held in the platform’s own
+            database; they are read only through a signed-in administrator’s audited route, which
+            streams the decrypted bytes and records the access.
           </>
         ),
       },
@@ -130,7 +131,7 @@ const COLUMNS: readonly Column[] = [
     facts: [
       'Equity = Starting Capital + Realized P/L + Unrealized P/L − Deducted Fees − Withdrawals + Confirmed Deposits',
       'Append-only audit log covering deposit, withdrawal, investment, broker, risk and KYC events.',
-      'KYC files live in private object storage with encryption at rest; review links are capped at 300 seconds.',
+      'KYC files are encrypted at rest with AES-256-GCM and stored in the platform’s own database; only an ADMIN can open them, and every read is audited.',
     ],
   },
 ];

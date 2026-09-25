@@ -48,8 +48,10 @@ enforcing file is named so a reviewer can check it.
    into the browser bundle. Broker tokens are encrypted at rest with AES-256-GCM
    (`src/lib/crypto/credential-cipher.ts`). Nothing is ever written to `localStorage`.
 5. **Manual KYC.** No third-party identity API. Documents are uploaded by the client,
-   stored in a **private** S3 bucket with SSE, and viewable by an admin only through
-   **300-second** pre-signed URLs — every view is written to the audit log.
+   encrypted at rest with AES-256-GCM, and stored in the platform's own PostgreSQL
+   (`KycDocument.ciphertext`). The only read path is an ADMIN-authenticated, audited route
+   that streams the decrypted bytes to a reviewer, who approves or rejects by hand — every
+   view is written to the audit log.
 6. **Strict payment verification.** The IPN webhook verifies an HMAC-SHA512 signature
    over the key-sorted raw body, compares it in constant time, and de-duplicates via a
    Redis replay guard.
@@ -111,7 +113,6 @@ Socket.io worker  ──────────┐               ├──> Red
   • /ws/trading namespace   └──> Redis pub/sub ──┘
   • bot runtime + broker sync               └──> Deriv WS API ──> Deriv contracts
                                             └──> NOWPayments.io
-                                            └──> AWS S3 (private, KYC)
 ```
 
 Why two processes: a Next.js App Router app cannot host a Socket.io server. The socket
@@ -136,7 +137,7 @@ src/
 │   ├── accounting/          equity.ts · ledger.ts · strategy-stats.ts
 │   ├── modules/
 │   │   ├── auth/            Argon2id, JWT sessions, TOTP 2FA
-│   │   ├── kyc/             private S3 storage, admin review
+│   │   ├── kyc/             internal encrypted store, admin review
 │   │   ├── payments/        NOWPayments client, IPN verification, deposits, withdrawals
 │   │   ├── broker/          Deriv client + adapter, registry, sync
 │   │   ├── bot/             risk engine, lot allocator, strategy engine, order manager, fees
@@ -159,7 +160,7 @@ GET    /api/v1/plans                          (public)
 GET    /api/v1/account/overview | investments | positions | trades | activity
 POST   /api/v1/account/investments
 
-POST   /api/v1/kyc/upload                     (multipart, 4 documents)
+POST   /api/v1/kyc/upload                     (multipart, up to 2 documents)
 POST   /api/v1/kyc/submit
 GET    /api/v1/kyc/me
 
@@ -257,7 +258,7 @@ runbook for the two services, the managed Postgres/Redis, the exact variable tab
 the cross-origin realtime wiring.
 
 **Self-hosted / Docker:** **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the full runbook
-(environment table, secret generation, S3/NOWPayments/Deriv setup, TLS, the required
+(environment table, secret generation, NOWPayments/Deriv setup, TLS, the required
 WebSocket proxy rule, backups and rollback), **[SECURITY.md](./SECURITY.md)** for the
 security posture and an honest list of what is not yet hardened, and `docker-compose.yml`
 + `deploy/nginx/` for a reference stack.

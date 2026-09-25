@@ -17,14 +17,15 @@ import type { KycStatusValue } from '@/types/api';
  * Identity verification (server component).
  *
  * Reads the caller's own profile through `getMyKyc()` — a DTO with a masked
- * document number and no object keys — and renders the real state machine:
+ * document number and no storage keys — and renders the real state machine:
  *
  *   Not submitted → Pending review → Under review → Verified
  *                                            ↘ Action required / Rejected
  *
- * Documents are held in a private bucket and opened by a reviewer through
- * short-lived signed URLs. Nothing here (and nothing in the form below) renders
- * a document, a thumbnail or a link to one.
+ * Documents are encrypted at rest and stored by the platform itself, and are
+ * opened only by a compliance officer through an internal, audited admin-only
+ * route. Nothing here (and nothing in the form below) renders a document, a
+ * thumbnail or a link to one.
  */
 
 export const dynamic = 'force-dynamic';
@@ -34,8 +35,6 @@ const STATUS_SEQUENCE: KycStatusValue[] = ['NOT_SUBMITTED', 'PENDING', 'UNDER_RE
 const DOCUMENT_LABELS: Record<string, string> = {
   idFront: 'Identity document (front)',
   idBack: 'Identity document (back)',
-  proofOfAddress: 'Proof of address',
-  selfie: 'Selfie with document',
 };
 
 export default async function DashboardKycPage() {
@@ -150,9 +149,10 @@ export default async function DashboardKycPage() {
 
           <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">
             <Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-            Your documents are stored in a private, encrypted bucket. Reviewers open them through
-            short-lived signed links (five minutes) and every access is written to the audit trail —
-            which is why this page shows you that a document exists without ever displaying it.
+            Your documents are encrypted at rest and stored by the platform itself. They are opened
+            only by a compliance officer through an internal, admin-only route, and every access is
+            written to the audit trail — which is why this page shows you that a document exists
+            without ever displaying it.
           </p>
         </CardContent>
       </Card>

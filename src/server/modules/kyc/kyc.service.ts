@@ -1,24 +1,33 @@
 import { z } from 'zod';
-import type { KycProfile, Role } from '@prisma/client';
+import type { KycProfile } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
 import { AUDIT, recordAudit, type AuditAction } from '@/server/modules/audit/audit.service';
 import type { KycProfileDTO, KycReviewRow, KycStatusValue } from '@/types/api';
 import {
   KYC_DOCUMENT_KINDS,
-  getKycDocumentState,
-  getSignedDocumentUrl,
-  resolveSignedUrlTtl,
+  assertKycDocumentKind,
+  attachDocumentsToProfile,
+  extensionForContentType,
+  findKycDocuments,
+  listKycDocuments,
+  loadKycDocumentBytes,
   type KycDocumentKind,
 } from './storage.service';
 
 /**
  * MANUAL KYC — business directive #5.
  *
- * Identity verification is performed by a human reviewer against documents held
- * in the private S3 bucket (see ./storage.service.ts). This module owns the
- * workflow: submission → queue → under review → decision, plus the access trail
- * every time an admin opens a private document.
+ * Identity verification is performed by a human reviewer against documents the
+ * platform holds ITSELF: the bytes live encrypted in this platform's Postgres
+ * (see ./storage.service.ts and ./document-cipher.ts). There is no external
+ * bucket, no object-storage credential and no third-party identity API. This
+ * module owns the workflow: submission → queue → under review → decision, plus
+ * the access trail every time an admin opens a private document.
+ *
+ * Two slots only — the FRONT and BACK of one identity document. There is no
+ * liveness check and no selfie: the reviewer compares the two images against the
+ * details the client declared.
  *
  * ZERO SIMULATION: nothing here invents a verification result. A record only
  * leaves APPROVED because an ADMIN recorded that decision, and that decision is
@@ -92,22 +101,10 @@ export function ageInYears(dob: Date, now: Date = new Date()): number {
   return age;
 }
 
-function documentKeyFor(profile: KycProfile, kind: KycDocumentKind): string | null {
-  switch (kind) {
-    case 'idFront':
-      return profile.idFrontKey;
-    case 'idBack':
-      return profile.idBackKey ?? null;
-    case 'proofOfAddress':
-      return profile.proofOfAddressKey;
-    case 'selfie':
-      return profile.selfieKey;
-    default:
-      return null;
-  }
-}
-
-export function toKycProfileDto(profile: KycProfile): KycProfileDTO {
+export function toKycProfileDto(
+  profile: KycProfile,
+  uploadedKinds: readonly string[] = [],
+): KycProfileDTO {
   return {
     id: profile.id,
     legalName: profile.legalName,
@@ -121,9 +118,18 @@ export function toKycProfileDto(profile: KycProfile): KycProfileDTO {
     createdAt: profile.createdAt.toISOString(),
     documents: KYC_DOCUMENT_KINDS.map((kind) => ({
       kind,
-      uploaded: Boolean(documentKeyFor(profile, kind)),
+      uploaded: uploadedKinds.includes(kind),
     })),
   };
+}
+
+/** The DTO plus which slots the profile actually has documents in. */
+async function toKycProfileDtoWithDocuments(profile: KycProfile): Promise<KycProfileDTO> {
+  const documents = await listKycDocuments(profile.id);
+  return toKycProfileDto(
+    profile,
+    documents.map((document) => document.kind),
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -154,14 +160,18 @@ const isoDobSchema = z
     }
   });
 
-/** Private-bucket object keys are opaque; reject anything path-like. */
-const objectKeySchema = z
+/**
+ * A document row id produced by POST /api/v1/kyc/upload.
+ *
+ * The id grants NOTHING on its own: the bytes are only readable through an
+ * ADMIN-authenticated route scoped to the submission, and every read is audited.
+ * It is opaque to the client and cannot be used to fetch a file.
+ */
+const documentIdSchema = z
   .string()
   .trim()
-  .min(1, 'A document key is required.')
-  .max(512, 'Document key is too long.')
-  .refine((key) => !key.startsWith('/'), 'Document key must be a relative S3 object key.')
-  .refine((key) => !key.includes('..'), 'Document key must not contain path traversal.');
+  .min(1, 'A document is required.')
+  .max(64, 'Document reference is too long.');
 
 export const submitKycSchema = z
   .object({
@@ -170,19 +180,17 @@ export const submitKycSchema = z
     address: z.string().trim().min(5, 'A residential address is required.').max(400),
     idType: z.enum(KYC_ID_TYPES),
     idNumber: z.string().trim().min(3, 'Document number is too short.').max(64),
-    idFrontKey: objectKeySchema,
-    idBackKey: objectKeySchema.optional(),
-    proofOfAddressKey: objectKeySchema,
-    selfieKey: objectKeySchema,
+    idFrontDocumentId: documentIdSchema,
+    idBackDocumentId: documentIdSchema.optional(),
   })
   .superRefine((value, ctx) => {
-    // A driving licence always has a reverse side; passports and most national
-    // IDs are single-sided.
-    if (value.idType === 'DRIVERS_LICENSE' && !value.idBackKey) {
+    // Only a passport is reliably single-sided; national ID cards and driving
+    // licences carry the document number and/or expiry on the reverse.
+    if (value.idType !== 'PASSPORT' && !value.idBackDocumentId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['idBackKey'],
-        message: 'The reverse side of a driving licence is required (idBackKey).',
+        path: ['idBackDocumentId'],
+        message: `The reverse side of a ${value.idType === 'DRIVERS_LICENSE' ? 'driving licence' : 'national ID card'} is required.`,
       });
     }
   });
@@ -209,11 +217,11 @@ const decideKycSchema = z.object({
 /* Client-facing reads                                                         */
 /* -------------------------------------------------------------------------- */
 
-/** The caller's own profile — never includes object keys. Null when not submitted. */
+/** The caller's own profile — never includes documents or their bytes. Null when not submitted. */
 export async function getMyKyc(userId: string): Promise<KycProfileDTO | null> {
   const profile = await prisma.kycProfile.findUnique({ where: { userId } });
   if (!profile) return null;
-  return toKycProfileDto(profile);
+  return toKycProfileDtoWithDocuments(profile);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -233,17 +241,30 @@ export async function submitKyc(
 ): Promise<KycProfileDTO> {
   const data = submitKycSchema.parse(input);
 
-  for (const [field, key] of Object.entries({
-    idFrontKey: data.idFrontKey,
-    proofOfAddressKey: data.proofOfAddressKey,
-    selfieKey: data.selfieKey,
-    ...(data.idBackKey ? { idBackKey: data.idBackKey } : {}),
-  })) {
-    assertKeyBelongsToUser(key, userId, field);
-  }
-
   const dob = parseIsoDateOnly(data.dob);
   if (!dob) throw ApiError.badRequest('Date of birth must be a real calendar date in ISO format (YYYY-MM-DD).');
+
+  /*
+   * Resolve the references against what is actually stored for THIS user before
+   * anything is attached. This is the check that stops a submission pointing a
+   * reviewer at somebody else's file, and it rejects a reference to a slot this
+   * user has not uploaded at all. (The row id is stable across re-uploads of the
+   * same slot, so re-uploading does not invalidate a reference — it changes the
+   * bytes behind it, which the upload route handles by resetting the review.)
+   */
+  const stored = await findKycDocuments(userId);
+  const front = stored.get('idFront');
+  if (!front || front.id !== data.idFrontDocumentId) {
+    throw ApiError.badRequest(
+      'The front-of-document upload could not be matched to your account. Upload it again and resubmit.',
+    );
+  }
+  const back = stored.get('idBack');
+  if (data.idBackDocumentId && (!back || back.id !== data.idBackDocumentId)) {
+    throw ApiError.badRequest(
+      'The reverse-side upload could not be matched to your account. Upload it again and resubmit.',
+    );
+  }
 
   const existing = await prisma.kycProfile.findUnique({ where: { userId } });
 
@@ -259,10 +280,6 @@ export async function submitKyc(
         address: data.address,
         idType: data.idType,
         idNumber: data.idNumber,
-        idFrontKey: data.idFrontKey,
-        idBackKey: data.idBackKey ?? null,
-        proofOfAddressKey: data.proofOfAddressKey,
-        selfieKey: data.selfieKey,
         status: 'PENDING',
       },
       update: {
@@ -271,10 +288,6 @@ export async function submitKyc(
         address: data.address,
         idType: data.idType,
         idNumber: data.idNumber,
-        idFrontKey: data.idFrontKey,
-        idBackKey: data.idBackKey ?? null,
-        proofOfAddressKey: data.proofOfAddressKey,
-        selfieKey: data.selfieKey,
         status: 'PENDING',
         rejectionReason: null,
         reviewedBy: null,
@@ -284,6 +297,12 @@ export async function submitKyc(
     prisma.user.update({ where: { id: userId }, data: { kycStatus: 'PENDING' } }),
   ]);
 
+  // Attach the slots this client actually holds: the front (verified above) and
+  // the back when one was uploaded. Attaching is what makes a document part of
+  // the file under review; a replaced document stays detached until resubmitted.
+  const attachedKinds: KycDocumentKind[] = back ? ['idFront', 'idBack'] : ['idFront'];
+  await attachDocumentsToProfile({ userId, profileId: profile.id, kinds: attachedKinds });
+
   await recordAudit({
     action: existing ? AUDIT.KYC_RESUBMITTED : AUDIT.KYC_SUBMITTED,
     userId,
@@ -291,27 +310,16 @@ export async function submitKyc(
     details: {
       kycProfileId: profile.id,
       idType: data.idType,
-      // Object keys are deliberately not written to the audit trail.
-      documentKinds: KYC_DOCUMENT_KINDS.filter((kind) => Boolean(documentKeyFor(profile, kind))),
+      // Document row ids are deliberately not written to the audit trail; the
+      // slot names are what an investigator needs, and the platform holds the
+      // hashes next to the document itself.
+      documentKinds: attachedKinds,
       resubmission: Boolean(existing),
       previousStatus: existing ? existing.status : null,
     },
   });
 
-  return toKycProfileDto(profile);
-}
-
-/**
- * Document keys are namespaced `kyc/<userId>/...` by the uploader. Anything in
- * our own namespace that belongs to a different user is refused so a submission
- * cannot point a reviewer at somebody else's identity documents.
- */
-function assertKeyBelongsToUser(key: string, userId: string, field: string): void {
-  if (!key.startsWith('kyc/')) return;
-  const owner = key.slice('kyc/'.length).split('/')[0];
-  if (owner && owner !== userId) {
-    throw ApiError.badRequest(`${field} does not belong to your account.`);
-  }
+  return toKycProfileDtoWithDocuments(profile);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -354,11 +362,15 @@ export async function listKycQueue(input: unknown = {}): Promise<KycReviewRow[]>
   return rows.map(toReviewRow);
 }
 
-export interface KycObjectKeys {
-  idFrontKey: string;
-  idBackKey: string | null;
-  proofOfAddressKey: string;
-  selfieKey: string;
+export interface KycDetailDocument {
+  kind: string;
+  uploaded: boolean;
+  /** Null for an empty slot. */
+  contentType: string | null;
+  byteLength: number | null;
+  /** SHA-256 of the plaintext bytes, so a reviewer can confirm what was stored. */
+  sha256: string | null;
+  uploadedAt: string | null;
 }
 
 export interface KycDetail {
@@ -374,35 +386,46 @@ export interface KycDetail {
   reviewedBy: string | null;
   reviewedAt: string | null;
   createdAt: string;
-  /** Which document slots are filled — safe for any reviewer role. */
-  documents: { kind: string; uploaded: boolean }[];
-  /**
-   * Raw private-bucket object keys. SERVER-SIDE ONLY: the keys are returned
-   * when the caller is server-side (role omitted) or an ADMIN, and they must
-   * never be serialised straight into a response. A browser receives signed
-   * URLs from getKycDocumentUrls() instead.
-   */
-  keys: KycObjectKeys | null;
+  /** Slot metadata only — never bytes, and never a storage key (there is none). */
+  documents: KycDetailDocument[];
 }
 
 /**
  * Full review payload for one submission.
  *
- * @param viewerRole when supplied, raw object keys are only included for
- *                   ADMIN — a TRADING_MANAGER sees the file without them.
+ * There is no privileged "raw keys" variant any more: documents are read by
+ * slot through the audited streaming route, so nothing here can be used to
+ * reach the ciphertext directly.
  */
-export async function getKycDetail(id: string, viewerRole?: Role): Promise<KycDetail> {
+export async function getKycDetail(id: string): Promise<KycDetail> {
   const profile = await prisma.kycProfile.findUnique({
     where: { id },
     include: { user: { select: { id: true, email: true, fullName: true, country: true } } },
   });
   if (!profile) throw ApiError.notFound('KYC profile not found.');
 
-  const maySeeKeys = viewerRole === undefined || viewerRole === 'ADMIN';
-  const documents = KYC_DOCUMENT_KINDS.map((kind) => ({
-    kind: kind as string,
-    uploaded: Boolean(documentKeyFor(profile, kind)),
-  }));
+  const stored = await listKycDocuments(profile.id);
+  const byKind = new Map(stored.map((document) => [document.kind, document]));
+  const documents: KycDetailDocument[] = KYC_DOCUMENT_KINDS.map((kind) => {
+    const document = byKind.get(kind);
+    return document
+      ? {
+          kind,
+          uploaded: true,
+          contentType: document.contentType,
+          byteLength: document.byteLength,
+          sha256: document.sha256,
+          uploadedAt: document.uploadedAt,
+        }
+      : {
+          kind,
+          uploaded: false,
+          contentType: null,
+          byteLength: null,
+          sha256: null,
+          uploadedAt: null,
+        };
+  });
 
   return {
     id: profile.id,
@@ -418,58 +441,95 @@ export async function getKycDetail(id: string, viewerRole?: Role): Promise<KycDe
     reviewedAt: profile.reviewedAt ? profile.reviewedAt.toISOString() : null,
     createdAt: profile.createdAt.toISOString(),
     documents,
-    keys: maySeeKeys
-      ? {
-          idFrontKey: profile.idFrontKey,
-          idBackKey: profile.idBackKey ?? null,
-          proofOfAddressKey: profile.proofOfAddressKey,
-          selfieKey: profile.selfieKey,
-        }
-      : null,
   };
 }
 
-/** Everything a review UI needs — with the raw object keys removed. */
-export type KycDetailClientView = Omit<KycDetail, 'keys'> & {
-  /** Where the 300-second signed URLs come from. */
-  signedUrlEndpoint: string;
-};
+export type KycDetailClientView = KycDetail;
 
-/** Strip the raw keys before a detail payload leaves the server. */
 export function toKycDetailClientView(detail: KycDetail): KycDetailClientView {
-  const { keys: _rawObjectKeys, ...safe } = detail;
-  return {
-    ...safe,
-    signedUrlEndpoint: `/api/v1/admin/kyc/${detail.id}/files`,
-  };
+  return { ...detail };
+}
+
+/**
+ * A client replaced a document that was already part of a submitted file.
+ *
+ * An approval describes the bytes that were reviewed. Once those bytes change the
+ * approval can no longer stand, so the submission goes back to PENDING, the
+ * reviewer/decision fields are cleared, the user's own KYC status follows, and
+ * the change is audited. Without this an APPROVED client could swap their ID
+ * image and keep the verified status — the review would describe a file that no
+ * longer exists.
+ *
+ * Safe to call for a profile that does not exist or is not the caller's: it is a
+ * no-op, not an error, because the upload itself has already succeeded.
+ */
+export async function resetSubmissionAfterDocumentReplacement(input: {
+  userId: string;
+  profileId: string;
+  kinds: readonly KycDocumentKind[];
+  ip: string | null;
+}): Promise<void> {
+  const profile = await prisma.kycProfile.findUnique({ where: { id: input.profileId } });
+  if (!profile || profile.userId !== input.userId) return;
+
+  const previousStatus = profile.status;
+
+  await prisma.$transaction([
+    prisma.kycProfile.update({
+      where: { id: profile.id },
+      data: { status: 'PENDING', rejectionReason: null, reviewedBy: null, reviewedAt: null },
+    }),
+    prisma.user.update({ where: { id: input.userId }, data: { kycStatus: 'PENDING' } }),
+  ]);
+
+  await recordAudit({
+    action: AUDIT.KYC_RESUBMITTED,
+    userId: input.userId,
+    ipAddress: input.ip,
+    details: {
+      kycProfileId: profile.id,
+      documentKinds: input.kinds,
+      reason: 'document_replaced',
+      previousStatus,
+      status: 'PENDING',
+    },
+  });
 }
 
 /* -------------------------------------------------------------------------- */
 /* Admin: private document access                                              */
 /* -------------------------------------------------------------------------- */
 
-export interface KycDocumentUrlEntry {
+export interface KycDocumentEntry {
   kind: string;
-  /** Pre-signed GET URL, or null when the object is gone / could not be signed. */
+  uploaded: boolean;
+  contentType: string | null;
+  byteLength: number | null;
+  /** SHA-256 of the plaintext bytes. */
+  sha256: string | null;
+  uploadedAt: string | null;
+  /**
+   * Same-origin, ADMIN-authenticated route that streams the bytes — NOT a
+   * pre-signed bearer URL. There is nothing to leak, nothing to expire and
+   * nothing that works outside a signed-in admin session.
+   */
   url: string | null;
-  expiresInSeconds: number;
-  error?: string;
 }
 
 /**
- * Mint short-lived review URLs for every stored document.
+ * The review-dialog manifest: which slots this submission holds, and where the
+ * audited stream for each one lives.
  *
- * ACCESS TRAIL: this is the only path that can reveal a private identity
- * document, so every call — successful or not — writes KYC_DOCUMENT_VIEWED with
- * the reviewer's user id and the document kinds involved. A failure to sign one
- * document is reported inline instead of failing the whole request, so a single
- * lost object cannot block the review of the others.
+ * ACCESS TRAIL: this is what a reviewer opens first, so it writes
+ * KYC_DOCUMENT_VIEWED with `phase: 'manifest'`. Serving the bytes themselves
+ * writes a second entry with `phase: 'download'` (see streamKycDocument), which
+ * is the row that proves a document was actually opened.
  */
-export async function getKycDocumentUrls(
+export async function getKycDocumentManifest(
   id: string,
   adminUserId: string,
   ip: string | null = null,
-): Promise<KycDocumentUrlEntry[]> {
+): Promise<KycDocumentEntry[]> {
   if (!adminUserId || !adminUserId.trim()) {
     throw ApiError.forbidden('A reviewer identity is required to open KYC documents.');
   }
@@ -477,59 +537,131 @@ export async function getKycDocumentUrls(
   const profile = await prisma.kycProfile.findUnique({ where: { id } });
   if (!profile) throw ApiError.notFound('KYC profile not found.');
 
-  const expiresInSeconds = resolveSignedUrlTtl();
-  const stored = KYC_DOCUMENT_KINDS.flatMap((kind) => {
-    const key = documentKeyFor(profile, kind);
-    return key ? [{ kind: kind as string, key }] : [];
-  });
+  const stored = await listKycDocuments(profile.id);
+  const byKind = new Map(stored.map((document) => [document.kind, document]));
 
-  const entries: KycDocumentUrlEntry[] = [];
-  for (const doc of stored) {
-    try {
-      const state = await getKycDocumentState(doc.key);
-      if (state === 'missing') {
-        entries.push({
-          kind: doc.kind,
-          url: null,
-          expiresInSeconds,
-          error: 'This document is no longer present in storage.',
-        });
-        continue;
-      }
-      const url = await getSignedDocumentUrl(doc.key, expiresInSeconds);
-      entries.push({ kind: doc.kind, url, expiresInSeconds });
-    } catch (err) {
-      console.error(
-        '[kyc] failed to sign document url:',
-        err instanceof Error ? err.message : 'unknown error',
-      );
-      entries.push({
-        kind: doc.kind,
+  const entries: KycDocumentEntry[] = KYC_DOCUMENT_KINDS.map((kind) => {
+    const document = byKind.get(kind);
+    if (!document) {
+      return {
+        kind,
+        uploaded: false,
+        contentType: null,
+        byteLength: null,
+        sha256: null,
+        uploadedAt: null,
         url: null,
-        expiresInSeconds,
-        error: 'A signed URL could not be generated for this document.',
-      });
+      };
     }
-  }
-
-  const signedDocumentKinds = entries.filter((e) => e.url !== null).map((e) => e.kind);
-  const failedDocumentKinds = entries.filter((e) => e.url === null).map((e) => e.kind);
+    return {
+      kind,
+      uploaded: true,
+      contentType: document.contentType,
+      byteLength: document.byteLength,
+      sha256: document.sha256,
+      uploadedAt: document.uploadedAt,
+      url: `/api/v1/admin/kyc/${profile.id}/documents/${kind}`,
+    };
+  });
 
   await recordAudit({
     action: AUDIT.KYC_DOCUMENT_VIEWED,
     userId: adminUserId,
     ipAddress: ip,
     details: {
+      phase: 'manifest',
       kycProfileId: profile.id,
       targetUserId: profile.userId,
-      documentKinds: stored.map((doc) => doc.kind),
-      signedDocumentKinds,
-      failedDocumentKinds,
-      expiresInSeconds,
+      documentKinds: stored.map((document) => document.kind),
     },
   });
 
   return entries;
+}
+
+export interface KycDocumentStream {
+  bytes: Buffer;
+  contentType: string;
+  /** Safe, server-derived filename: `<kind>.<ext>`. The client's own filename is not stored. */
+  filename: string;
+  byteLength: number;
+}
+
+/**
+ * Load ONE document for a reviewer and audit the access.
+ *
+ * ADMIN-only at the route. Scoped by the PROFILE that owns the document (not by
+ * a client-supplied document id), so the request cannot be pointed at another
+ * client's file. Returns null when the slot is empty; a ciphertext that fails
+ * its authentication tag is reported as an integrity failure rather than served.
+ */
+export async function streamKycDocument(input: {
+  profileId: string;
+  kind: string;
+  adminUserId: string;
+  ip: string | null;
+}): Promise<KycDocumentStream | null> {
+  if (!input.adminUserId || !input.adminUserId.trim()) {
+    throw ApiError.forbidden('A reviewer identity is required to open KYC documents.');
+  }
+  const kind = assertKycDocumentKind(input.kind);
+
+  const profile = await prisma.kycProfile.findUnique({
+    where: { id: input.profileId },
+    select: { id: true, userId: true },
+  });
+  if (!profile) throw ApiError.notFound('KYC profile not found.');
+
+  let document: Awaited<ReturnType<typeof loadKycDocumentBytes>>;
+  try {
+    document = await loadKycDocumentBytes({ profileId: profile.id, kind });
+  } catch (err) {
+    // A failed auth tag means the stored bytes were tampered with, or
+    // CREDENTIAL_ENCRYPTION_KEY was rotated without re-encrypting. Either way the
+    // document must NOT be served, and the operator needs a loud signal.
+    console.error(
+      `[kyc] could not decrypt ${kind} for profile ${profile.id}:`,
+      err instanceof Error ? err.message : 'unknown error',
+    );
+    await recordAudit({
+      action: AUDIT.KYC_DOCUMENT_VIEWED,
+      userId: input.adminUserId,
+      ipAddress: input.ip,
+      details: {
+        phase: 'download_failed',
+        kycProfileId: profile.id,
+        targetUserId: profile.userId,
+        documentKind: kind,
+        error: err instanceof Error ? err.message : 'unknown error',
+      },
+    });
+    throw ApiError.internal('The stored document could not be read. It was not served — report this to an operator.');
+  }
+
+  if (!document) return null;
+
+  // Written only once the bytes are in hand: an audit entry means a document was
+  // served, not merely requested.
+  await recordAudit({
+    action: AUDIT.KYC_DOCUMENT_VIEWED,
+    userId: input.adminUserId,
+    ipAddress: input.ip,
+    details: {
+      phase: 'download',
+      kycProfileId: profile.id,
+      targetUserId: profile.userId,
+      documentKind: kind,
+      byteLength: document.byteLength,
+      sha256: document.sha256,
+    },
+  });
+
+  return {
+    bytes: document.bytes,
+    contentType: document.contentType,
+    filename: `${kind}.${extensionForContentType(document.contentType)}`,
+    byteLength: document.byteLength,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -610,7 +742,7 @@ export async function decideKyc(input: DecideKycInput): Promise<KycProfileDTO> {
     },
   });
 
-  return toKycProfileDto(updated);
+  return toKycProfileDtoWithDocuments(updated);
 }
 
 /** Move a submission to UNDER_REVIEW and hand it to a named reviewer. */
@@ -642,5 +774,5 @@ export async function markUnderReview(id: string, adminUserId: string): Promise<
     },
   });
 
-  return toKycProfileDto(updated);
+  return toKycProfileDtoWithDocuments(updated);
 }

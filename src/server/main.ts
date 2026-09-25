@@ -10,7 +10,9 @@
  *   3. Attach the socket.io server on the `/ws/trading` namespace.
  *   4. Start the bot runtime (and the broker-sync worker) AFTER the socket
  *      server is listening — both are owned by other team members, so a
- *      missing/broken module is a warning, never a crash.
+ *      missing/broken module is a warning, never a crash. The bot runtime is
+ *      supervised: it is retried with backoff if it cannot take the lock, and
+ *      restarted if it stops.
  *   5. Shut down gracefully on SIGTERM/SIGINT.
  *
  * The Next.js app never imports this file; it pushes events with
@@ -34,6 +36,11 @@ import {
   TRADING_NAMESPACE,
   type TradingSocketServer,
 } from '@/server/ws/socket-server';
+import { computeTradingStatus, type TradingStatus } from '@/server/modules/bot/bot.runtime.health';
+import { readBotRuntimeHeartbeat } from '@/server/modules/bot/bot.runtime.state';
+// Type-only import: erased at compile time, so main.ts still boots when the bot
+// runtime module itself is missing or broken (see RUNTIME_SPECS below).
+import type { BotRuntimeStatus } from '@/server/modules/bot/bot.runtime';
 
 /** Request bodies on the internal channel are small envelopes, not uploads. */
 const MAX_BODY_BYTES = 64 * 1024;
@@ -179,6 +186,45 @@ async function probeDb(): Promise<DependencyReport> {
   }
 }
 
+/**
+ * Builds the `trading` block of `/healthz`.
+ *
+ * Prefers the in-process `botRuntimeStatus()` — a fresh lock read plus the live
+ * cycle counters — and falls back to the Redis heartbeat, the same cross-process
+ * truth the admin API reads, for anything the runtime cannot report. Never
+ * throws: a health endpoint that fails because the thing it is checking is broken
+ * is useless to the operator staring at it.
+ */
+async function collectTradingStatus(
+  botRuntimeModule: Record<string, unknown> | null,
+  fallbackIntervalSeconds: number,
+): Promise<TradingStatus> {
+  const heartbeat = await readBotRuntimeHeartbeat();
+  const statusFn = botRuntimeModule ? asCallable(botRuntimeModule.botRuntimeStatus) : null;
+
+  let status: BotRuntimeStatus | null = null;
+  if (statusFn) {
+    try {
+      status = (await statusFn()) as BotRuntimeStatus;
+    } catch (err) {
+      console.warn(`[ws] botRuntimeStatus() failed: ${errorMessage(err)}`);
+    }
+  }
+
+  return computeTradingStatus({
+    started: status?.started ?? false,
+    lockHeld: status?.lockHeld ?? false,
+    startedAt: status?.startedAt ?? heartbeat?.startedAt ?? null,
+    lastCycleAt: status?.lastCycleAt ?? heartbeat?.lastCycleAt ?? null,
+    cycleCount: status?.cycleCount ?? heartbeat?.cycleCount ?? 0,
+    intervalSeconds: status?.intervalSeconds || heartbeat?.intervalSeconds || fallbackIntervalSeconds,
+    enabledStrategies: status?.enabledStrategies ?? heartbeat?.enabledStrategies ?? [],
+    reason: status?.reason ?? (botRuntimeModule ? null : 'bot runtime module is not loaded yet'),
+    heartbeatAgeSeconds: heartbeat?.ageSeconds ?? null,
+    nowMs: Date.now(),
+  });
+}
+
 /* ──────────────────── internal publish endpoint ─────────────────── */
 
 const publishSchema = z.object({
@@ -254,9 +300,22 @@ async function handleInternalPublish(
 
 /* ─────────────────────── optional runtimes ──────────────────────── */
 
-interface RuntimeHandle {
+interface StoppableRuntime {
   name: string;
   stop: () => Promise<void>;
+}
+
+/** Result of one attempt to start a runtime. */
+type RuntimeStartOutcome = { started: true } | { started: false; reason: string };
+
+interface RuntimeHandle extends StoppableRuntime {
+  /**
+   * Calls the resolved starter. Safe to call repeatedly — the supervisor does —
+   * and never throws: a throwing starter becomes `{ started: false, reason }`.
+   */
+  start: () => Promise<RuntimeStartOutcome>;
+  /** The lazily loaded module, kept for read-only introspection (health). */
+  module: Record<string, unknown>;
 }
 
 interface RuntimeSpec {
@@ -267,6 +326,11 @@ interface RuntimeSpec {
   starters: string[];
   /** Exported (optional) stopper function names. */
   stoppers: string[];
+  /**
+   * True when the runtime can refuse to start (or stop itself later) and must be
+   * retried. main.ts runs exactly one supervisor loop per supervised spec.
+   */
+  supervised?: boolean;
 }
 
 /**
@@ -284,6 +348,10 @@ const RUNTIME_SPECS: RuntimeSpec[] = [
     modules: ['src/server/modules/bot/bot.runtime.ts', 'dist/server/modules/bot/bot.runtime.js'],
     starters: ['startBotRuntime'],
     stoppers: ['stopBotRuntime'],
+    // The bot runtime is the whole point of this process and it can legitimately
+    // refuse to start (lock held by the outgoing replica) or stop itself (lock
+    // lost). One supervisor loop keeps retrying it for the life of the process.
+    supervised: true,
   },
   // There is deliberately NO standalone 'broker-sync' runtime registered here.
   //
@@ -329,7 +397,7 @@ async function importModule(candidates: string[]): Promise<ModuleLoadSuccess | M
   return { ok: false, error: lastError };
 }
 
-async function startRuntime(spec: RuntimeSpec): Promise<RuntimeHandle | null> {
+async function loadRuntime(spec: RuntimeSpec): Promise<RuntimeHandle | null> {
   const loaded = await importModule(spec.modules);
   if (!loaded.ok) {
     console.warn(
@@ -356,25 +424,165 @@ async function startRuntime(spec: RuntimeSpec): Promise<RuntimeHandle | null> {
     .find((fn): fn is (...args: unknown[]) => unknown => fn !== null);
 
   const controller = new AbortController();
-  try {
-    // Tolerates `start*(opts)` and `start()` signatures — the current bot
-    // runtime takes no arguments and simply ignores the extra one. The signal
-    // is there for a runtime that wants to react to a cooperative stop.
-    await starter.fn({ signal: controller.signal });
-  } catch (err) {
-    console.error(`[ws] ${spec.name} failed to start: ${errorMessage(err)}`);
-    return null;
-  }
 
-  console.log(`[ws] ${spec.name} started via ${starter.name}()`);
   return {
     name: spec.name,
+    module: loaded.module,
+    start: async (): Promise<RuntimeStartOutcome> => {
+      try {
+        // Tolerates `start*(opts)` and `start()` signatures — the current bot
+        // runtime takes no arguments and simply ignores the extra one. The signal
+        // is there for a runtime that wants to react to a cooperative stop.
+        const result = await starter.fn({ signal: controller.signal });
+        // Starters that report their outcome return `{ started, reason }`
+        // (startBotRuntime does). Anything else that returns without throwing is
+        // treated as started, which keeps this generic for other runtimes.
+        if (result !== null && typeof result === 'object' && 'started' in (result as object)) {
+          const outcome = result as { started?: unknown; reason?: unknown };
+          if (outcome.started === false) {
+            return {
+              started: false,
+              reason:
+                typeof outcome.reason === 'string' && outcome.reason.length > 0
+                  ? outcome.reason
+                  : 'the starter declined to run',
+            };
+          }
+        }
+        return { started: true };
+      } catch (err) {
+        return { started: false, reason: `START_THREW: ${errorMessage(err)}` };
+      }
+    },
     stop: async () => {
       controller.abort();
       // Called with no argument on purpose: `stopBotRuntime(reason = 'requested')`
       // takes a string, and passing anything else (an AbortSignal, an options
       // object) lands in its audit payload and fails validation.
       if (stopper) await stopper();
+    },
+  };
+}
+
+/** Retry schedule for a supervised runtime: 5s, 10s, 20s, 40s, then 60s forever. */
+const RUNTIME_RETRY_BASE_MS = 5_000;
+const RUNTIME_RETRY_MAX_MS = 60_000;
+/** How often a running supervised runtime is checked for a silent stop. */
+const RUNTIME_WATCH_INTERVAL_MS = 5_000;
+
+function runtimeRetryDelayMs(attempt: number): number {
+  return Math.min(RUNTIME_RETRY_BASE_MS * 2 ** Math.max(0, attempt), RUNTIME_RETRY_MAX_MS);
+}
+
+/** Reads the runtime's own `botRuntimeStatus()`, or null when it exports none. */
+async function readRuntimeStatus(
+  handle: RuntimeHandle,
+): Promise<{ started: boolean; reason?: string } | null> {
+  const statusFn = asCallable(handle.module.botRuntimeStatus);
+  if (!statusFn) return null;
+  try {
+    const status = (await statusFn()) as { started?: unknown; reason?: unknown };
+    return {
+      started: status.started === true,
+      reason: typeof status.reason === 'string' ? status.reason : undefined,
+    };
+  } catch (err) {
+    console.warn(`[ws] ${handle.name} status read failed: ${errorMessage(err)}`);
+    return null;
+  }
+}
+
+/**
+ * Supervises ONE runtime with ONE loop.
+ *
+ * WHY: `startBotRuntime()` returns `{ started: false, reason: 'LOCK_HELD' }`
+ * during a rolling deploy (the outgoing replica can hold the lock for up to its
+ * 60s TTL) and stops itself permanently on lock loss. The old code called the
+ * starter exactly once, so both cases left the worker serving sockets and a green
+ * `/healthz` while placing zero trades forever. This loop retries with
+ * exponential backoff until a start succeeds, then watches for a silent stop and
+ * resumes the same retry loop.
+ *
+ * SAFETY: exactly one loop per runtime, and it never has two start attempts in
+ * flight — the next attempt is scheduled only after the previous one finished
+ * (`pause` is awaited inside the single async loop; there are no concurrent
+ * timers that could both call `handle.start()`). Two runtimes trading at once
+ * would double every client's exposure, so this invariant matters more than
+ * latency.
+ */
+function superviseRuntime(
+  handle: RuntimeHandle,
+  readStatus: () => Promise<{ started: boolean; reason?: string } | null>,
+): StoppableRuntime {
+  let stopped = false;
+  let wake: (() => void) | null = null;
+  let attempt = 0;
+
+  /** Sleep that `stop()` interrupts immediately, so shutdown is not delayed. */
+  function pause(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        wake = null;
+        resolve();
+      }, ms);
+      timer.unref();
+      wake = () => {
+        clearTimeout(timer);
+        wake = null;
+        resolve();
+      };
+    });
+  }
+
+  async function loop(): Promise<void> {
+    while (!stopped) {
+      const outcome = await handle.start();
+      if (stopped) return;
+
+      if (outcome.started) {
+        attempt = 0;
+        console.info(`[ws] ${handle.name} started via the boot supervisor`);
+        // A successful start is not a promise to keep running: the bot runtime
+        // stops itself when it loses the Redis lock. Poll its own status until it
+        // reports stopped, then loop around and start it again.
+        while (!stopped) {
+          await pause(RUNTIME_WATCH_INTERVAL_MS);
+          if (stopped) return;
+          const status = await readStatus();
+          if (status && !status.started) {
+            console.warn(
+              `[ws] ${handle.name} stopped after a successful start ` +
+                `(${status.reason ?? 'no reason reported'}); restarting.`,
+            );
+            break;
+          }
+        }
+        continue;
+      }
+
+      const delayMs = runtimeRetryDelayMs(attempt);
+      attempt += 1;
+      // console.error, not warn: a runtime that cannot start is a platform that
+      // is not trading, and the old code logged this once and then went silent.
+      console.error(
+        `[ws] ${handle.name} did NOT start (${outcome.reason}); attempt ${attempt} failed, ` +
+          `retrying in ${Math.round(delayMs / 1000)}s. Trading is stopped until it succeeds.`,
+      );
+      await pause(delayMs);
+    }
+  }
+
+  void loop().catch((err: unknown) => {
+    // The loop handles its own expected failures; reaching here means a bug.
+    console.error(`[ws] ${handle.name} supervisor crashed: ${errorMessage(err)}`);
+  });
+
+  return {
+    name: handle.name,
+    stop: async () => {
+      stopped = true;
+      wake?.();
+      await handle.stop();
     },
   };
 }
@@ -447,6 +655,11 @@ async function main(): Promise<void> {
   const host = env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1';
   const startedAt = new Date().toISOString();
 
+  // Set once the bot-runtime module has been lazily loaded (see step 4). Health
+  // reads its status from here rather than importing the module statically, which
+  // preserves the defensive lazy-import behaviour below.
+  let botRuntimeModule: Record<string, unknown> | null = null;
+
   // 2. Plain HTTP layer: health + internal publish.
   const httpServer = createServer((req, res) => {
     void (async () => {
@@ -455,15 +668,28 @@ async function main(): Promise<void> {
 
       if (req.method === 'GET' && route === '/healthz') {
         const [db, redisReport] = await Promise.all([probeDb(), probeRedis()]);
+        const trading = await collectTradingStatus(botRuntimeModule, env.BROKER_SYNC_INTERVAL);
         const stats = sockets.getConnectionStats();
-        const healthy = db.status === 'ok' && redisReport.status === 'ok';
-        sendJson(res, healthy ? 200 : 503, {
-          ok: healthy,
+        const infraHealthy = db.status === 'ok' && redisReport.status === 'ok';
+        // WHY THE HTTP CODE DOES NOT FOLLOW THE BOT: Railway's healthcheck points
+        // at /healthz and restarts the container on a non-2xx. A worker that
+        // legitimately does NOT own the lock — the normal case during a rolling
+        // deploy, while the outgoing replica still holds it — would then be
+        // restarted in a loop and could never take over. Postgres + Redis being up
+        // is therefore the only thing this endpoint asserts with a 2xx; `trading`
+        // carries the bot truth, and `?strict=1` turns any non-'ok' trading status
+        // into a 503 for monitors that want a hard alert (never the platform's own
+        // healthcheck).
+        const strict = new URL(url, 'http://localhost').searchParams.get('strict') === '1';
+        const statusCode = !infraHealthy || (strict && trading.status !== 'ok') ? 503 : 200;
+        sendJson(res, statusCode, {
+          ok: infraHealthy,
           uptime: Number(process.uptime().toFixed(3)),
           connections: stats.sockets,
           rooms: stats.rooms,
           db,
           redis: redisReport,
+          trading,
           namespace: TRADING_NAMESPACE,
           startedAt,
           pid: process.pid,
@@ -515,11 +741,21 @@ async function main(): Promise<void> {
   );
 
   // 4. Runtimes start only once sockets are reachable, so the first activity
-  //    they publish has a live subscriber.
-  const runtimes: RuntimeHandle[] = [];
+  //    they publish has a live subscriber. The bot runtime is SUPERVISED: one
+  //    loop keeps retrying it after a held-lock refusal or a lock-lost stop, so a
+  //    rolling deploy or a Redis flush cannot leave the platform silently idle.
+  const runtimes: StoppableRuntime[] = [];
   for (const spec of RUNTIME_SPECS) {
-    const handle = await startRuntime(spec);
-    if (handle) runtimes.push(handle);
+    const handle = await loadRuntime(spec);
+    if (!handle) continue;
+    if (spec.name === 'bot-runtime') botRuntimeModule = handle.module;
+    if (spec.supervised) {
+      runtimes.push(superviseRuntime(handle, () => readRuntimeStatus(handle)));
+    } else {
+      const outcome = await handle.start();
+      if (outcome.started) runtimes.push(handle);
+      else console.error(`[ws] ${spec.name} failed to start: ${outcome.reason}`);
+    }
   }
 
   let shuttingDown = false;

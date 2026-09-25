@@ -72,8 +72,6 @@ jobs:
       JWT_AUDIENCE: autopips-pro-clients
       # base64 of 32 'a' bytes — valid shape, obviously not a credential.
       CREDENTIAL_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
-      AWS_REGION: eu-west-1
-      AWS_KYC_BUCKET: ci-dummy-kyc-bucket
       NOWPAYMENTS_API_KEY: ci-dummy-nowpayments-key
       NOWPAYMENTS_IPN_SECRET: ci-dummy-nowpayments-ipn-secret
       DERIV_APP_ID: "1089"
@@ -157,8 +155,6 @@ jobs:
       JWT_ISSUER: autopips.pro
       JWT_AUDIENCE: autopips-pro-clients
       CREDENTIAL_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
-      AWS_REGION: eu-west-1
-      AWS_KYC_BUCKET: ci-dummy-kyc-bucket
       NOWPAYMENTS_API_KEY: ci-dummy-nowpayments-key
       NOWPAYMENTS_IPN_SECRET: ci-dummy-nowpayments-ipn-secret
       DERIV_APP_ID: "1089"

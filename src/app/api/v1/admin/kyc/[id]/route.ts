@@ -9,17 +9,20 @@ export const dynamic = 'force-dynamic';
  * GET /api/v1/admin/kyc/:id
  *
  * Review detail for one submission: personal details (ID number masked),
- * presence flags for each document and the reviewer state.
+ * document metadata for each slot and the reviewer state.
  *
- * The raw private-bucket object keys stay on the server — to look at a document
- * the reviewer calls GET /api/v1/admin/kyc/:id/files, which mints 300-second
- * signed URLs and records the access in AuditLog.
+ * No storage key and no document bytes are part of this payload. To look at a
+ * document the reviewer calls GET /api/v1/admin/kyc/:id/files for the manifest
+ * and then streams the slot from
+ * GET /api/v1/admin/kyc/:id/documents/:kind — both ADMIN-only, both audited.
  */
 export const GET = handler(
   async (_request: Request, context: { params: { id: string } }) => {
-    const session = await requireAdminOrManager();
+    // A TRADING_MANAGER may view the queue and the declared details; the
+    // document routes themselves are stricter (ADMIN only).
+    await requireAdminOrManager();
 
-    const detail = await getKycDetail(context.params.id, session.role);
+    const detail = await getKycDetail(context.params.id);
 
     return ok(toKycDetailClientView(detail));
   },

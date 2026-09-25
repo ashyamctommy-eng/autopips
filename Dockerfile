@@ -20,7 +20,7 @@
 #     is run *inside* this image, so the client is generated for the musl target
 #     it will actually run on. `openssl` is installed below because Prisma's
 #     engine detection needs libssl present.
-#   * `metaapi.cloud-sdk`, `ioredis`, `socket.io` and the AWS SDK are pure JS.
+#   * `ioredis` and `socket.io` are pure JS.
 #   Fallback: if a future dependency starts failing on musl, switch `base` to
 #   `node:20-bookworm-slim` (glibc) and replace the `apk add` lines with
 #   `apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates`.
@@ -31,7 +31,7 @@
 #   (`docker history`) and in the build cache, i.e. it is PUBLISHED, not secret.
 #   No other variable from .env.example may ever be passed as a build arg.
 #   Every secret (JWT_SECRET, DATABASE_URL, CREDENTIAL_ENCRYPTION_KEY,
-#   NOWPAYMENTS_*, METAAPI_TOKEN, AWS_*, WS_INTERNAL_TOKEN) is injected at
+#   NOWPAYMENTS_*, WS_INTERNAL_TOKEN) is injected at
 #   RUNTIME via `--env-file` / compose `env_file:` and is validated by
 #   `src/lib/env.ts`, which exits the process when anything is missing.
 #   The build needs no secret at all: every page is rendered dynamically

@@ -81,7 +81,14 @@ function check(
  *   7. LOT_TOO_LARGE               — 0 < signalVolume <= maxLotPerOrder
  *   8. SYMBOL_NOT_TRADABLE         — broker reports the symbol as tradable
  *   9. INSUFFICIENT_FREE_MARGIN    — requiredMargin is known and <= freeMargin.
- *                                     FAILS CLOSED when either figure is unknown
+ *                                     FAILS CLOSED when either figure is unknown.
+ *                                     On a STAKE-denominated broker the caller
+ *                                     supplies the per-signal stake budget
+ *                                     (capital x risk-per-trade) as
+ *                                     `requiredMargin` and the broker-reported
+ *                                     equity as `freeMargin`, because such a
+ *                                     broker has no margin RPC and publishes no
+ *                                     free margin — see order.manager.ts.
  *                                     (a contract broker reports no margin at all).
  */
 export function evaluatePreTradeRisk(ctx: RiskContextWithFloor): RiskDecision {

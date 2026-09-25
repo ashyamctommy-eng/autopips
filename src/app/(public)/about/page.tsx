@@ -36,7 +36,7 @@ const STACK: readonly StackItem[] = [
   { name: 'Deriv WebSocket API', role: 'Broker connectivity — account state, candles, order submission and contract settlement.' },
   { name: 'NOWPayments', role: 'Crypto deposit addresses, payout broadcast and signed IPN callbacks.' },
   { name: 'Argon2id + TOTP (speakeasy)', role: 'Password hashing and time-based two-factor authentication.' },
-  { name: 'AWS S3 + KMS', role: 'Private storage for identity documents, encrypted at rest, reachable only through short-lived signed links.' },
+  { name: 'AES-256-GCM document encryption', role: 'Identity documents are encrypted at rest and held in the platform’s own PostgreSQL — no external storage service — and are readable only by a signed-in administrator through an audited route.' },
   { name: 'Socket.IO service', role: 'Streams broker-sourced position, equity and activity events to signed-in clients.' },
   { name: 'Decimal arithmetic', role: 'All balances, P/L and fees — no floating-point money anywhere in the platform.' },
 ];

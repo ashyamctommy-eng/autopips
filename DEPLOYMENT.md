@@ -74,7 +74,7 @@ Files added by this deployment work, all at the repository root:
 * Ports 80 and 443 open to the internet. **Postgres 5432, Redis 6379, 3000 and
   4001 must NOT be exposed** — compose publishes 3000/4001 on `127.0.0.1` only.
 * Outbound HTTPS (443): Deriv's WebSocket endpoint
-  (`api.derivws.com`, TLS on 443), `api.nowpayments.io`, your S3 endpoint, and
+  (`api.derivws.com`, TLS on 443), `api.nowpayments.io`, and
   `fonts.googleapis.com` /
   `fonts.gstatic.com` **at image build time** (`next/font/google` downloads the
   Inter and JetBrains Mono subsets during `next build`; the build fails without
@@ -83,7 +83,6 @@ Files added by this deployment work, all at the repository root:
 **Accounts / infrastructure**
 * A domain: `autopips.pro` (and `www.autopips.pro`) with A/AAAA records pointing
   at the host.
-* An AWS S3 bucket for KYC documents (private; see §6).
 * A NOWPayments account with an API key and the IPN secret (see §7).
 * A Deriv account with an `app_id` registered at <https://api.deriv.com> and an
   account API token (see §8).
@@ -144,16 +143,22 @@ The same file refuses to boot if a variable named like a secret is prefixed with
 | --- | --- | --- | --- | --- |
 | `CREDENTIAL_ENCRYPTION_KEY` | yes (must decode to ≥ 32 bytes) | **secret** | AES-256-GCM envelope key for broker (Deriv) tokens and payout secrets stored in the DB (`src/lib/crypto/credential-cipher.ts`). **Changing it makes every stored credential undecryptable** — re-enter broker tokens after a rotation. | `openssl rand -base64 32` |
 
-### 3.5 AWS S3 (private KYC bucket)
+**The same rotation also destroys every stored KYC document.** Document ciphertext is
+keyed from this root with a purpose label (`src/server/modules/kyc/document-cipher.ts`),
+so a new root can never verify the old AES-256-GCM auth tag again. Unlike a broker token,
+a document cannot be re-entered or re-derived — the client's only copy is the upload — so
+a rotation makes every stored identity document **permanently unreadable** unless the
+existing `KycDocument` rows are re-encrypted in the same operation. If a rotation is
+required, re-encrypt the stored rows before retiring the old key; do not rotate without a
+migration that does so.
 
-| Variable | Required | Secret | Purpose | Example |
-| --- | --- | --- | --- | --- |
-| `AWS_REGION` | yes | no | Bucket region. | `eu-west-1` |
-| `AWS_ACCESS_KEY_ID` | optional in the schema | **secret** | Access key. **Omit on EC2/ECS and use an instance/task IAM role instead** (the SDK's default provider chain is used; keys are never logged or echoed). | `AKIA…` |
-| `AWS_SECRET_ACCESS_KEY` | optional in the schema | **secret** | Matching secret. | `…` |
-| `AWS_KYC_BUCKET` | yes | no | The private KYC bucket name. | `autopips-kyc-private` |
-| `AWS_KMS_KEY_ID` | optional | no | SSE-KMS key ARN/ID. When set, every PUT uses `aws:kms`; otherwise `AES256`. **Preferred in production.** | `arn:aws:kms:eu-west-1:123456789012:key/uuid` |
-| `KYC_SIGNED_URL_TTL` | no (default `300`) | no | Presigned GET lifetime for admin review. **Hard-capped at 300 s in code** — a larger value here is silently clamped. | `300` |
+### 3.5 KYC document storage — no external service
+
+There is nothing to configure here. Identity documents are encrypted at rest with
+AES-256-GCM (key derived from `CREDENTIAL_ENCRYPTION_KEY`, §3.4) and stored in the
+platform's own Postgres, in `KycDocument.ciphertext`. The platform runs no bucket and
+no third-party identity API, so `.env.example` and `src/lib/env.ts` carry no `AWS_*`
+and no `KYC_SIGNED_URL_TTL` variables at all. See §6.
 
 ### 3.6 NOWPayments
 
@@ -331,41 +336,43 @@ step.
 
 ---
 
-## 6. S3 bucket for KYC documents
+## 6. KYC document storage (internal, encrypted)
 
-The platform has no third-party identity-verification service: identity documents
-go to a **private** bucket and leave it only as short-lived presigned URLs minted
-for a signed-in admin (`src/server/modules/kyc/storage.service.ts`).
+The platform has no third-party identity-verification service and no object store:
+identity documents are uploaded by the client, encrypted at rest with AES-256-GCM and
+written to the platform's own Postgres, in `KycDocument.ciphertext`
+(`src/server/modules/kyc/storage.service.ts`, `document-cipher.ts`). Manual review is
+the only route by which a document is read.
 
-Required posture:
+What that means operationally:
 
-1. **Block Public Access: ON** (all four switches). No public bucket policy, no
-   ACLs. KYC documents are passports and selfies; a public object is a breach.
-2. **Bucket policy: deny any request where `aws:SecureTransport` is false.**
-3. **Encryption at rest:** SSE-KMS with a customer-managed key (`AWS_KMS_KEY_ID`)
-   is preferred; without it the module falls back to SSE-S3 `AES256`. There is no
-   code path that uploads without server-side encryption, and a caller cannot
-   supply its own encryption parameters or canned ACL — those are rejected by a
-   client middleware guard.
-4. **Object keys are unguessable**: `kyc/<userId>/<uuid>/<kind>-<uuid>.<ext>`,
-   extension derived from the validated content type, never from the client
-   filename.
-5. **No public URL is ever produced.** The only URL the module can mint is a
-   presigned `GetObject` URL, capped at **300 seconds** regardless of
-   `KYC_SIGNED_URL_TTL`, and every read is written to `AuditLog` as
-   `KYC_DOCUMENT_VIEWED`.
-6. **Uploads are bounded**: 10 MB per document, allow-listed content types
-   (`image/jpeg`, `image/png`, `image/webp`, `application/pdf`) and four slots
-   (`idFront`, `idBack`, `proofOfAddress`, `selfie`). nginx allows 12 MB per
-   request so multipart framing is never the thing that 413s a legitimate upload.
-7. **Credentials:** prefer an IAM role on the instance (leave
-   `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` blank — they are optional in the
-   schema), otherwise a dedicated IAM user limited to
-   `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket` on that one
-   bucket (+ `kms:Encrypt`/`kms:Decrypt`/`kms:GenerateDataKey` on the KMS key).
-8. Turn on **versioning** and an **object-lock/retention or lifecycle rule**
-   appropriate to your KYC retention obligation, and enable access logging /
-   CloudTrail data events for the bucket.
+1. **No bucket, no keys, no external service.** `@aws-sdk/client-s3` and
+   `@aws-sdk/s3-request-presigner` are not dependencies, and no `AWS_*` or
+   `KYC_SIGNED_URL_TTL` variables exist in `src/lib/env.ts` or `.env.example`.
+2. **Encryption is mandatory** before anything is written: AES-256-GCM with a key
+   derived from `CREDENTIAL_ENCRYPTION_KEY` and purpose-separated in
+   `src/server/modules/kyc/document-cipher.ts`, so a document envelope can never be
+   decrypted as a broker credential. The stored form is `iv(12 bytes) || authTag(16
+   bytes) || ciphertext`; there is no code path that writes plaintext.
+3. **There is no bearer credential.** Documents are read only through
+   `GET /api/v1/admin/kyc/:id/files` (the manifest) and
+   `GET /api/v1/admin/kyc/:id/documents/:kind` (which streams the decrypted bytes),
+   both ADMIN-authenticated and scoped to the submission that owns the file. The manifest
+   route returns metadata only and sets no cache headers; the document-bytes response
+   sets `Cache-Control: private, no-store` (with `max-age=0`) and
+   `X-Content-Type-Options: nosniff`.
+   Nothing is pre-signed and nothing expires, because nothing exists outside a session.
+4. **Every read is audited**: `KYC_DOCUMENT_VIEWED` is written for the manifest
+   (`phase: 'manifest'`) and again for each download (`phase: 'download'`).
+5. **Uploads are bounded**: 10 MB per document, exactly two slots — the front and back
+   of one identity document (`idFront`, `idBack`) — and allow-listed content types
+   (`image/jpeg`, `image/png`, `image/webp`, `application/pdf`). Both documents travel in
+   one multipart body, so the nginx body limit is 24m — above 2 × 10 MB — and multipart
+   framing is never the thing that 413s a legitimate upload.
+6. **The documents are part of the database now.** They are covered by the Postgres
+   backup in §11.2 and add at most two files per client to the table, so size the
+   database volume accordingly. There is no separate bucket to version, replicate or
+   set a lifecycle rule on.
 
 ---
 
@@ -470,7 +477,7 @@ scrubbed from error messages before they are logged.
 6. Tune `BROKER_CONNECT_TIMEOUT` if Deriv is slow to authorise, and
    `BROKER_SYNC_INTERVAL` for the state-poll interval (floored at 5 s).
 
-> **Deriv trades are contracts, and end-to-end trading is not wired up yet.**
+> **Deriv trades are contracts, and the exposure model is a STAKE, not a lot.**
 > The read path is live: candles come from `ticks_history` (`style: "candles"`,
 > granularity in seconds — 1m/5m/15m/30m/1h/4h/1d → 60…86400), live prices come
 > from a refcounted `ticks` subscription (a client watching a symbol starts it; the
@@ -478,13 +485,20 @@ scrubbed from error messages before they are logged.
 > `src/server/modules/market/market-stream.service.ts`), and account state comes from `balance` (plus
 > open-contract profit) and `portfolio`. Order-execution calls are implemented
 > against Deriv's contract API — `proposal` → `buy` → contract id, early close via
-> `sell`, settlement/closure via `proposal_open_contract` and `profit_table` — but
-> the platform's ledger still computes open exposure as `volume × entryPrice` from
-> the old MT5 lot model. Deriv exposure is **stake × multiplier** and Deriv reports
-> no lots, no contract size, no tick value and no free margin, so the bot's lot
-> allocator cannot size a contract correctly and **refuses to place Deriv trades**
-> with a clear error rather than mis-sizing one. The exposure/notional model must
-> be decided and reworked before positions are booked to `TradeRecord`.
+> `sell`, settlement/closure via `proposal_open_contract` and `profit_table`.
+>
+> SIZING: Deriv reports no lots, no contract size, no tick value and no free
+> margin, and the platform does not pretend to know them. A Deriv order is sized as
+> a STAKE — the money at risk, which is also the maximum loss on the contract —
+> bounded by `risk.risk_per_trade_pct`, the plan's drawdown stop and
+> `risk.max_stake_usd`; `TradeRecord.notional` stores the broker's stake ×
+> multiplier exposure explicitly instead of deriving it from a lot size. The
+> MT5-shaped lot allocator is retained for a lot-denominated broker, and a
+> denomination the platform cannot price is refused rather than converted with an
+> invented contract size.
+>
+> NOT YET PROVEN: no order has been placed end-to-end against Deriv. The first one
+> needs a supervised run — see HANDOVER.md §7.
 
 ---
 
@@ -672,9 +686,9 @@ docker compose exec -T postgres pg_restore -U autopips -d autopips_restore --cle
   (`archive_mode=on`, `archive_command` → object storage) and use PITR. Without
   it, your RPO is the dump interval.
 * Take a dump **immediately before** any release that includes a migration.
-* KYC documents are **not** in Postgres — they live in S3. Back those up with
-  versioning plus (ideally) cross-region replication, and keep the same retention
-  policy as the database rows that reference them.
+* KYC documents **are** in Postgres, as AES-256-GCM ciphertext in
+  `KycDocument.ciphertext`, so the dump above is their backup too — there is no
+  separate object store to copy, version or replicate.
 
 ### 11.3 Redis backup / restore
 
@@ -726,13 +740,13 @@ docker compose logs web    | grep -E "Invalid or missing server environment|\[au
 | `/healthz` returns 503 | Postgres or Redis unreachable — the failing dependency is named in the body | Fix the datastore; check `REDIS_URL`/`DATABASE_URL` hosts (compose uses service names, not localhost) |
 | IPNs rejected; `AuditLog` shows `DEPOSIT_IPN_REJECTED` | Wrong `NOWPAYMENTS_IPN_SECRET`, or the proxy/body pipeline is rewriting the body or dropping `x-nowpayments-sig` | Re-copy the secret from *Store settings → IPN*; verify the registered callback URL is `https://autopips.pro/api/v1/payments/nowpayments/ipn`; remove any body-rewriting proxy rule |
 | Deposits stay `PENDING` though the provider says paid | Redis was down, so the replay guard failed closed and dropped the delivery; or the callback URL is unreachable | Restore Redis, then use the reconciliation/recovery path (it is idempotent) and confirm the `AuditLog` entries |
-| `[bot.runtime] refusing to start — LOCK_HELD` | A second worker container owns `autopips:lock:bot-runtime` | Ensure exactly one worker; if the previous container was hard-killed, wait ≤ 60 s (lock TTL) and restart the worker |
-| No trades at all, but the socket server is healthy | Deriv trade execution is not wired to the ledger yet (expected — see §8), no `DERIV_API_TOKEN`, all strategies disabled, or a risk guard is blocking (`RISK_MAX_OPEN_POSITIONS=0`, equity floor, `RISK_MIN_CLIENT_CAPITAL_USD`) | Check the admin broker screen for the Deriv connection state, then the risk config, then worker logs for per-cycle audit errors |
+| `[bot.runtime] refusing to start — LOCK_HELD` | A second worker container owns `autopips:lock:bot-runtime` | Ensure exactly one worker. The boot supervisor retries with backoff, so this normally self-heals once the outgoing replica's lock expires (≤ 60 s); `/healthz` shows `trading.reason` while it waits |
+| No trades at all, but the socket server is healthy | Check, in order: `/healthz` → `trading.status` (a `stopped`/`degraded` verdict names why), the platform kill switch, no `DERIV_API_TOKEN`, all strategies disabled, or a risk guard blocking (`RISK_MAX_OPEN_POSITIONS=0`, equity floor, `RISK_MIN_CLIENT_CAPITAL_USD`) | Start from the `trading` block on `/healthz` — it distinguishes a worker that never got the lock from one that stopped; then the admin bot console for the kill switch and risk config, then the worker logs for per-cycle audit errors |
 | Broker connection shows `ERROR`/`DISCONNECTED` | Wrong `DERIV_APP_ID`, a missing/invalid `DERIV_API_TOKEN`, or a token not issued for that account | Re-check `DERIV_APP_ID`/`DERIV_API_TOKEN` (and whether the token is still valid in the Deriv dashboard), then re-enter it in the admin UI |
 | Users are signed out after every deploy | Redis was replaced/flushed, or web and worker point at different Redis instances | Make both services use the same `REDIS_URL`; enable AOF persistence (already set in compose) |
 | `prisma migrate deploy` fails with `P1001`/connection refused | Postgres not healthy yet, or `DATABASE_URL` uses the wrong host | `docker compose ps postgres`; inside compose the host must be `postgres` |
-| KYC upload returns 413 | Request exceeded `client_max_body_size` (12m) or a single document exceeded the 10 MB limit | Check both; the per-document limit is enforced in code and is not configurable |
-| Presigned KYC link "expired" after a few minutes | By design — the hard cap is 300 s | Open the document from the admin review screen again |
+| KYC upload returns 413 | Request exceeded `client_max_body_size` (24m) or a single document exceeded the 10 MB limit | Check both; the per-document limit is enforced in code and is not configurable |
+| A reviewer cannot open a KYC document | The session is not an ADMIN, or the slot is empty for that submission | Check the role on the session; the files manifest reports which slots are on file |
 | Admin screens show empty tables/panels | Some service contracts intentionally return honest empty states (no invented data) | Check the browser network tab / `GET /api/v1/admin/*` before assuming data loss |
 
 ---
@@ -755,6 +769,7 @@ docker compose logs web    | grep -E "Invalid or missing server environment|\[au
   or schedules them.
 * **Migration history is forward-only.** There are no down migrations; plan
   rollbacks around expand/contract or a restore.
-* **Deriv trade execution is not yet driven from the ledger** (§8): the platform
-  refuses to place Deriv contracts until the exposure/notional model is reworked
-  for stake × multiplier. Do not treat this deployment as end-to-end trading.
+* **No order has been placed end-to-end yet.** The stake/exposure model is settled
+  and implemented (§8) — orders are sized as stakes — but the first live order still
+  needs a supervised run: watch `trading.status` on `/healthz`, the admin bot
+  console and the audit trail while it happens.

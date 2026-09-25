@@ -61,10 +61,6 @@ build. That is why the worker is created first.
    | `NOWPAYMENTS_IPN_SECRET` | from NOWPayments dashboard |
    | `DERIV_APP_ID` | the `app_id` from <https://api.deriv.com> |
    | `DERIV_API_TOKEN` | from the Deriv dashboard (optional at boot; can also be set in Admin → Platform settings) |
-   | `AWS_REGION` | e.g. `eu-west-1` |
-   | `AWS_ACCESS_KEY_ID` | IAM user with `s3:PutObject`/`GetObject` on the KYC bucket |
-   | `AWS_SECRET_ACCESS_KEY` | as above |
-   | `AWS_KYC_BUCKET` | your private bucket name |
 
    > Every variable in `.env.example` must be present — `src/lib/env.ts` validates
    > the whole contract at boot and **exits non-zero** if anything is missing or
@@ -244,8 +240,9 @@ Do these in order; each one depends on the previous.
 5. Create plans in `/admin/plans`.
 6. Send a **live minimum deposit** through the real NOWPayments flow and confirm
    it credits exactly once in the client's deposit history.
-7. Submit one KYC file as a test client and walk the admin review, confirming the
-   signed document URLs expire after 300 seconds.
+7. Submit one identity document as a test client and walk the admin review, confirming
+   the reviewer can open it only through the audited ADMIN route and that the client
+   cannot read the file back.
 
 ---
 
@@ -339,9 +336,8 @@ Rules that hold for every one of them:
 
 Deliberately **not** editable there, because rotating them invalidates live
 sessions, stored credentials or the running deployment itself: `JWT_SECRET`,
-`CREDENTIAL_ENCRYPTION_KEY`, `DATABASE_URL`, `REDIS_URL`, the AWS/KYC
-credentials, and the risk limits the bot enforces. Those stay in service
-variables.
+`CREDENTIAL_ENCRYPTION_KEY`, `DATABASE_URL`, `REDIS_URL`, and the risk limits the
+bot enforces. Those stay in service variables.
 
 ### The realtime / bot runtime is a SEPARATE service
 

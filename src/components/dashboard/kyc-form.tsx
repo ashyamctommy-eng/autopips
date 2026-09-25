@@ -28,19 +28,20 @@ import { apiFetch } from '@/lib/session-refresh';
  *
  * Flow (business directive #5 — a human reviewer makes the decision):
  *   1. the browser validates the type and size of every file,
- *   2. each file is streamed to `POST /api/v1/kyc/upload` (multipart) into the
- *      PRIVATE bucket, which returns opaque object keys,
- *   3. those keys plus the personal details go to `POST /api/v1/kyc/submit`.
+ *   2. each file is streamed to `POST /api/v1/kyc/upload` (multipart), which
+ *      encrypts it and stores it inside the platform, returning opaque document
+ *      row ids,
+ *   3. those ids plus the personal details go to `POST /api/v1/kyc/submit`.
  *
  * The server's answer is always the authority: this component mirrors the
  * upload allow-list for fast feedback, and surfaces the API's own error message
  * (including Zod issue details) when the server rejects something the mirror let
  * through.
  *
- * This component NEVER previews a document. There is no thumbnail, no object
- * URL and no filename round-trip: a reviewer opens the files through
- * short-lived signed URLs minted server-side, and those never reach the client
- * bundle.
+ * This component NEVER previews a document. There is no thumbnail and no
+ * filename round-trip: a reviewer opens a file through an internal, audited
+ * admin-only route, and nothing that grants access to the bytes reaches this
+ * client.
  */
 
 /** Mirror of KYC_ALLOWED_CONTENT_TYPES (src/server/modules/kyc/storage.service.ts). */
@@ -56,13 +57,14 @@ const ID_TYPES = [
   { value: 'DRIVERS_LICENSE', label: 'Driving licence' },
 ] as const;
 
-type DocumentField = 'idFront' | 'idBack' | 'proofOfAddress' | 'selfie';
+type DocumentField = 'idFront' | 'idBack';
 
+/** The `POST /api/v1/kyc/upload` response: row ids, never storage keys. */
 interface UploadKeys {
-  idFrontKey: string;
-  idBackKey: string | null;
-  proofOfAddressKey: string;
-  selfieKey: string;
+  idFrontDocumentId: string;
+  idBackDocumentId: string | null;
+  /** Slots the account holds after this write; informational. */
+  storedKinds: string[];
 }
 
 export interface KycFormProps {
@@ -78,8 +80,6 @@ interface FieldErrors {
   idNumber?: string;
   idFront?: string;
   idBack?: string;
-  proofOfAddress?: string;
-  selfie?: string;
 }
 
 function describeFile(file: File): string {
@@ -148,15 +148,17 @@ function serverError(body: unknown, fallback: string): string {
 function isUploadKeys(value: unknown): value is UploadKeys {
   if (typeof value !== 'object' || value === null) return false;
   const keys = value as Record<string, unknown>;
+  // `storedKinds` is informational, so a payload that omits it (or a future one
+  // that reshapes it) still passes as long as the two ids we submit are sound.
+  const storedKinds = keys.storedKinds;
   return (
-    typeof keys.idFrontKey === 'string' &&
-    typeof keys.proofOfAddressKey === 'string' &&
-    typeof keys.selfieKey === 'string' &&
-    (keys.idBackKey === null || typeof keys.idBackKey === 'string')
+    typeof keys.idFrontDocumentId === 'string' &&
+    (keys.idBackDocumentId === null || typeof keys.idBackDocumentId === 'string') &&
+    (storedKinds === undefined || Array.isArray(storedKinds))
   );
 }
 
-const STEP_LABELS = ['Personal details', 'Identity document', 'Proof & selfie'] as const;
+const STEP_LABELS = ['Personal details', 'Identity documents'] as const;
 
 export function KycForm({ initial }: KycFormProps) {
   const router = useRouter();
@@ -170,14 +172,16 @@ export function KycForm({ initial }: KycFormProps) {
   const [files, setFiles] = React.useState<Record<DocumentField, File | null>>({
     idFront: null,
     idBack: null,
-    proofOfAddress: null,
-    selfie: null,
   });
   const [errors, setErrors] = React.useState<FieldErrors>({});
   const [serverMessage, setServerMessage] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
-  const idBackRequired = idType === 'DRIVERS_LICENSE';
+  // Server rule (submitKycSchema.superRefine): only a passport is reliably
+  // single-sided; a national ID card or driving licence carries data on the
+  // reverse and must have its back uploaded.
+  const idBackRequired = idType !== 'PASSPORT';
+  const idBackNoun = idType === 'DRIVERS_LICENSE' ? 'driving licence' : 'national ID card';
   const onFileField = onFileFieldFactory(setFiles, setErrors);
 
   const validateStep = (target: number): FieldErrors => {
@@ -202,7 +206,7 @@ export function KycForm({ initial }: KycFormProps) {
         if (problem) next.idFront = problem;
       }
       if (idBackRequired) {
-        if (!files.idBack) next.idBack = 'A driving licence needs its reverse side.';
+        if (!files.idBack) next.idBack = `The reverse side of a ${idBackNoun} is required.`;
         else {
           const problem = validateFile(files.idBack);
           if (problem) next.idBack = problem;
@@ -210,18 +214,6 @@ export function KycForm({ initial }: KycFormProps) {
       } else if (files.idBack) {
         const problem = validateFile(files.idBack);
         if (problem) next.idBack = problem;
-      }
-    }
-    if (target >= 2) {
-      if (!files.proofOfAddress) next.proofOfAddress = 'Upload a proof of address.';
-      else {
-        const problem = validateFile(files.proofOfAddress);
-        if (problem) next.proofOfAddress = problem;
-      }
-      if (!files.selfie) next.selfie = 'Upload a selfie holding your document.';
-      else {
-        const problem = validateFile(files.selfie);
-        if (problem) next.selfie = problem;
       }
     }
     return next;
@@ -242,17 +234,16 @@ export function KycForm({ initial }: KycFormProps) {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const found = validateStep(2);
+    const found = validateStep(1);
     setErrors(found);
     if (Object.keys(found).length > 0) {
       // Send the user to the first step that has a problem, so the message is
       // always next to the field it belongs to.
       if (found.legalName || found.dob || found.address) setStep(0);
-      else if (found.idType || found.idNumber || found.idFront || found.idBack) setStep(1);
-      else setStep(2);
+      else setStep(1);
       return;
     }
-    if (!files.idFront || !files.proofOfAddress || !files.selfie) return;
+    if (!files.idFront) return;
 
     setSubmitting(true);
     setServerMessage(null);
@@ -260,8 +251,6 @@ export function KycForm({ initial }: KycFormProps) {
       const form = new FormData();
       form.append('idFront', files.idFront);
       if (files.idBack) form.append('idBack', files.idBack);
-      form.append('proofOfAddress', files.proofOfAddress);
-      form.append('selfie', files.selfie);
 
       const uploadResponse = await apiFetch('/api/v1/kyc/upload', {
         method: 'POST',
@@ -295,10 +284,11 @@ export function KycForm({ initial }: KycFormProps) {
           address: address.trim(),
           idType,
           idNumber: idNumber.trim(),
-          idFrontKey: keys.idFrontKey,
-          proofOfAddressKey: keys.proofOfAddressKey,
-          selfieKey: keys.selfieKey,
-          ...(keys.idBackKey ? { idBackKey: keys.idBackKey } : {}),
+          idFrontDocumentId: keys.idFrontDocumentId,
+          // The upload reports what is on file after the write, so a back side
+          // stored by an earlier upload is carried through even when this request
+          // did not include one.
+          ...(keys.idBackDocumentId ? { idBackDocumentId: keys.idBackDocumentId } : {}),
         }),
       });
       const submitBody: unknown = await submitResponse.json();
@@ -322,7 +312,7 @@ export function KycForm({ initial }: KycFormProps) {
         description: 'A compliance officer will review your file. You can track the status here.',
         variant: 'success',
       });
-      setFiles({ idFront: null, idBack: null, proofOfAddress: null, selfie: null });
+      setFiles({ idFront: null, idBack: null });
       setIdNumber('');
       router.refresh();
     } catch {
@@ -463,8 +453,8 @@ export function KycForm({ initial }: KycFormProps) {
             label={idBackRequired ? 'Identity document — back (required)' : 'Identity document — back (optional)'}
             hint={
               idBackRequired
-                ? 'A driving licence always needs its reverse side.'
-                : 'Not needed for a passport; most national ID cards are single-sided.'
+                ? `A ${idBackNoun} carries data on the reverse, so the back is required.`
+                : 'A passport is single-sided, so the back is optional. National ID cards and driving licences carry data on the reverse, so they must include it.'
             }
             file={files.idBack}
             error={errors.idBack}
@@ -474,37 +464,14 @@ export function KycForm({ initial }: KycFormProps) {
         </div>
       ) : null}
 
-      {step === 2 ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FileField
-            id="kyc-proof-of-address"
-            label="Proof of address"
-            hint="Utility bill, bank statement or government letter from the last 3 months."
-            file={files.proofOfAddress}
-            error={errors.proofOfAddress}
-            onChange={onFileField('proofOfAddress')}
-            required
-          />
-          <FileField
-            id="kyc-selfie"
-            label="Selfie holding your document"
-            hint="Your face and the document must both be clearly visible."
-            file={files.selfie}
-            error={errors.selfie}
-            onChange={onFileField('selfie')}
-            required
-          />
-        </div>
-      ) : null}
-
       <Separator />
 
       <div className="flex flex-col gap-3">
         <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">
           <Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-          Documents are stored in a private bucket. A compliance officer opens them through
-          short-lived signed links, and every access is written to the audit trail. This page never
-          renders a document preview.
+          Documents are encrypted and stored by the platform itself, and are opened only by a
+          compliance officer through an internal, audited admin-only route. No document is ever
+          previewed to you.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {step > 0 ? (

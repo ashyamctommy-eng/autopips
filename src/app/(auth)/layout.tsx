@@ -14,9 +14,9 @@ import { BrandMark } from '@/components/shared/brand-mark';
  *
  * The footer states the platform's actual security posture in the same words
  * the rest of the product uses — Argon2id password hashing, TOTP two-factor,
- * and identity documents in a private bucket reachable only through short-lived
- * signed links. No counts, no badges, no claims: see `src/components/public` for
- * the rules this copy follows.
+ * and identity documents encrypted at rest and readable only by a signed-in
+ * administrator through an audited route. No counts, no badges, no claims: see
+ * `src/components/public` for the rules this copy follows.
  */
 
 export const metadata: Metadata = {
@@ -46,7 +46,7 @@ const SECURITY_POSTURE: readonly PostureItem[] = [
     icon: FileLock2,
     title: 'Private document storage',
     detail:
-      'Identity documents stay in a private bucket, readable only through signed links that expire after five minutes.',
+      'Identity documents are encrypted at rest and stay inside the platform; only a signed-in administrator can open them, and every access is logged.',
   },
 ];
 

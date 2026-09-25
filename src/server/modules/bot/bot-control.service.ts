@@ -91,14 +91,18 @@ async function readEnabledFromRedis(): Promise<boolean | null> {
  * Durable state, read straight from the table (not the settings cache).
  *
  * Returns 'unknown' only when the read FAILED. A missing row is not an unknown
- * state: a platform that has never been stopped is running, and treating
- * "no row yet" as unknown would refuse every order on a fresh deployment —
- * fail-closed on a technicality, which is not the same as failing safe.
+ * state: it falls back to the CONFIGURED value, which is `BOT_ENABLED` when the
+ * service variable is set and the setting's own default ('true') otherwise. That
+ * is what makes `BOT_ENABLED=false` in the host's variables actually stop the
+ * bot — an operator who sets that variable expects it to be obeyed, and before
+ * this it was silently ignored whenever no console row existed. Treating "no row
+ * yet" as unknown would refuse every order on a fresh deployment — fail-closed on
+ * a technicality, which is not the same as failing safe.
  */
 async function readEnabledFromDatabase(): Promise<boolean | 'unknown'> {
   try {
     const row = await prisma.platformSetting.findUnique({ where: { key: 'bot.enabled' } });
-    if (!row) return true;
+    if (!row) return getSetting('bot.enabled').trim().toLowerCase() !== 'false';
     return row.value.trim().toLowerCase() !== 'false';
   } catch (err) {
     console.error(

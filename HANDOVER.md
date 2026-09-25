@@ -84,7 +84,8 @@ size and equity are not inputs (they describe the broker account, not the money 
    ticks, no strategy signals, no bot activity feed. The panel honestly says "Disconnected".
 2. **No order has been placed.** The stake path is unit-tested and the auth path is proven
    against the live broker, but the first real order still needs a supervised run (§7).
-3. NOWPayments keys are still `CHANGE_ME` placeholders; KYC S3 vars may or may not be set.
+3. NOWPayments keys are still `CHANGE_ME` placeholders. KYC storage is internal to the
+   platform and needs no variables beyond `CREDENTIAL_ENCRYPTION_KEY`, which already exists.
 
 ---
 
@@ -195,7 +196,7 @@ so DEMO/LIVE is a label — the account type Deriv issues is what the adapter de
    3. **Variables** — the worker runs the SAME environment contract as the web service
       (`src/lib/env.ts`) and exits 1 naming anything missing: `DATABASE_URL`, `REDIS_URL`,
       `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`, `WS_INTERNAL_TOKEN`, `DERIV_APP_ID`, `DERIV_*`,
-      `AWS_*`, `NOWPAYMENTS_*`. Reference the shared ones (`${{Postgres.DATABASE_URL}}`,
+      `NOWPAYMENTS_*`. Reference the shared ones (`${{Postgres.DATABASE_URL}}`,
       `${{Redis.REDIS_URL}}`) rather than pasting copies.
    4. **Give the worker a public domain** (Settings → Networking → Generate Domain). The browser
       connects to the socket server directly.

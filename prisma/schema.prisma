@@ -66,7 +66,8 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  kycProfile  KycProfile?
+  kycProfile   KycProfile?
+  kycDocuments KycDocument[]
   deposits    Deposit[]
   withdrawals Withdrawal[]
   investments Investment[]
@@ -85,18 +86,61 @@ model KycProfile {
   address           String
   idType            String // "PASSPORT" | "NATIONAL_ID" | "DRIVERS_LICENSE"
   idNumber          String
-  idFrontKey        String // S3 Private Object Key
-  idBackKey         String?
-  proofOfAddressKey String
-  selfieKey         String
   rejectionReason   String?
   reviewedBy        String?
   reviewedAt        DateTime?
   status            KycStatus @default(PENDING)
   createdAt         DateTime  @default(now())
 
+  /// The identity documents that belong to this submission. The bytes live in
+  /// KycDocument.ciphertext — there is no external object store.
+  documents         KycDocument[]
+
   @@index([status])
   @@index([createdAt])
+}
+
+/// An identity document held INSIDE the platform.
+///
+/// There is no external bucket and no third-party verification API in this
+/// product: the bytes live in this row, encrypted at rest with AES-256-GCM
+/// (`document-cipher.ts`, key derived from CREDENTIAL_ENCRYPTION_KEY), and they
+/// leave the server only through an ADMIN-authenticated route that streams them
+/// to a reviewer and writes KYC_DOCUMENT_VIEWED. No pre-signed URL exists, so
+/// there is no bearer credential that can leak.
+///
+/// TRADE-OFF: Postgres is not an object store. Uploads are capped at 10 MB per
+/// document and there are at most two per client, which keeps the table small
+/// and makes the documents part of the same backup/migration story as the rest
+/// of the ledger. If volume ever outgrows that, move the bytes to a private
+/// volume or blob store and keep this row as the index — the encryption helper
+/// and the audited read path stay as they are.
+model KycDocument {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Set when the document is attached to a submission; NULL while the client
+  /// is still filling the form in.
+  profileId   String?
+  profile     KycProfile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  /// "idFront" | "idBack" — see KYC_DOCUMENT_KINDS.
+  kind        String
+  /// The client-declared MIME type, already checked against the allow-list.
+  contentType String
+  byteLength  Int
+  /// SHA-256 of the PLAINTEXT bytes: an integrity check that survives encryption
+  /// and lets a reviewer confirm the file is the one that was uploaded.
+  sha256      String
+  /// AES-256-GCM envelope: iv(12 bytes) || authTag(16 bytes) || ciphertext.
+  ciphertext  Bytes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// One row per slot per user: re-uploading replaces the document rather than
+  /// accumulating versions, and the reviewer always sees the latest file.
+  @@unique([userId, kind])
+  @@index([profileId])
+  @@index([userId])
 }
 
 model TradingPlan {

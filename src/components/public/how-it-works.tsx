@@ -37,7 +37,7 @@ const STEPS: readonly Step[] = [
     icon: ShieldCheck,
     title: 'Verify your identity',
     description:
-      'Upload your identity document, a proof of address and a selfie. Reviews are performed by a human reviewer against the stored documents. You must be at least 18 years old.',
+      'Upload the front and back of one identity document — a passport is single-sided, so only its front is needed. Reviews are performed by a human reviewer against the stored documents; there is no automated identity-scoring service. You must be at least 18 years old.',
     href: '/faq#kyc',
     linkLabel: 'What KYC needs',
   },

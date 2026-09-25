@@ -53,13 +53,9 @@ REQUIRED_VARS=(
   REDIS_URL
   JWT_SECRET
   CREDENTIAL_ENCRYPTION_KEY
-  AWS_REGION
-  AWS_ACCESS_KEY_ID
-  AWS_SECRET_ACCESS_KEY
-  AWS_KYC_BUCKET
   NOWPAYMENTS_API_KEY
   NOWPAYMENTS_IPN_SECRET
-  METAAPI_TOKEN
+  DERIV_APP_ID
 )
 
 # Secrets that must never be exposed with a NEXT_PUBLIC_ prefix (mirrors the
@@ -327,10 +323,8 @@ else
   pass "NODE_ENV=production"
 fi
 
-ttl="$(get_var KYC_SIGNED_URL_TTL || true)"
-if [ -n "$ttl" ] && [ "$ttl" -gt 300 ] 2>/dev/null; then
-  warn "KYC_SIGNED_URL_TTL=$ttl exceeds the hard cap of 300s — src/server/modules/kyc/storage.service.ts clamps it, so the configured value is misleading"
-fi
+# KYC documents are stored inside the platform (encrypted, in Postgres) — there is
+# no object-storage variable and no signed-URL lifetime to validate here.
 
 if has_var NEXT_PUBLIC_WS_URL; then
   warn "NEXT_PUBLIC_WS_URL is set — the browser will connect to that host directly instead of same-origin /ws/socket.io. Only do this when that hostname really serves the worker."

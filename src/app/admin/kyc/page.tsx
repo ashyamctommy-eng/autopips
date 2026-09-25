@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'KYC review',
-  description: 'Manual identity review queue: documents are opened only through short-lived signed URLs.',
+  description: 'Manual identity review queue: documents are decrypted and streamed to a signed-in ADMIN through an audited route.',
 };
 
 const DEFAULT_STATUS: KycStatusValue = 'PENDING';
@@ -24,8 +24,9 @@ const DEFAULT_STATUS: KycStatusValue = 'PENDING';
  * tab never shows rows it did not ask for.
  *
  * Documents are NOT fetched on this page: the reviewer must open a submission,
- * which calls the files endpoint, mints 300-second signed URLs and writes the
- * KYC_DOCUMENT_VIEWED audit entry that makes the access reviewable afterwards.
+ * which calls the files manifest endpoint and then the ADMIN-only stream route,
+ * each of which writes a KYC_DOCUMENT_VIEWED audit entry (phases 'manifest' and
+ * 'download') that makes the access reviewable afterwards.
  */
 export default async function AdminKycPage() {
   const user = await requireStaffPage();

@@ -278,6 +278,16 @@ export class DerivBrokerAdapter implements BrokerAdapter {
   private authorized: AuthorizedAccount | null = null;
   /** Whether the OTP-issued socket is for a demo account (from its URL path). */
   private socketIsVirtual: boolean | null = null;
+  /**
+   * True once Deriv issued an account-scoped OTP socket for this connection.
+   *
+   * The OTP exchange runs against Deriv's TRADING endpoint and fails without the
+   * `trade` scope, so a socket existing at all IS the capability proof. This flag
+   * is that proof, held explicitly: it is what `getAccountState()` reports as
+   * `isTradingEnabled`, and the pre-trade risk gate refuses every order without
+   * it (risk check #1, ACCOUNT_NOT_ACTIVE).
+   */
+  private otpSocketIssued = false;
   private instruments: Map<string, InstrumentInfo> | null = null;
   private instrumentsCachedAt = 0;
 
@@ -312,6 +322,8 @@ export class DerivBrokerAdapter implements BrokerAdapter {
     this.balanceSubscribed = false;
     this.portfolio.clear();
     this.authorized = null;
+    this.otpSocketIssued = false;
+    this.socketIsVirtual = null;
     this.lastBalance = null;
     const client = this.client;
     this.client = null;
@@ -359,6 +371,7 @@ export class DerivBrokerAdapter implements BrokerAdapter {
 
     const issued = this.config.token ? await this.requestAccountSocket() : null;
     this.socketIsVirtual = issued?.isVirtual ?? null;
+    this.otpSocketIssued = issued !== null;
 
     this.client = new DerivClient({
       appId: this.config.appId,
@@ -370,6 +383,13 @@ export class DerivBrokerAdapter implements BrokerAdapter {
         this.tickSubscriptions.clear();
         this.balanceSubscribed = false;
         this.portfolio.clear();
+        // Authentication dies with the socket too — an OTP socket is issued per
+        // session. Clearing it here fails CLOSED: `getAccountState()` reports
+        // trading disabled and the risk gate refuses orders until the next call
+        // re-issues and re-authenticates, rather than trading on a stale
+        // "authorized" flag against a dead connection.
+        this.authorized = null;
+        this.otpSocketIssued = false;
         void this.handlers.onConnectionState?.({
           connected: false,
           state: `DISCONNECTED (${reason})`,
@@ -499,8 +519,14 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       loginId: reported ?? loginId,
       currency: typeof raw?.currency === 'string' ? raw.currency : (this.config.currency ?? 'USD'),
       isVirtual: this.socketIsVirtual === true,
-      // Not reported by this surface: the OTP exchange already required `trade`.
-      scopes: [],
+      // DERIVED, not read back: Deriv's OTP surface returns no scope list. The
+      // exchange that produced this socket runs on the trading endpoint and
+      // fails without the `trade` scope, so a successful exchange IS the
+      // capability proof. This used to be a hard-coded `[]`, which made
+      // `isTradingEnabled` permanently false and had the risk gate refuse every
+      // order with ACCOUNT_NOT_ACTIVE while the console showed a healthy
+      // connection.
+      scopes: this.otpSocketIssued ? ['trade'] : [],
       balance: raw && isFiniteNumber(raw.balance) ? raw.balance : null,
     };
     this.lastBalance = this.authorized.balance;
@@ -637,7 +663,9 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       margin: null,
       leverage: null,
       isTradingEnabled:
-        authorized !== null && authorized.scopes.includes('trade') && this.isConnected(),
+        // The capability proof is the account-scoped OTP socket plus a live
+        // connection — not a scope list (there is none to read back).
+        authorized !== null && this.otpSocketIssued && this.isConnected(),
       status: this.isConnected() ? 'CONNECTED' : 'DISCONNECTED',
       rawState: authorized ? 'AUTHORIZED' : 'CONNECTED',
       updatedAt: new Date(),

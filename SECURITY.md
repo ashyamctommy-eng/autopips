@@ -138,35 +138,46 @@ Every API route and server component re-verifies through `requireSession()` /
 **KYC documents** (`src/server/modules/kyc/storage.service.ts`) — the only
 sensitive documents the platform stores:
 
-1. **Private S3 bucket only.** No public URL can be produced by the module; the
-   only URL it can mint is a presigned `GetObject` URL. Requests that would grant
-   public/anonymous access (canned ACLs such as `public-read`,
-   `authenticated-read`, or grants to `AllUsers`/`AuthenticatedUsers`) are
-   rejected by a client middleware guard.
-2. **Encryption at rest is mandatory** on every PUT: SSE-KMS (`aws:kms` with
-   `AWS_KMS_KEY_ID`) when configured, otherwise SSE-S3 (`AES256`). A caller cannot
-   pass its own encryption parameters and cannot turn encryption off.
-3. **Unguessable object keys**: `kyc/<userId>/<uuid>/<kind>-<uuid>.<ext>`, with
-   the extension derived from the *validated* content type, never from the
-   client-supplied filename.
-4. **Presigned URLs are capped at 300 seconds** — a hard cap
-   (`KYC_SIGNED_URL_TTL_HARD_CAP_SECONDS`) applied on top of
-   `KYC_SIGNED_URL_TTL`, so a misconfigured deployment still issues 5-minute
-   links. A presigned URL is a bearer credential for a passport scan; the cap is
-   the blast-radius control.
+1. **No external service holds a document.** There is no bucket, no
+   object-storage credential and no third-party identity API on this path: the
+   bytes live in the platform's own Postgres, in `KycDocument.ciphertext`
+   (`BYTEA`). No public URL exists and none can be produced.
+2. **Encryption at rest is mandatory** before anything is written:
+   AES-256-GCM with a key derived from `CREDENTIAL_ENCRYPTION_KEY` and
+   purpose-separated in `src/server/modules/kyc/document-cipher.ts`, so a
+   document envelope can never be decrypted as a broker credential or vice
+   versa. The stored form is `iv(12 bytes) || authTag(16 bytes) || ciphertext`.
+3. **One row per user per slot** (`@@unique([userId, kind])`): re-uploading
+   replaces the stored document and detaches it from any submission, so a
+   replaced file is always re-reviewed rather than inherited by the previous
+   decision. The client-declared filename is not stored at all.
+4. **There is no bearer credential.** Documents are read only through
+   `GET /api/v1/admin/kyc/:id/files` (the manifest) and
+   `GET /api/v1/admin/kyc/:id/documents/:kind` (which streams the decrypted
+   bytes), both ADMIN-authenticated and scoped to the submission that owns the
+   file. The manifest route returns metadata only and sets no cache headers; the
+   document-bytes response sets `Cache-Control: private, no-store` and
+   `X-Content-Type-Options: nosniff`. There is no pre-signed URL, no expiry and
+   nothing that works outside a signed-in admin session; the client can never
+   read back its own upload and the portal reports only which slots are on file.
 5. **Every admin document read is audited**: `AUDIT.KYC_DOCUMENT_VIEWED` is
-   written for each presigned URL issued.
-6. **Input bounds**: 10 MB per document, four slots, allow-listed content types
-   (`image/jpeg`, `image/png`, `image/webp`, `application/pdf`), type+size
-   asserted *before* any byte is uploaded and re-asserted inside the service so
-   it cannot be bypassed. The platform has no third-party identity-verification
-   API and does not claim to have one: documents leave the bucket only to a
-   signed-in **admin** during manual review, whose decision is audited
+   written for the manifest (`phase: 'manifest'`) and again for each download
+   (`phase: 'download'`).
+6. **Input bounds**: 10 MB per document, exactly two slots — the front and back
+   of one identity document (`KYC_DOCUMENT_KINDS = ['idFront', 'idBack']`) —
+   allow-listed content types (`image/jpeg`, `image/png`, `image/webp`,
+   `application/pdf`), type+size asserted *before* any byte is encrypted or
+   written and re-asserted inside the service so it cannot be bypassed. The
+   platform has no third-party identity-verification API and does not claim to
+   have one: a document leaves the server only to a signed-in **admin** during
+   manual review, whose decision is audited
    (`KYC_APPROVED` / `KYC_REJECTED` / `KYC_ADDITIONAL_INFO_REQUESTED`).
 
 **Data minimisation in the database.** `prisma/schema.prisma` stores the KYC
-*metadata* (`KycProfile`: legal name, DOB, address, id type/number) plus S3
-object keys — never the document bytes. Withdrawals store a payout address;
+*metadata* (`KycProfile`: legal name, DOB, address, id type/number) and the
+document rows themselves; the document bytes are held only as ciphertext
+(`KycDocument.ciphertext`) and the client-declared filename is never stored, so
+there are no storage keys or paths to leak. Withdrawals store a payout address;
 broker credentials are ciphertext (§1). The refresh-token store is a SHA-256
 digest in Redis.
 
@@ -340,7 +351,7 @@ surprise in the implementation; they are simply not done.
 9. **The rate limiter is per-process/fixed-window with no global backoff or
    account lockout.** Distributed floods from many IPs are not mitigated, and
    the following mutating endpoints have **no** dedicated limiter at all:
-   `POST /api/v1/kyc/submit` (a submission can carry four 10 MB documents — the
+   `POST /api/v1/kyc/submit` (a submission can carry two 10 MB documents — the
    upload endpoint is limited, the submission endpoint is not) and every
    `/api/v1/admin/**` route.
 10. **No WAF, no bot detection, no DDoS protection, no IP allow-list for

@@ -16,19 +16,20 @@ adversarially reviewed and **eleven real defects were found and fixed** during
 verification, including three that would have let a client withdraw or deploy money
 they did not have.
 
-It is **not yet deployed and not yet exercised against live broker, payment or storage
+It is **not yet deployed and not yet exercised against live broker or payment
 providers.** Go-live is blocked on credentials and infrastructure that only the operator
 can supply — enumerated precisely in §5. No claim in this report rests on a live
-Deriv, NOWPayments or S3 call, because none was made.
+Deriv or NOWPayments call, because none was made.
 
-One integration is deliberately incomplete, and this report says so up front rather than
+One integration still needs live proof, and this report says so up front rather than
 burying it: Deriv's *market-data and account* paths are implemented (candles, ticks,
-balance/open-contract profit, portfolio), but the **trade-execution engine is not yet
-driven from the ledger**. A Deriv trade is a *contract* — stake × multiplier — while the
-ledger computes open exposure as `volume × entryPrice` from the MT5 lot model. That
-exposure/notional model must be decided and reworked before positions are booked to
-`TradeRecord`, so the bot's allocator currently **refuses to place a Deriv trade** with a
-clear error rather than mis-sizing one. End-to-end trading is therefore not claimed
+balance/open-contract profit, portfolio), and the **stake/exposure model for the
+trade-execution path is settled and implemented** — a Deriv trade is a *contract* sized
+as a stake (the maximum loss), `TradeRecord.notional` stores `stake × multiplier`, and
+`getOpenExposure()` prefers it over `volume × entryPrice`. What is **not yet proven is
+that a real order has ever been placed end-to-end**: the stake allocator and order path
+are unit-tested and the broker auth path is verified against the live API, but the first
+live order still needs a supervised run. End-to-end trading is therefore not claimed
 anywhere in this document.
 
 ---
@@ -124,9 +125,10 @@ not acceptable.
 
 ### Backend services
 `auth` (Argon2id, HS256 JWT with issuer/audience, single-use rotating refresh tokens with
-replay-triggered family revocation, TOTP 2FA, login rate limiting) · `kyc` (private S3,
-SSE-KMS-or-AES256 enforced, non-guessable keys, **300-second** pre-signed admin URLs, every
-view audited) · `payments` (NOWPayments client, strict HMAC-SHA512 IPN verification with
+replay-triggered family revocation, TOTP 2FA, login rate limiting) · `kyc` (documents
+encrypted at rest with AES-256-GCM and held in the platform's own Postgres, two slots —
+the front and back of one identity document — with an ADMIN-only audited read path and no
+pre-signed URLs, every view audited) · `payments` (NOWPayments client, strict HMAC-SHA512 IPN verification with
 timing-safe comparison and a Redis replay guard, deposit/withdrawal lifecycle) · `broker`
 (Deriv WebSocket client + adapter implementing a broker-agnostic interface, connection
 registry with AES-256-GCM token encryption, sync worker) · `bot` (9-check fail-closed
@@ -144,7 +146,7 @@ Public site (hero, live strategy metrics from verified trade history, transparen
 auth pages incl. the 2FA challenge · client portal (overview with an honest equity-formula
 panel, live trading with TradingView lightweight-charts, positions, history, KYC upload,
 deposits with QR + address copy, withdrawals, settings with 2FA) · admin suite (AUM,
-KYC reviewer with signed-URL document viewer and expiry countdown, users, plan
+KYC reviewer with an audited document viewer, users, plan
 configurator, broker manager, payouts, audit log).
 
 Dark-mode fintech design system (`#0B0E14` base, cyan/emerald accents) built on
@@ -163,7 +165,8 @@ rate. This is enforced by a test that parses the producer sources.
 ### Deployment
 `Dockerfile`, `Dockerfile.worker`, `docker-compose.yml` (postgres + redis + one-shot
 migrate + web + worker), an nginx config with the required WebSocket upgrade rules and
-`client_max_body_size 12m` for KYC uploads, a CI workflow (a DB-less job plus an
+`client_max_body_size 24m` for KYC uploads (two documents up to 10 MB each in one
+multipart body), a CI workflow (a DB-less job plus an
 integration job with service containers), `DEPLOYMENT.md`, `SECURITY.md`, and
 `scripts/preflight.sh`.
 
@@ -176,15 +179,14 @@ None of it has been tested live; that is stated plainly rather than assumed away
 
 | # | Blocker | What is needed |
 | --- | --- | --- |
-| 1 | **Deriv broker account** | An `app_id` from <https://api.deriv.com> (`DERIV_APP_ID`) and an account API token (`DERIV_API_TOKEN`). No order has ever been placed. Even with credentials supplied, the bot cannot trade yet: the trade-execution engine is not driven from the ledger until the exposure/notional model is reworked for contracts (stake × multiplier). Until then it refuses to place a Deriv trade rather than mis-size one. |
+| 1 | **Deriv broker account** | An `app_id` from <https://api.deriv.com> (`DERIV_APP_ID`) and an account API token (`DERIV_API_TOKEN`). No order has ever been placed. Credentials alone do not place one: the stake/exposure model is settled and implemented (see row 8), so orders are sized as stakes, but the **first live order still needs a supervised run** with the worker deployed (see `HANDOVER.md` §7). |
 | 2 | **NOWPayments production key + IPN secret** | `NOWPAYMENTS_API_KEY` and `NOWPAYMENTS_IPN_SECRET`. Every IPN test used a self-computed HMAC. Register the callback as `https://autopips.pro/api/v1/payments/nowpayments/ipn`. |
 | 3 | **NOWPayments payout credentials** | The payout API needs a JWT from `/auth`, not the API key. Until supplied, approved withdrawals remain approved for manual settlement and the platform records the transaction hash by hand — it will never invent one. |
-| 4 | **Private S3 bucket** | A bucket with **Block Public Access ON**, SSE-KMS preferred, plus credentials. No upload has been performed against real S3. |
-| 5 | **Production secrets** | `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`, `WS_INTERNAL_TOKEN`, DB credentials. `scripts/preflight.sh` fails while any value still contains `CHANGE_ME`. |
-| 6 | **Hosting + TLS + DNS** | `autopips.pro` pointed at the host, certificates issued, **and the `/ws/` location proxied with WebSocket upgrade support** — without it the real-time tier silently falls back and never connects. |
-| 7 | **Container images** | No Docker daemon exists in the build sandbox, so the Dockerfiles and compose file are reasoned and syntax-validated but **never built**. First `docker compose build` should be treated as the first real test. |
-| 8 | **Compliance sign-off** | The platform deliberately makes no regulatory claim. Whoever operates `autopips.pro` must confirm their own licensing position, terms of service, and privacy policy for the jurisdictions they accept clients from. |
-| 9 | **Deriv contract/exposure model** | **SETTLED 2026-09-25** — see `HANDOVER.md` §Exposure model. Risk is sized in dollars at risk (the STAKE, which is the maximum loss on a multiplier contract), `TradeRecord.notional` stores `stake × multiplier` explicitly, and `getOpenExposure()` prefers it over `volume × entryPrice`. Implemented in `src/server/modules/bot/stake.allocator.ts` + the `'stake'` branch of `order.manager.ts`; 13 unit tests. No order has been placed yet: that needs the worker deployed (see HANDOVER.md §7). |
+| 4 | **Production secrets** | `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`, `WS_INTERNAL_TOKEN`, DB credentials. `scripts/preflight.sh` fails while any value still contains `CHANGE_ME`. |
+| 5 | **Hosting + TLS + DNS** | `autopips.pro` pointed at the host, certificates issued, **and the `/ws/` location proxied with WebSocket upgrade support** — without it the real-time tier silently falls back and never connects. |
+| 6 | **Container images** | No Docker daemon exists in the build sandbox, so the Dockerfiles and compose file are reasoned and syntax-validated but **never built**. First `docker compose build` should be treated as the first real test. |
+| 7 | **Compliance sign-off** | The platform deliberately makes no regulatory claim. Whoever operates `autopips.pro` must confirm their own licensing position, terms of service, and privacy policy for the jurisdictions they accept clients from. |
+| 8 | **Deriv contract/exposure model** | **SETTLED 2026-09-25** — see `HANDOVER.md` §Exposure model. Risk is sized in dollars at risk (the STAKE, which is the maximum loss on a multiplier contract), `TradeRecord.notional` stores `stake × multiplier` explicitly, and `getOpenExposure()` prefers it over `volume × entryPrice`. Implemented in `src/server/modules/bot/stake.allocator.ts` + the `'stake'` branch of `order.manager.ts`; 13 unit tests. No order has been placed yet: that needs the worker deployed (see HANDOVER.md §7). |
 
 ---
 
@@ -193,7 +195,6 @@ None of it has been tested live; that is stated plainly rather than assumed away
 | Brief | Delivered | Why |
 | --- | --- | --- |
 | `@metaapi/metaapi-node-sdk` (an MT5 bridge) | **Deriv's WebSocket API** on the `ws` package — MetaApi was removed | The named package **does not exist on npm** (the real MT5 SDK was `metaapi.cloud-sdk`), and the MT5 bridge was later dropped entirely in favour of Deriv's contract API. The typed client is `src/server/modules/broker/deriv.client.ts`; `@deriv/deriv-api` is **not** used because it ships no TypeScript types, so the trade path owns typed, validated messages. No Deriv SDK package is a dependency. |
-| `aws-sdk` | `@aws-sdk/client-s3` v3 | AWS SDK v2 is end-of-life; v3 is the current AWS SDK for JavaScript. |
 | NestJS **or** Next.js API Routes | Next.js App Router route handlers + framework-agnostic modules in `src/server/modules/*` with `src/server/main.ts` | The brief allowed either. One deployable keeps the surface smaller while preserving the required tree and modularity. |
 | Socket.io "directly to Next.js clients" | A separate Node socket process, bridged by Redis pub/sub | A Next.js App Router app **cannot** host a Socket.io server. Documented in the README and `DEPLOYMENT.md`; the nginx config carries the upgrade. |
 | Exact schema | Fields unchanged; **indexes added**, decimal scales specified, `onDelete` behaviour set | Indexes and scales are additive/unspecified; float money was not acceptable. No field was renamed or removed. |
@@ -205,7 +206,7 @@ None of it has been tested live; that is stated plainly rather than assumed away
 
 ## 7. Honest limitations
 
-- **Nothing has run against a real broker, real payment provider, or real object store.**
+- **Nothing has run against a real broker or a real payment provider.**
   All integrations are verified against their published contracts, not against live
   endpoints.
 - **No load, soak or failover testing.** Rate limits and room fan-out are unit-verified,
@@ -213,7 +214,7 @@ None of it has been tested live; that is stated plainly rather than assumed away
 - **No penetration test.** Authz was probed systematically over HTTP (18 admin
   route/method combinations, cross-tenant reads), but that is not a substitute for one.
 - **`npm audit` was not reviewed.** Several transitive advisories are plausible; the
-  dependency tree is still large (Next.js, AWS SDK v3, Socket.IO).
+  dependency tree is still large (Next.js, Socket.IO).
 - **No CSRF token** beyond `SameSite=Lax` cookies and JSON-only bodies.
 - **Single region, no WAF, no DDoS protection.**
 - **`createInvestment`/`requestWithdrawal` serialise per user via a row lock**, which is
@@ -230,19 +231,20 @@ None of it has been tested live; that is stated plainly rather than assumed away
 1. Provision PostgreSQL and Redis; set every variable in `.env`; run `scripts/preflight.sh`
    until it passes.
 2. `npx prisma migrate deploy`.
-3. Create the private S3 bucket (Block Public Access ON, SSE-KMS).
-4. `docker compose build && docker compose up -d` — treat this as the first real test of
+3. `docker compose build && docker compose up -d` — treat this as the first real test of
    the container artifacts.
-5. Point `autopips.pro` at the host; issue TLS; confirm the `/ws/` proxy carries the
+4. Point `autopips.pro` at the host; issue TLS; confirm the `/ws/` proxy carries the
    WebSocket upgrade.
-6. Register the Deriv connection (`DERIV_APP_ID` + `DERIV_API_TOKEN`) and confirm it
+5. Register the Deriv connection (`DERIV_APP_ID` + `DERIV_API_TOKEN`) and confirm it
    reports `CONNECTED` with a real balance in `/admin/brokers`.
-7. Register the IPN callback with NOWPayments and send a **live minimum deposit**;
+6. Register the IPN callback with NOWPayments and send a **live minimum deposit**;
    confirm it credits exactly once and appears in the client's deposit history.
-8. Create the first ADMIN user, then create plans in `/admin/plans`.
-9. Submit one KYC file as a test client and walk the admin approve flow, confirming the
-   signed URLs expire after 300 seconds.
-10. Fund a small test allocation and observe one full trade cycle end to end **before
-    accepting client capital**. This step is blocked until the Deriv contract/exposure
-    model is reworked and the bot can place a correctly-sized contract (§1, §5 row 9) — do
-    not accept client capital against an execution path that refuses every order.
+7. Create the first ADMIN user, then create plans in `/admin/plans`.
+8. Submit one identity document as a test client and walk the admin approve flow,
+   confirming the reviewer can open it only through the ADMIN-authenticated stream route
+   and that the client cannot read the file back.
+9. Fund a small test allocation and observe one full trade cycle end to end **before
+    accepting client capital**. The stake/exposure model is settled and implemented
+    (§5 row 8), so what this step still needs is the **first supervised live order** — no
+    order has been placed end-to-end yet (see `HANDOVER.md` §7). Do not accept client
+    capital before that run.

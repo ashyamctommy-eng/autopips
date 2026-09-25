@@ -26,7 +26,7 @@ export interface AdminUserRowView {
   equity: number;
 }
 
-/** `KycDetailClientView` — kyc.service.ts toKycDetailClientView() (no object keys). */
+/** `KycDetailClientView` — kyc.service.ts toKycDetailClientView() (metadata only). */
 export interface KycDetailView {
   id: string;
   userId: string;
@@ -40,7 +40,20 @@ export interface KycDetailView {
   reviewedBy: string | null;
   reviewedAt: string | null;
   createdAt: string;
-  documents: { kind: string; uploaded: boolean }[];
+  /**
+   * Slot metadata only. The bytes live encrypted in the platform's own Postgres
+   * and are reached exclusively through the ADMIN-only, audited stream route
+   * named by `KycDocumentEntry.url`; there is no storage key in this payload and
+   * there never was one.
+   */
+  documents: {
+    kind: string;
+    uploaded: boolean;
+    contentType: string | null;
+    byteLength: number | null;
+    sha256: string | null;
+    uploadedAt: string | null;
+  }[];
   /**
    * NOT part of the current `KycDetailClientView` payload: `getKycDetail()`
    * returns the legal name and ID type but not the date of birth, the address or
@@ -51,17 +64,22 @@ export interface KycDetailView {
   dob?: string;
   address?: string;
   idNumberMasked?: string;
-  /** Where the 300-second signed URLs come from. */
-  signedUrlEndpoint: string;
 }
 
-/** `KycDocumentUrlEntry` — kyc.service.ts getKycDocumentUrls(). */
-export interface KycDocumentUrlEntry {
+/** `KycDocumentEntry` — kyc.service.ts getKycDocumentManifest(). */
+export interface KycDocumentEntry {
   kind: string;
-  /** Pre-signed GET URL (≤ 300s), or null when signing failed / object is gone. */
+  uploaded: boolean;
+  contentType: string | null;
+  byteLength: number | null;
+  sha256: string | null;
+  uploadedAt: string | null;
+  /**
+   * Same-origin, ADMIN-authenticated stream route (no expiry, no signature), or
+   * null for an empty slot. There is nothing here that works outside a
+   * signed-in admin session.
+   */
   url: string | null;
-  expiresInSeconds: number;
-  error?: string;
 }
 
 /** `SyncSummary` — broker.sync.ts. */
@@ -119,12 +137,14 @@ export interface WithdrawalRowView {
   userEmail: string | null;
 }
 
-/** Human labels for the four KYC document slots (`KYC_DOCUMENT_KINDS`). */
+/**
+ * Human labels for the two KYC document slots (`KYC_DOCUMENT_KINDS`) — the front
+ * and back of one identity document. The platform stores both itself, encrypted
+ * at rest, so neither label refers to an external object store.
+ */
 export const KYC_DOCUMENT_LABELS: Record<string, string> = {
   idFront: 'ID document — front',
   idBack: 'ID document — back',
-  proofOfAddress: 'Proof of address',
-  selfie: 'Selfie holding the ID',
 };
 
 /** Human labels for `KYC_ID_TYPES`. */

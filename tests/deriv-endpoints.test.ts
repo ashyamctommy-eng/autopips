@@ -49,8 +49,6 @@ describe('the retired Deriv endpoint is refused, not retried', () => {
       REDIS_URL: 'redis://127.0.0.1:6379',
       JWT_SECRET: 'test-jwt-secret-that-is-long-enough-to-pass',
       CREDENTIAL_ENCRYPTION_KEY: 'test-credential-encryption-key-32ch+',
-      AWS_REGION: 'eu-west-1',
-      AWS_KYC_BUCKET: 'test-kyc-bucket',
       NOWPAYMENTS_API_KEY: 'test-nowpayments-key',
       NOWPAYMENTS_IPN_SECRET: 'test-nowpayments-ipn-secret',
       DERIV_APP_ID: '1089',
