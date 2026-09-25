@@ -828,6 +828,135 @@ export async function adminListWithdrawals(
   };
 }
 
+/**
+ * A deposit row as the ADMIN console sees it: the same DTO the client gets, plus
+ * the account it belongs to. The console is an operator surface — a list of
+ * amounts with no client attached would be unactionable.
+ */
+export type AdminDepositRow = DepositDTO & { userEmail: string; userName: string };
+
+/** Platform-wide deposit list, newest first. */
+export async function adminListDeposits(
+  opts: Omit<ListOptions, 'allUsers'> & { status?: PaymentStatusValue; userId?: string } = {},
+): Promise<{ items: AdminDepositRow[]; nextCursor: string | null }> {
+  const take = pageSize(opts.take);
+  const rows = await prisma.deposit.findMany({
+    where: {
+      ...(opts.status ? { status: opts.status } : {}),
+      ...(opts.userId ? { userId: opts.userId } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: take + 1,
+    ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+    include: { user: { select: { email: true, fullName: true } } },
+  });
+
+  const hasMore = rows.length > take;
+  const page = hasMore ? rows.slice(0, take) : rows;
+  return {
+    items: page.map((row) => ({
+      ...toDepositDTO(row),
+      userEmail: row.user.email,
+      userName: row.user.fullName,
+    })),
+    nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+  };
+}
+
+export interface CreditDepositInput {
+  /** Client account to credit, by id or email (the console searches by email). */
+  userId: string;
+  amountUsd: number;
+  /** Why the credit exists — kept in the audit row and on the deposit row. */
+  note: string;
+  adminUserId: string;
+  adminEmail: string;
+  ip?: string | null;
+}
+
+/** Ceiling for a single manual credit; anything larger is a fat finger. */
+const MAX_MANUAL_CREDIT_USD = 1_000_000;
+
+/**
+ * Credit a client's balance BY HAND.
+ *
+ * There is no chain payment here, and nothing pretends there was:
+ *   • the row is written with `paymentId = manual:<uuid>` so it can never be
+ *     mistaken for, or matched against, a provider payment;
+ *   • `cryptoCurrency` is `MANUAL` and `payAmount` equals the USD credited,
+ *     because no conversion took place;
+ *   • the status is CONFIRMED, which is the SAME state the ledger credits equity
+ *     from — so the balance the client sees is produced by the ordinary formula,
+ *     not by a special case;
+ *   • it is audited as ADMIN_DEPOSIT_CREDITED with the operator's identity and
+ *     their note.
+ *
+ * Rejections are deliberate: staff accounts are refused (crediting an operator's
+ * own balance is a books-are-wrong situation, not a feature) and the amount is
+ * bounded.
+ */
+export async function adminCreditDeposit(input: CreditDepositInput): Promise<AdminDepositRow> {
+  const user = await prisma.user.findUnique({ where: { id: input.userId } });
+  if (!user) throw ApiError.notFound('No such client account.');
+  if (isStaff(user)) {
+    throw ApiError.badRequest(
+      'That account is a staff account; manual credits are for client balances only.',
+    );
+  }
+
+  const amount = D(input.amountUsd);
+  if (!Number.isFinite(input.amountUsd) || amount.lessThanOrEqualTo(0)) {
+    throw ApiError.badRequest('A credit must be a positive amount.');
+  }
+  if (amount.decimalPlaces() > 2) {
+    throw ApiError.badRequest('A credit may not have more than 2 decimal places.');
+  }
+  if (amount.greaterThan(MAX_MANUAL_CREDIT_USD)) {
+    throw ApiError.badRequest(`A single manual credit may not exceed ${MAX_MANUAL_CREDIT_USD} USD.`);
+  }
+
+  const note = input.note.trim();
+  if (note.length < 3) {
+    throw ApiError.badRequest('A reason of at least 3 characters is required for a manual credit.');
+  }
+
+  const row = await prisma.deposit.create({
+    data: {
+      userId: user.id,
+      amountUsd: toPrismaDecimal(amount, 2),
+      cryptoCurrency: 'MANUAL',
+      paymentId: `manual:${randomUUID()}`,
+      depositAddress: 'manual',
+      payAmount: toPrismaDecimal(amount, 8),
+      status: 'CONFIRMED',
+      ipnPayload: {
+        source: 'ADMIN_MANUAL_CREDIT',
+        actorUserId: input.adminUserId,
+        actorEmail: input.adminEmail,
+        note,
+        creditedAt: new Date().toISOString(),
+      } as unknown as Prisma.InputJsonValue,
+    },
+    include: { user: { select: { email: true, fullName: true } } },
+  });
+
+  await recordAudit({
+    action: AUDIT.ADMIN_DEPOSIT_CREDITED,
+    userId: user.id,
+    ipAddress: input.ip ?? null,
+    details: {
+      depositId: row.id,
+      amountUsd: amount.toNumber(),
+      currency: 'USD',
+      method: 'MANUAL',
+      actor: input.adminEmail,
+      note,
+    },
+  });
+
+  return { ...toDepositDTO(row), userEmail: row.user.email, userName: row.user.fullName };
+}
+
 export interface DecideWithdrawalInput {
   id: string;
   adminUserId: string;

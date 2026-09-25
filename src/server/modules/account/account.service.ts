@@ -538,6 +538,7 @@ const ACTIVITY_TEMPLATES: Record<AuditAction, ActivityTemplate> = {
   BOT_STOPPED: always('Strategy engine stopped', 'info'),
   LOT_ALLOCATED: always('Capital allocated to a position', 'info'),
   STAKE_ALLOCATED: always('Risk budget allocated to a contract', 'info'),
+  ADMIN_DEPOSIT_CREDITED: always('Deposit credited by an operator', 'warning'),
 
   // admin
   PLAN_CREATED: always('Investment plan created', 'info'),

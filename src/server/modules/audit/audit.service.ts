@@ -40,6 +40,14 @@ export const AUDIT = {
   DEPOSIT_IPN_RECEIVED: 'DEPOSIT_IPN_RECEIVED',
   DEPOSIT_IPN_REJECTED: 'DEPOSIT_IPN_REJECTED',
   DEPOSIT_CONFIRMED: 'DEPOSIT_CONFIRMED',
+  /**
+   * A deposit CREDITED BY AN OPERATOR, not by a payment provider.
+   *
+   * Its own action on purpose: the money is real in the ledger, but no chain
+   * payment happened, and an audit trail that files it under DEPOSIT_CONFIRMED
+   * would claim a settlement the platform never received.
+   */
+  ADMIN_DEPOSIT_CREDITED: 'ADMIN_DEPOSIT_CREDITED',
   DEPOSIT_FAILED: 'DEPOSIT_FAILED',
 
   // payments out
