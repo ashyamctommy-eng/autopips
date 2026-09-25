@@ -10,9 +10,11 @@ import {
   CandlestickChart,
   History,
   LayoutDashboard,
+  LineChart,
   PanelLeft,
   Settings,
   ShieldCheck,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -38,9 +40,14 @@ export interface NavItem {
 /** Client dashboard navigation. Exported so pages can render it elsewhere. */
 export const CLIENT_NAV: NavItem[] = [
   { label: 'Overview', href: '/dashboard', icon: LayoutDashboard, exact: true },
-  { label: 'Live Trading', href: '/dashboard/live', icon: CandlestickChart },
+  { label: 'Markets', href: '/dashboard/markets', icon: LineChart },
+  // The canonical path. `/dashboard/live` remains a working alias, but linking to
+  // the alias meant a deep link (e.g. from the markets list, `?symbol=`) left this
+  // item unhighlighted — the nav said "nowhere" on a page it owns.
+  { label: 'Live Trading', href: '/dashboard/trading', icon: CandlestickChart },
   { label: 'Positions', href: '/dashboard/positions', icon: Activity },
   { label: 'History', href: '/dashboard/history', icon: History },
+  { label: 'Wallet', href: '/dashboard/wallet', icon: Wallet },
   { label: 'KYC', href: '/dashboard/kyc', icon: ShieldCheck },
   { label: 'Deposits', href: '/dashboard/deposits', icon: ArrowDownToLine },
   { label: 'Withdrawals', href: '/dashboard/withdrawals', icon: ArrowUpFromLine },
@@ -123,7 +130,9 @@ export function SidebarShell({
                     'flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
                     collapsed ? 'justify-center px-2' : 'px-2.5',
                     active
-                      ? 'bg-brand/10 text-base-100 shadow-[inset_2px_0_0_0_#22D3EE]'
+                      // Token, not a literal: the active rail has to follow the
+                      // light palette too (a hardcoded #22D3EE stayed cyan on white).
+                      ? 'bg-brand/10 text-base-100 shadow-[inset_2px_0_0_0_rgb(var(--c-brand-400))]'
                       : 'text-muted hover:bg-base-800 hover:text-base-100',
                   )}
                 >

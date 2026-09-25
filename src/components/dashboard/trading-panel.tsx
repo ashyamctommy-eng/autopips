@@ -89,6 +89,12 @@ export interface TradingPanelProps {
   /** Investment whose realtime room this panel subscribes to (may be null). */
   investmentId: string | null;
   /**
+   * Symbol to select on first render, from the `?symbol=` deep link (already
+   * normalised by the page). It is added to the selector's options even when the
+   * public feed did not list it, because the caller navigated here for it.
+   */
+  initialSymbol?: string | null;
+  /**
    * Open positions as hydrated by the server, used for the chart's entry / stop
    * / target overlay. Live deltas from the socket are folded on top, so a moved
    * stop is drawn where the broker says it is now.
@@ -208,16 +214,27 @@ export function TradingPanel({
   availableInstruments = [],
   investmentId,
   initialPositions,
+  initialSymbol = null,
 }: TradingPanelProps) {
   const [roomId, setRoomId] = React.useState<string | null>(investmentId);
-  const instrumentOptions = React.useMemo(
-    () => [...instruments, ...availableInstruments.filter((s) => !instruments.includes(s))],
-    [instruments, availableInstruments],
-  );
-  const [symbol, setSymbol] = React.useState<string | null>(() =>
-    defaultInstrument(instruments, availableInstruments),
+  const instrumentOptions = React.useMemo(() => {
+    const base = [
+      ...instruments,
+      ...availableInstruments.filter((symbol) => !instruments.includes(symbol)),
+    ];
+    // Keep a deep-linked instrument selectable even if the feed did not list it.
+    return initialSymbol && !base.includes(initialSymbol) ? [initialSymbol, ...base] : base;
+  }, [instruments, availableInstruments, initialSymbol]);
+  const [symbol, setSymbol] = React.useState<string | null>(
+    () => initialSymbol ?? defaultInstrument(instruments, availableInstruments),
   );
   const [timeframe, setTimeframe] = React.useState<string>(TIMEFRAME_OPTIONS[4]);
+
+  // Follow a later deep link (client-side navigation to another `?symbol=`) while
+  // leaving an in-page selection alone when the prop is unchanged.
+  React.useEffect(() => {
+    if (initialSymbol) setSymbol(initialSymbol);
+  }, [initialSymbol]);
 
   const [candles, setCandles] = React.useState<Candle[]>([]);
   const [source, setSource] = React.useState<CandleSource | null>(null);

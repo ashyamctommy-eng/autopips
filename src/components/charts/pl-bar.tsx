@@ -15,6 +15,8 @@ import {
 
 import { cn } from '@/lib/utils';
 import { formatUsd, type Numeric } from '@/lib/money';
+import { MONOSPACE_FALLBACK, type TokenSpec } from '@/lib/theme';
+import { useChartTheme } from '@/components/theme/use-theme-tokens';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Spinner } from '@/components/ui/spinner';
 import { BarChart3 } from 'lucide-react';
@@ -36,14 +38,20 @@ export interface PlBarProps {
   valueLabel?: string;
 }
 
-const PROFIT = '#10B981';
-const LOSS = '#F43F5E';
-
-const AXIS_STYLE = {
-  fontSize: 11,
-  fill: 'rgba(148,163,184,0.65)',
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-} as const;
+/**
+ * Chart colours are resolved from the SAME tokens the rest of the UI uses
+ * (`globals.css`), not from literals: `useThemeTokens` re-reads them whenever
+ * `<html data-theme>` changes, so the bars follow a light/dark switch. The
+ * fallbacks are the dark palette and cover the server render.
+ */
+const CHART_TOKENS = {
+  tick: { token: '--chart-tick', fallback: 'rgba(148, 163, 184, 0.65)' },
+  grid: { token: '--chart-grid', fallback: 'rgba(148, 163, 184, 0.06)' },
+  axis: { token: '--chart-axis', fallback: 'rgba(148, 163, 184, 0.14)' },
+  cursor: { token: '--chart-grid', fallback: 'rgba(148, 163, 184, 0.06)' },
+  profit: { token: '--c-profit-500', fallback: 'rgb(16, 185, 129)' },
+  loss: { token: '--c-loss-500', fallback: 'rgb(244, 63, 94)' },
+} satisfies Record<string, TokenSpec>;
 
 interface BarTooltipProps extends TooltipProps<number, string> {
   valueLabel: string;
@@ -82,6 +90,13 @@ export function PlBar({
 }: PlBarProps) {
   const hasData = data.length > 0;
 
+  const theme = useChartTheme(CHART_TOKENS, MONOSPACE_FALLBACK);
+
+  const axisStyle = React.useMemo(
+    () => ({ fontSize: 11, fill: theme.tick, fontFamily: theme.fontFamily }),
+    [theme.tick, theme.fontFamily],
+  );
+
   const chartData = React.useMemo(
     () =>
       data.map((datum) => ({
@@ -92,7 +107,7 @@ export function PlBar({
   );
 
   return (
-    <div className={cn('flex flex-col overflow-hidden rounded-xl border border-line bg-base-850/70 shadow-card', className)}>
+    <div className={cn('surface flex flex-col overflow-hidden', className)}>
       <div className="relative" style={{ height }}>
         {isLoading ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-base-850/60">
@@ -106,28 +121,25 @@ export function PlBar({
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-              <CartesianGrid stroke="rgba(148,163,184,0.08)" vertical={false} />
+              <CartesianGrid stroke={theme.grid} vertical={false} />
               <XAxis
                 dataKey="label"
-                tick={AXIS_STYLE}
+                tick={axisStyle}
                 tickLine={false}
-                axisLine={{ stroke: 'rgba(148,163,184,0.14)' }}
+                axisLine={{ stroke: theme.axis }}
                 minTickGap={16}
               />
               <YAxis
-                tick={AXIS_STYLE}
+                tick={axisStyle}
                 tickLine={false}
                 axisLine={false}
                 width={56}
                 tickFormatter={(value: number) => `${value < 0 ? '-' : ''}$${formatUsd(Math.abs(value))}`}
               />
-              <Tooltip
-                content={<BarTooltip valueLabel={valueLabel} />}
-                cursor={{ fill: 'rgba(148,163,184,0.06)' }}
-              />
+              <Tooltip content={<BarTooltip valueLabel={valueLabel} />} cursor={{ fill: theme.cursor }} />
               <Bar dataKey="value" radius={[3, 3, 0, 0]} isAnimationActive={false}>
                 {chartData.map((datum) => (
-                  <Cell key={datum.label} fill={datum.value < 0 ? LOSS : PROFIT} />
+                  <Cell key={datum.label} fill={datum.value < 0 ? theme.loss : theme.profit} />
                 ))}
               </Bar>
             </BarChart>

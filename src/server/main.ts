@@ -652,7 +652,17 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const host = env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1';
+  /*
+   * Bind address.
+   *
+   * A container behind a platform edge must listen on 0.0.0.0 or its port is
+   * unreachable from the router — and the host's PORT being injected is the
+   * reliable signal that we are behind one. Keying this on NODE_ENV alone was a
+   * live trap: a service with NODE_ENV unset got a 127.0.0.1 bind, an apparently
+   * healthy process, and zero inbound connections.
+   */
+  const behindPlatformEdge = Boolean(process.env.PORT) || env.NODE_ENV === 'production';
+  const host = behindPlatformEdge ? '0.0.0.0' : '127.0.0.1';
   const startedAt = new Date().toISOString();
 
   // Set once the bot-runtime module has been lazily loaded (see step 4). Health
@@ -683,7 +693,12 @@ async function main(): Promise<void> {
         const strict = new URL(url, 'http://localhost').searchParams.get('strict') === '1';
         const statusCode = !infraHealthy || (strict && trading.status !== 'ok') ? 503 : 200;
         sendJson(res, statusCode, {
+          status: infraHealthy ? 'ok' : 'degraded',
           ok: infraHealthy,
+          // Names the tier that answered. A worker service built from the WEB
+          // image reports 'web' here, which is how that misconfiguration becomes
+          // visible instead of looking healthy.
+          service: 'worker',
           uptime: Number(process.uptime().toFixed(3)),
           connections: stats.sockets,
           rooms: stats.rooms,

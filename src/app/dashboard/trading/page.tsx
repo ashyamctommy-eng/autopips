@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { normaliseMarketSymbol } from '@/lib/contracts';
 import {
   listActivity,
   listInvestments,
@@ -37,8 +38,26 @@ const INSTRUMENT_SAMPLE = 200;
 /** Audit rows read as the feed's initial (stored) state. */
 const ACTIVITY_TAKE = 50;
 
-export default async function DashboardTradingPage() {
+/**
+ * Optional `?symbol=` deep link from the markets list. Read as untrusted input
+ * and normalised before use: anything that is not a broker symbol is ignored,
+ * so a made-up value never reaches the broker or the selector.
+ */
+interface TradingPageSearchParams {
+  symbol?: string | string[];
+}
+
+export default async function DashboardTradingPage({
+  searchParams,
+}: {
+  searchParams?: TradingPageSearchParams;
+}) {
   const user = await requireSessionUser();
+
+  const requestedSymbol = Array.isArray(searchParams?.symbol)
+    ? searchParams?.symbol[0]
+    : searchParams?.symbol;
+  const initialSymbol = requestedSymbol ? normaliseMarketSymbol(requestedSymbol) : null;
 
   const [positions, investments, trades, activity] = await Promise.all([
     listPositions(user.id),
@@ -111,6 +130,7 @@ export default async function DashboardTradingPage() {
         availableInstruments={availableInstruments}
         investmentId={activeInvestment?.id ?? null}
         initialPositions={openPositions}
+        initialSymbol={initialSymbol}
       />
 
       <div className="grid gap-4 lg:grid-cols-3">

@@ -25,7 +25,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { WS_EVENTS, marketRoom, normaliseMarketSymbol } from '@/lib/contracts';
+import {
+  MAX_MARKET_ROOMS_PER_SOCKET,
+  WS_EVENTS,
+  marketRoom,
+  normaliseMarketSymbol,
+} from '@/lib/contracts';
 import {
   applyPositionUpdate,
   createTradingSocket,
@@ -61,6 +66,16 @@ export interface UseTradingSocketOptions {
    * arrive on the namespace-wide `price:tick` event, filtered here by symbol.
    */
   marketSymbol?: string | null;
+  /**
+   * A WATCHLIST: several instruments to stream at once, for a markets list.
+   *
+   * Bounded by `MAX_MARKET_ROOMS_PER_SOCKET` because every watched symbol costs
+   * one upstream broker subscription; extras are dropped here rather than
+   * refused by the server. Use ONE hook per page for a watchlist — a hook (and
+   * therefore a socket) per row would blow the per-connection room cap and race
+   * the shared connection on unmount.
+   */
+  marketSymbols?: readonly string[] | null;
   /** Set false to keep the hook mounted without a connection (e.g. preview mode). */
   enabled?: boolean;
   /** Activity feed cap. Defaults to 100 entries. */
@@ -136,6 +151,7 @@ export function useTradingSocket(options: UseTradingSocketOptions = {}): UseTrad
   const {
     investmentId = null,
     marketSymbol = null,
+    marketSymbols = null,
     enabled = true,
     activityLimit = DEFAULT_ACTIVITY_LIMIT,
   } = options;
@@ -359,6 +375,43 @@ export function useTradingSocket(options: UseTradingSocketOptions = {}): UseTrad
       setJoinedRooms((prev) => prev.filter((entry) => entry !== room));
     };
   }, [socket, status, marketSymbol]);
+
+  /*
+   * Watchlist lifecycle.
+   *
+   * `watchlistKey` is the identity of the requested set: dependency arrays compare
+   * by reference, and a caller building the array inline would otherwise
+   * re-subscribe on every render. Broker symbols cannot contain a comma (see
+   * MARKET_SYMBOL_PATTERN), so the joined form round-trips exactly.
+   */
+  const watchlistKey = useMemo(() => {
+    const seen = new Set<string>();
+    for (const raw of marketSymbols ?? []) {
+      const symbol = normaliseMarketSymbol(raw);
+      if (!symbol || seen.has(symbol)) continue;
+      seen.add(symbol);
+      if (seen.size >= MAX_MARKET_ROOMS_PER_SOCKET) break;
+    }
+    return [...seen].join(',');
+  }, [marketSymbols]);
+
+  useEffect(() => {
+    const active = socket;
+    if (!active || status !== 'connected' || !watchlistKey) return;
+
+    const rooms = watchlistKey.split(',').map((symbol) => marketRoom(symbol));
+    for (const room of rooms) active.emit(WS_EVENTS.subscribe, { room });
+    setJoinedRooms((prev) => [...prev.filter((entry) => !rooms.includes(entry)), ...rooms]);
+
+    return () => {
+      // Only un-join while still connected: emitting on a dead socket would be
+      // buffered and could arrive after a later re-subscribe.
+      if (active.connected) {
+        for (const room of rooms) active.emit(WS_EVENTS.unsubscribe, { room });
+      }
+      setJoinedRooms((prev) => prev.filter((entry) => !rooms.includes(entry)));
+    };
+  }, [socket, status, watchlistKey]);
 
   /* ─────────────────────────────── actions ─────────────────────────────── */
 

@@ -48,7 +48,9 @@ export const DialogContent = React.forwardRef<
       ref={ref}
       className={cn(
         'fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4',
-        'rounded-xl border border-line bg-base-850 p-6 shadow-card',
+        // Raised overlay panel: the shared glass surface, so modal chrome matches
+        // Card and the chart frames in both palettes.
+        'surface-raised p-6',
         'duration-200 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
         'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
         className,

@@ -24,7 +24,12 @@ import { Server as SocketIoServer, type Namespace, type Socket } from 'socket.io
 import { z } from 'zod';
 import type { Role } from '@prisma/client';
 
-import { MARKET_ROOM_PREFIX, WS_EVENTS, parseMarketRoom } from '@/lib/contracts';
+import {
+  MARKET_ROOM_PREFIX,
+  MAX_MARKET_ROOMS_PER_SOCKET,
+  WS_EVENTS,
+  parseMarketRoom,
+} from '@/lib/contracts';
 import { prisma } from '@/lib/prisma';
 import { redisSub } from '@/lib/redis';
 import {
@@ -67,12 +72,14 @@ const MAX_JOINED_ROOMS = 20;
 /**
  * Hard cap on simultaneously WATCHED symbols per socket.
  *
- * Each market room costs one upstream broker subscription, so this is the
- * per-connection share of `MAX_STREAMED_SYMBOLS` in the market-stream service.
- * A dashboard charts a handful of instruments; a client asking for dozens is
- * either broken or abusive.
+ * Shared with the browser (see `MAX_MARKET_ROOMS_PER_SOCKET` in
+ * `@/lib/contracts`) so a watchlist can never ask for more rooms than this
+ * process will grant: each market room costs one upstream broker subscription,
+ * so this is the per-connection share of `MAX_STREAMED_SYMBOLS` in the
+ * market-stream service. A client asking for far more than a watchlist is either
+ * broken or abusive.
  */
-const MAX_MARKET_ROOMS = 4;
+const MAX_MARKET_ROOMS = MAX_MARKET_ROOMS_PER_SOCKET;
 
 /** Heartbeat tuned for a trading UI: a dead tab is noticed in ~45s worst case. */
 const DEFAULT_PING_INTERVAL_MS = 20_000;

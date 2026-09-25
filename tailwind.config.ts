@@ -23,6 +23,25 @@ const config: Config = {
       padding: '1.5rem',
       screens: { '2xl': '1400px' },
     },
+    /*
+     * `text-base` was ambiguous: `base` is BOTH a font-size step (1rem) and the
+     * near-black surface colour, so Tailwind emitted the utility twice —
+     * `.text-base { font-size: 1rem }` followed by `.text-base { color: rgb(var(--c-base)) }`.
+     * On the dark base both properties resolved to the same near-black, so a
+     * bare `text-base` painted INVISIBLE text, and reviewers could not tell
+     * whether the class meant a size or a colour.
+     *
+     * Dropping only the DEFAULT from TEXT colours keeps every explicit token
+     * utility (`text-base-100`, `text-base-850`, …) working, leaves `bg-base`
+     * untouched, and makes `text-base` unambiguously the 1rem font-size step.
+     * `border-base`, `ring-base` etc. still resolve through `colors`.
+     */
+    textColor: ({ theme }) => {
+      const colors = theme('colors') as Record<string, Record<string, string> | undefined>;
+      const { base, ...rest } = colors;
+      const { DEFAULT: _surface, ...baseShades } = base ?? {};
+      return { ...rest, base: baseShades };
+    },
     extend: {
       colors: {
         /*
@@ -100,7 +119,9 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        /* JetBrains Mono is loaded into `--font-mono` by layout.tsx; keep a
+           system fallback chain for the pre-swap frame and for CJK glyphs. */
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       backgroundImage: {
         // Textures are themeable: a near-black grid is invisible on white.
@@ -110,6 +131,7 @@ const config: Config = {
       },
       boxShadow: {
         card: 'var(--shadow-card)',
+        raised: 'var(--shadow-raised)',
         cta: 'var(--shadow-cta)',
         'glow-cyan': 'var(--shadow-glow-cyan)',
         'glow-emerald': 'var(--shadow-glow-emerald)',

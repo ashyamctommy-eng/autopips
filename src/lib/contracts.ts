@@ -157,10 +157,23 @@ export function normaliseMarketSymbol(input: string): string | null {
   return MARKET_SYMBOL_PATTERN.test(symbol) ? symbol : null;
 }
 
-/** Room name for a symbol's live feed. */
+/**
+ * Room name for a symbol's live feed. */
 export function marketRoom(symbol: string): string {
   return `${MARKET_ROOM_PREFIX}${symbol}`;
 }
+
+/**
+ * How many symbols ONE socket may watch at once.
+ *
+ * Lives here, not in the socket server, because the browser has to obey the same
+ * number: a watchlist that joins more rooms than this gets its extras refused
+ * with a `server:error`, and the two sides drifting apart on the constant is
+ * exactly how a UI ends up showing "no live quote" for a symbol it is entitled
+ * to. Each watched symbol costs one upstream broker subscription, so this is the
+ * per-connection share of `MAX_STREAMED_SYMBOLS` in the market-stream service.
+ */
+export const MAX_MARKET_ROOMS_PER_SOCKET = 12;
 
 /** Symbol carried by a market room name, or null when `room` is not one. */
 export function parseMarketRoom(room: string): string | null {

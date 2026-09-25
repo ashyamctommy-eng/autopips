@@ -2,17 +2,10 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
-/** The standard surface: 1px hairline border, deep shadow, no pure black. */
+/** The standard raised surface: hairline border, glass fill, deep themed shadow. */
 export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div
-      ref={ref}
-      className={cn(
-        'rounded-xl border border-line bg-base-850/80 shadow-card backdrop-blur-sm',
-        className,
-      )}
-      {...props}
-    />
+    <div ref={ref} className={cn('surface-raised', className)} {...props} />
   ),
 );
 Card.displayName = 'Card';
@@ -30,10 +23,11 @@ export const CardTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <h3
     ref={ref}
-    // Token hazard: the custom `base` colour makes the bare font-size utility
-    // (text + "-base") ambiguous — Tailwind emits it twice (font-size 1rem AND
-    // near-black colour) and the colour rule wins. Use an arbitrary value.
-    className={cn('text-[1rem] font-semibold leading-tight tracking-tight text-base-100', className)}
+    // `text-base` is the 1rem font-size step without ambiguity: the DEFAULT
+    // surface colour is no longer exposed as a TEXT colour in
+    // tailwind.config.ts, so the class can no longer silently inject
+    // near-black text (invisible on the dark base). No arbitrary value needed.
+    className={cn('text-base font-semibold leading-tight tracking-tight text-base-100', className)}
     {...props}
   />
 ));

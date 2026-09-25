@@ -11,7 +11,7 @@
     "dev:ws": "tsx watch src/server/main.ts",
     "build": "prisma generate && next build",
     "build:server": "tsc -p tsconfig.server.json",
-    "start": "next start",
+    "start": "next start -H 0.0.0.0",
     "start:ws": "tsx src/server/main.ts",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",

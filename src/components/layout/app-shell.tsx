@@ -10,6 +10,8 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/toaster';
 import { AdminSidebar } from '@/components/layout/admin-sidebar';
 import { ClientSidebar } from '@/components/layout/sidebar';
+import { MobileNav } from '@/components/layout/mobile-nav';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Topbar, type TopbarNotification, type TopbarUser } from '@/components/layout/topbar';
 import type { KycStatusValue } from '@/types/api';
 
@@ -33,6 +35,8 @@ export interface AppShellProps {
   showToaster?: boolean;
   /** Applied to the `<main>` element. */
   contentClassName?: string;
+  /** Extra topbar controls, rendered before the theme toggle. */
+  topbarActions?: React.ReactNode;
   className?: string;
 }
 
@@ -57,6 +61,7 @@ export function AppShell({
   pendingWithdrawalCount,
   showToaster = true,
   contentClassName,
+  topbarActions,
   className,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -154,10 +159,36 @@ export function AppShell({
               onSignOut={onSignOut}
               signOutHref={signOutHref}
               onToggleSidebar={() => setMobileOpen(true)}
+              actions={
+                <>
+                  {topbarActions}
+                  {/*
+                   * Client only: inside /admin the `theme-admin` palette wins by
+                   * design, so a toggle there would be a control that visibly
+                   * does nothing.
+                   */}
+                  {variant === 'client' ? <ThemeToggle /> : null}
+                </>
+              }
             />
-            <main className={cn('flex-1', contentClassName)}>{children}</main>
+            <main
+              className={cn(
+                'flex-1',
+                // Clear the fixed mobile bottom navigation (4.25rem plus the iOS
+                // safe-area inset). Client only — the admin shell has no bottom
+                // bar — and reset at `lg`, where the bar is hidden.
+                variant === 'client' && 'pb-[calc(4.25rem+env(safe-area-inset-bottom))] lg:pb-0',
+                contentClassName,
+              )}
+            >
+              {children}
+            </main>
           </div>
         </div>
+
+        {/* Mobile primary navigation. The drawer opened by the topbar hamburger
+            still carries the full menu; this is the thumb-reach layer. */}
+        {variant === 'client' ? <MobileNav /> : null}
 
         {showToaster ? <Toaster /> : null}
       </div>

@@ -47,16 +47,27 @@ export function BrandMark({
         className={cn('shrink-0', SIZE_GLYPH[size])}
       >
         <defs>
+          {/*
+           * Token-driven so the mark follows the active palette. Inline style is
+           * used because SVG presentation attributes do not resolve var().
+           */}
           <linearGradient id={GRADIENT_ID} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#22D3EE" />
-            <stop offset="100%" stopColor="#10B981" />
+            <stop offset="0%" style={{ stopColor: 'rgb(var(--c-brand-400))' }} />
+            <stop offset="100%" style={{ stopColor: 'rgb(var(--c-profit-500))' }} />
           </linearGradient>
         </defs>
-        <rect x="1" y="1" width="30" height="30" rx="9" fill="#10141C" stroke="rgba(148,163,184,0.14)" />
+        <rect
+          x="1"
+          y="1"
+          width="30"
+          height="30"
+          rx="9"
+          style={{ fill: 'rgb(var(--c-base-850))', stroke: 'rgb(var(--c-line) / var(--c-line-a))' }}
+        />
         {/* Three ascending bars: the pip ladder. */}
-        <rect x="8" y="18" width="4" height="7" rx="1.5" fill="rgba(148,163,184,0.45)" />
-        <rect x="14" y="13" width="4" height="12" rx="1.5" fill="rgba(34,211,238,0.75)" />
-        <rect x="20" y="7" width="4" height="18" rx="1.5" fill={`url(#${GRADIENT_ID})`} />
+        <rect x="8" y="18" width="4" height="7" rx="1.5" style={{ fill: 'rgb(var(--c-muted) / 0.45)' }} />
+        <rect x="14" y="13" width="4" height="12" rx="1.5" style={{ fill: 'rgb(var(--c-brand-400) / 0.75)' }} />
+        <rect x="20" y="7" width="4" height="18" rx="1.5" style={{ fill: `url(#${GRADIENT_ID})` }} />
       </svg>
       {showWordmark ? (
         <span

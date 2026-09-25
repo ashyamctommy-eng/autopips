@@ -26,7 +26,7 @@ export default function GlobalError({
         <AlertTriangle className="h-6 w-6 text-loss" />
       </div>
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-white">Something went wrong</h1>
+        <h1 className="text-2xl font-semibold text-base-100">Something went wrong</h1>
         <p className="max-w-md text-sm text-muted">
           The platform could not complete that request. No balance or trade record was
           modified by a failed page load.

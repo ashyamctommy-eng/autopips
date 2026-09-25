@@ -9,8 +9,15 @@
  * `text-muted`, `border-line`, …), so the palette can be swapped per surface
  * without touching a single component.
  *
- *   :root                     → the dark trading surface (public site + /dashboard)
- *   html:has(.theme-admin)    → the light executive console (/admin/*)
+ *   :root                       → the dark trading surface (public site + /dashboard)
+ *   html[data-theme='light']    → the visitor-chosen light theme (ThemeToggle)
+ *   html:has(.theme-admin)      → the light executive console (/admin/*)
+ *
+ * The two light selectors share one variable block: the console and the
+ * user-selected light theme are the same palette, so the admin scope cannot
+ * drift from it. The selectors have equal specificity and the admin one is
+ * listed last, so anything under `.theme-admin` stays on the light executive
+ * palette whatever the visitor picked.
  *
  * The dark block below holds the exact literals the Tailwind config used to
  * hard-code, so the default rendering is unchanged.
@@ -19,6 +26,8 @@
  * Radix portals (dialogs, selects, tooltips) mount on document.body — OUTSIDE the
  * wrapper — and would keep the dark palette. Nothing in the light block is
  * reached through JavaScript, so there is no theme flash and no layout shift.
+ * The blocking inline script in layout.tsx sets `data-theme` before first paint;
+ * with JavaScript disabled the page simply stays dark, which is the default.
  */
 @layer base {
   :root {
@@ -83,21 +92,50 @@
       linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
     --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(34, 211, 238, 0.18) 0%, rgba(11, 14, 20, 0) 100%);
     --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(16, 185, 129, 0.16) 0%, rgba(11, 14, 20, 0) 100%);
+
+    /*
+     * Glass surface treatment — one definition, both palettes. `.surface` and
+     * `.surface-raised` (and every `Card`) read these, so a raised element is
+     * the same translucent, blurred panel in the dark terminal and in the light
+     * theme. Blur is a token because the light palette wants a touch more
+     * separation from the page.
+     */
+    --blur-surface: 8px;
+    --blur-surface-raised: 12px;
+    --shadow-raised: 0 1px 0 0 rgba(148, 163, 184, 0.08) inset, 0 18px 48px -20px rgba(0, 0, 0, 0.9);
+
+    /*
+     * Canvas tokens. lightweight-charts and recharts take literal colour
+     * strings (no Tailwind classes), so the chart components read these at
+     * runtime via `getComputedStyle` and re-read them when the theme changes.
+     * Kept explicit rather than derived from the colour tokens so the alpha a
+     * hairline needs can differ per palette without a second design system.
+     */
+    --chart-grid: rgba(148, 163, 184, 0.06);
+    --chart-axis: rgba(148, 163, 184, 0.14);
+    --chart-tick: rgba(148, 163, 184, 0.65);
+    --chart-crosshair: rgba(148, 163, 184, 0.35);
   }
 
   /*
-   * EXECUTIVE LIGHT PALETTE — /admin/*
+   * SHARED LIGHT PALETTE — the visitor-selected light theme AND the console.
    *
    * Slate-50 page, white cards, slate-900 text, slate-500 muted, deep-navy
    * primary action. Same tokens, same primitives, different values: the console
    * is a back office, and a back office read on a white surface at 9am is a
    * different job from reading candles at midnight.
+   *
+   * Both selectors carry the SAME declarations on purpose — one palette, two
+   * triggers — so the client light theme and the admin console cannot drift.
+   * Specificity is equal and the console selector is listed last, so inside
+   * /admin the console keeps winning even if the visitor chose dark.
    */
+  html[data-theme='light'],
   html:has(.theme-admin) {
     color-scheme: light;
 
     --c-base: 248 250 252;
-    --c-base-50: 248 250 252;
+    --c-base-50: 2 6 23; /* was the near-white dark tint — invisible on white */
     --c-base-100: 15 23 42; /* primary text — slate-900 */
     --c-base-700: 241 245 249; /* badge container — slate-100 */
     --c-base-800: 241 245 249; /* nested surface / secondary button */
@@ -107,6 +145,8 @@
 
     /* Accents are darkened so they hold contrast on white. */
     --c-brand: 8 145 178;
+    --c-brand-50: 14 116 144; /* cyan-700: the dark near-white tint cannot read here */
+    --c-brand-100: 21 94 117; /* cyan-800 */
     --c-brand-300: 14 116 144;
     --c-brand-400: 8 145 178;
     --c-brand-500: 6 182 212;
@@ -140,15 +180,24 @@
     --c-scrim-a: 0.45;
 
     --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 12px 32px -16px rgba(15, 23, 42, 0.18);
+    --shadow-raised: 0 1px 2px 0 rgba(15, 23, 42, 0.05), 0 18px 40px -22px rgba(15, 23, 42, 0.28);
     --shadow-cta: 0 10px 24px -14px rgba(15, 23, 42, 0.55);
     --shadow-glow-cyan: 0 0 24px -10px rgba(8, 145, 178, 0.35);
     --shadow-glow-emerald: 0 0 24px -10px rgba(5, 150, 105, 0.3);
+
+    --blur-surface: 10px;
+    --blur-surface-raised: 16px;
 
     --bg-grid:
       linear-gradient(rgba(15, 23, 42, 0.045) 1px, transparent 1px),
       linear-gradient(90deg, rgba(15, 23, 42, 0.045) 1px, transparent 1px);
     --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(8, 145, 178, 0.1) 0%, rgba(248, 250, 252, 0) 100%);
     --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(5, 150, 105, 0.1) 0%, rgba(248, 250, 252, 0) 100%);
+
+    --chart-grid: rgba(15, 23, 42, 0.06);
+    --chart-axis: rgba(15, 23, 42, 0.12);
+    --chart-tick: rgba(100, 116, 139, 0.9);
+    --chart-crosshair: rgba(100, 116, 139, 0.45);
   }
 
   * {
@@ -172,8 +221,11 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Selection reads in both palettes: a brand wash over the palette's own
+     foreground, never a literal white (invisible on a light page). */
   ::selection {
-    @apply bg-brand/30 text-white;
+    background-color: rgb(var(--c-brand) / 0.24);
+    color: rgb(var(--c-base-100));
   }
 
   /* Scrollbars tuned for the dark surface */
@@ -195,27 +247,31 @@
     @apply outline-none ring-2 ring-brand/70 ring-offset-2 ring-offset-base-900;
   }
 
-  /* ── Light-console refinements (only reachable under .theme-admin) ── */
-  html:has(.theme-admin) ::selection {
-    background-color: rgb(var(--c-brand) / 0.18);
-    color: rgb(var(--c-base-100));
-  }
+  /* ── Light-palette refinements (client light theme + the admin console) ── */
+  html[data-theme='light'] ::-webkit-scrollbar-thumb,
   html:has(.theme-admin) ::-webkit-scrollbar-thumb {
-    background-color: #cbd5e1;
+    background-color: rgb(var(--c-line));
   }
+  html[data-theme='light'] ::-webkit-scrollbar-thumb:hover,
   html:has(.theme-admin) ::-webkit-scrollbar-thumb:hover {
-    background-color: #94a3b8;
+    background-color: rgb(var(--c-muted));
   }
 }
 
 @layer components {
-  /* The signature surface: a hairline-bordered panel on the base. */
+  /*
+   * The signature surfaces. One translucent, blurred panel with a hairline
+   * border and a themed shadow — used by `Card`, the chart frames and every
+   * `.surface` call site, in BOTH palettes. `.surface-raised` is the elevated
+   * variant (more blur, stronger shadow); the tokens above keep the two from
+   * drifting apart between themes.
+   */
   .surface {
-    @apply rounded-xl border border-line bg-base-850/70 shadow-card backdrop-blur-sm;
+    @apply rounded-xl border border-line bg-base-850/70 shadow-card backdrop-blur-[var(--blur-surface)];
   }
 
   .surface-raised {
-    @apply rounded-xl border border-line bg-base-800/80 shadow-card backdrop-blur;
+    @apply rounded-xl border border-line bg-base-850/85 shadow-raised backdrop-blur-[var(--blur-surface-raised)];
   }
 
   /* Subtle grid texture used behind hero / dashboard headers. */

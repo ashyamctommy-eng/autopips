@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { AppProviders } from './providers';
+import { DEFAULT_THEME_PREFERENCE, THEME_INIT_SCRIPT } from '@/lib/theme';
 
 /**
  * Root layout.
@@ -56,12 +57,29 @@ export const viewport: Viewport = {
   themeColor: '#0B0E14',
   width: 'device-width',
   initialScale: 1,
+  /* The mobile bottom navigation pads itself with env(safe-area-inset-*) so it
+     clears the iOS home indicator; that only resolves when the layout is
+     allowed to paint under it. */
+  viewportFit: 'cover',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable} dark`} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${sans.variable} ${mono.variable} dark`}
+      data-theme="dark"
+      data-theme-preference={DEFAULT_THEME_PREFERENCE}
+      suppressHydrationWarning
+    >
       <body className="min-h-screen bg-base-900 font-sans text-base-100">
+        {/*
+         * Blocking pre-paint theme script. It must run before the body is
+         * parsed so a light-theme visitor never sees a dark frame; it reads the
+         * stored preference and stamps `data-theme` on <html>. The server-rendered
+         * `data-theme="dark"` above is the no-JavaScript default.
+         */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <AppProviders>{children}</AppProviders>
       </body>
     </html>
