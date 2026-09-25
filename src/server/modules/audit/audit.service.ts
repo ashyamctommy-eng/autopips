@@ -59,6 +59,15 @@ export const AUDIT = {
 
   // investments
   INVESTMENT_CREATED: 'INVESTMENT_CREATED',
+  /**
+   * An OPERATOR deployed a client's funds into a plan on their behalf.
+   *
+   * Its own action because the client did not click anything: the audit row must
+   * name the operator, their stated reason, and the client's KYC status at the
+   * moment of the decision — otherwise the trail implies a client action that
+   * never happened, and hides that an unverified account was funded.
+   */
+  ADMIN_INVESTMENT_CREATED: 'ADMIN_INVESTMENT_CREATED',
   INVESTMENT_ACTIVATED: 'INVESTMENT_ACTIVATED',
   INVESTMENT_PAUSED: 'INVESTMENT_PAUSED',
   INVESTMENT_CLOSED: 'INVESTMENT_CLOSED',

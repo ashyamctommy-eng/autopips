@@ -76,6 +76,16 @@ export interface CreateInvestmentArgs {
   planId: string;
   amountUsd: number;
   ip: string | null;
+  /**
+   * Set ONLY by the admin action that starts an investment for a client.
+   *
+   * It switches off the caller-level KYC assertion, which is exactly why it is an
+   * explicit object naming the operator and a reason rather than a boolean: the
+   * investment is then audited as theirs, with the client's KYC status recorded.
+   * Everything else — plan bounds, the locked balance check, the ledger writes —
+   * is unchanged, so an operator cannot invest money the client does not have.
+   */
+  adminOnBehalf?: { actorUserId: string; actorEmail: string; reason: string };
 }
 
 // ─── overview ───────────────────────────────────────────────────────────────
@@ -169,9 +179,37 @@ export async function listInvestments(userId: string): Promise<InvestmentDTO[]> 
  * measured.
  */
 export async function createInvestment(args: CreateInvestmentArgs): Promise<InvestmentDTO> {
-  const { user, planId, amountUsd, ip } = args;
+  const { user, planId, amountUsd, ip, adminOnBehalf } = args;
 
-  assertVerifiedClient(user);
+  if (!adminOnBehalf) {
+    assertVerifiedClient(user);
+  } else {
+    /*
+     * An operator is deploying this client's funds. The client's own KYC gate is
+     * replaced by the operator's judgement PLUS two hard rules: a REJECTED client
+     * cannot be funded at all, and the decision is written down with the KYC
+     * status that was true when it was taken.
+     */
+    if (user.kycStatus === 'REJECTED') {
+      throw ApiError.badRequest(
+        'That client\'s identity documents were rejected; their funds cannot be deployed.',
+      );
+    }
+    await recordAudit({
+      action: AUDIT.ADMIN_INVESTMENT_CREATED,
+      userId: user.id,
+      details: {
+        actor: adminOnBehalf.actorEmail,
+        actorUserId: adminOnBehalf.actorUserId,
+        reason: adminOnBehalf.reason,
+        planId,
+        amountUsd,
+        clientKycStatus: user.kycStatus,
+        onBehalfOf: true,
+      },
+      ipAddress: ip,
+    });
+  }
 
   if (typeof amountUsd !== 'number' || !Number.isFinite(amountUsd)) {
     throw ApiError.badRequest('Investment amount must be a finite number.');
@@ -539,6 +577,7 @@ const ACTIVITY_TEMPLATES: Record<AuditAction, ActivityTemplate> = {
   LOT_ALLOCATED: always('Capital allocated to a position', 'info'),
   STAKE_ALLOCATED: always('Risk budget allocated to a contract', 'info'),
   ADMIN_DEPOSIT_CREDITED: always('Deposit credited by an operator', 'warning'),
+  ADMIN_INVESTMENT_CREATED: always('Investment started by an operator', 'warning'),
 
   // admin
   PLAN_CREATED: always('Investment plan created', 'info'),
