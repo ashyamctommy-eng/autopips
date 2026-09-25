@@ -78,7 +78,10 @@ export const strategies: Record<string, StrategyRuntimeConfig> = {
   'gold-momentum': {
     enabled: true,
     timeframe: '15m',
-    symbols: ['XAUUSD'],
+    // The BROKER's symbol, verbatim and case-sensitive: Deriv's gold is
+    // `frxXAUUSD`. An MT5-style `XAUUSD` is a symbol this broker does not have,
+    // so the engine fetched nothing and produced no signal.
+    symbols: ['frxXAUUSD'],
     // Master lot size. Size it against the master account's equity and the
     // smallest client capital you accept: the client lot is
     // masterVolume × (client capital / master equity), and an allocation that

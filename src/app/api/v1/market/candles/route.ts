@@ -30,8 +30,11 @@ export const dynamic = 'force-dynamic';
  *   'unavailable' — the market-data feed could not be reached.
  */
 
-/** Symbols the bridge can be asked for: letters, digits and common separators. */
-const SYMBOL_PATTERN = /^[A-Z0-9._#+-]{2,24}$/;
+/**
+ * Symbols the bridge can be asked for: letters, digits and common separators.
+ * Mixed case, because broker symbols are case-sensitive (`frxXAUUSD`).
+ */
+const SYMBOL_PATTERN = /^[A-Za-z0-9._#+-]{2,24}$/;
 
 /**
  * Timeframes the Deriv history endpoint accepts. Anything else is rejected
@@ -45,7 +48,9 @@ const querySchema = z.object({
   symbol: z
     .string()
     .trim()
-    .transform((value) => value.toUpperCase())
+    // NO case folding: the broker's symbol is passed through as given. Deriv's
+    // `ticks_history` tolerates the wrong case but `ticks` does not, so
+    // upper-casing here produced a chart that loaded and then never ticked.
     .refine((value) => SYMBOL_PATTERN.test(value), 'Symbol must be a market instrument name.'),
   timeframe: z.enum(TIMEFRAMES),
   limit: z.coerce.number().int().min(1).max(MAX_CANDLES).default(300),

@@ -74,23 +74,41 @@ beforeEach(async () => {
 
 describe('demand counting', () => {
   it('subscribes upstream once for N listeners and releases at zero', async () => {
-    expect(await market.acquireMarketSymbol('xauusd')).toBe(true); // normalised to XAUUSD
-    expect(await market.acquireMarketSymbol('XAUUSD')).toBe(true);
+    expect(await market.acquireMarketSymbol('frxXAUUSD')).toBe(true);
+    expect(await market.acquireMarketSymbol('frxXAUUSD')).toBe(true);
 
     expect(mocks.subscribe).toHaveBeenCalledTimes(1);
-    expect(mocks.subscribe).toHaveBeenCalledWith('XAUUSD');
+    expect(mocks.subscribe).toHaveBeenCalledWith('frxXAUUSD');
     expect(market.marketStreamSnapshot()).toEqual([
-      { symbol: 'XAUUSD', listeners: 2, connectionId: 'conn-1', connected: true },
+      { symbol: 'frxXAUUSD', listeners: 2, connectionId: 'conn-1', connected: true },
     ]);
 
-    await market.releaseMarketSymbol('XAUUSD');
+    await market.releaseMarketSymbol('frxXAUUSD');
     expect(mocks.unsubscribe).not.toHaveBeenCalled();
     expect(market.marketStreamSnapshot()[0].listeners).toBe(1);
 
-    await market.releaseMarketSymbol('XAUUSD');
+    await market.releaseMarketSymbol('frxXAUUSD');
     expect(mocks.unsubscribe).toHaveBeenCalledTimes(1);
-    expect(mocks.unsubscribe).toHaveBeenCalledWith('XAUUSD');
+    expect(mocks.unsubscribe).toHaveBeenCalledWith('frxXAUUSD');
     expect(market.marketStreamSnapshot()).toEqual([]);
+  });
+
+  it('treats a different case as a different instrument — broker symbols are case-sensitive', async () => {
+    /*
+     * This is the bug that made the chart load and then never tick:
+     * `normaliseMarketSymbol` upper-cased, so `frxXAUUSD` reached Deriv as
+     * `FRXXAUUSD`, which is not a symbol. `ticks_history` tolerated it, `ticks`
+     * answered InvalidSymbol — so the candles drew and the live feed died.
+     */
+    expect(await market.acquireMarketSymbol('frxXAUUSD')).toBe(true);
+    expect(await market.acquireMarketSymbol('FRXXAUUSD')).toBe(true);
+
+    // Two subscriptions, not one: they are two different instruments.
+    expect(mocks.subscribe).toHaveBeenCalledTimes(2);
+    expect(market.marketStreamSnapshot().map((entry) => entry.symbol).sort()).toEqual([
+      'FRXXAUUSD',
+      'frxXAUUSD',
+    ]);
   });
 
   it('publishes the quote the subscription call answered with, so a chart is not blank', async () => {

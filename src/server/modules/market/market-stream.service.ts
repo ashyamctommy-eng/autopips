@@ -185,14 +185,21 @@ export async function reattachMarketSubscriptions(): Promise<void> {
     if (!entry) continue;
 
     if (entry.adapter.isConnected()) {
-      // Same connection, but the server-side subscription is gone.
+      /*
+       * Same connection. A reconnect drops Deriv-side subscriptions, so the
+       * subscription is re-asserted — but the socket may also have simply
+       * survived, in which case the broker answers `AlreadySubscribed`. That is
+       * not a failure: it is the broker confirming the state we want, and
+       * logging it as one produced a warning storm on every broker status event.
+       */
       try {
         const quote = await entry.adapter.subscribeToMarketData(symbol);
         if (quote) await publishTick({ ...quote });
       } catch (err) {
-        console.warn(
-          `[market-stream] re-subscribe failed for ${symbol}: ${err instanceof Error ? err.message : err}`,
-        );
+        const message = err instanceof Error ? err.message : String(err);
+        if (!/AlreadySubscribed/i.test(message)) {
+          console.warn(`[market-stream] re-subscribe failed for ${symbol}: ${message}`);
+        }
       }
       continue;
     }

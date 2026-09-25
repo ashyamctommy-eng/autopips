@@ -136,12 +136,24 @@ export const WS_EVENTS = {
  */
 export const MARKET_ROOM_PREFIX = 'market:';
 
-/** Symbols a client may watch: letters, digits and common broker separators. */
-export const MARKET_SYMBOL_PATTERN = /^[A-Z0-9._#+-]{2,24}$/;
+/**
+ * Symbols a client may watch: letters, digits and common broker separators.
+ *
+ * Both cases on purpose. Broker symbols are CASE-SENSITIVE — Deriv's gold is
+ * `frxXAUUSD`, and `FRXXAUUSD` is a symbol that does not exist. Upper-casing
+ * here (it used to) turned a valid watch request into `InvalidSymbol` at the
+ * broker, which surfaced as "no live quote" with nothing pointing at the cause.
+ */
+export const MARKET_SYMBOL_PATTERN = /^[A-Za-z0-9._#+-]{2,24}$/;
 
-/** Normalise user input to a broker symbol, or null when it is not one. */
+/**
+ * Normalise user input to a broker symbol, or null when it is not one.
+ *
+ * Trims and validates ONLY. It must not change the case: the string is passed
+ * to the broker verbatim as the instrument to subscribe to or price.
+ */
 export function normaliseMarketSymbol(input: string): string | null {
-  const symbol = input.trim().toUpperCase();
+  const symbol = input.trim();
   return MARKET_SYMBOL_PATTERN.test(symbol) ? symbol : null;
 }
 

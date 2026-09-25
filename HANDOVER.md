@@ -179,11 +179,40 @@ so DEMO/LIVE is a label — the account type Deriv issues is what the adapter de
 
 ## 7. Next steps, in priority order
 
-1. **Deploy the worker** — `Dockerfile.worker` + `railway.worker.toml`. This turns on live
-   ticks, the bot runtime and the activity feed. **⚠️ It also starts the strategy engine, which
-   can place orders on the CONNECTED account (currently DEMO).** Before deploying, decide
-   whether to engage the kill switch (Admin → Bot control) and watch the first signals, or set
-   `risk.risk_per_trade_pct` to 0 so stake-sized orders are refused until you are ready.
+1. **Deploy the worker** — this turns on live ticks, the bot runtime and the activity feed.
+   **⚠️ It also starts the strategy engine, which can place orders on the CONNECTED account
+   (currently DEMO).** Before the first deploy: engage the kill switch (Admin → Bot control →
+   EMERGENCY STOP) or set **Risk per trade = 0**. Then release deliberately.
+
+   Step by step (Railway, same project as the web service):
+
+   1. **New → Deploy from GitHub repo**, pick `ashyamctommy-eng/autopips`. Same repo as the web
+      service — the worker is a second *service*, not a second project.
+   2. Service → **Settings → Config-as-code → Config File Path** = `/railway.worker.toml`.
+      That file is what selects `Dockerfile.worker`, sets `startCommand = npm run start:ws`,
+      points the healthcheck at `/healthz` and pins **`numReplicas = 1`** — keep it at 1: the bot
+      runtime holds a Redis lock so extra replicas waste a container and split socket rooms.
+   3. **Variables** — the worker runs the SAME environment contract as the web service
+      (`src/lib/env.ts`) and exits 1 naming anything missing: `DATABASE_URL`, `REDIS_URL`,
+      `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`, `WS_INTERNAL_TOKEN`, `DERIV_APP_ID`, `DERIV_*`,
+      `AWS_*`, `NOWPAYMENTS_*`. Reference the shared ones (`${{Postgres.DATABASE_URL}}`,
+      `${{Redis.REDIS_URL}}`) rather than pasting copies.
+   4. **Give the worker a public domain** (Settings → Networking → Generate Domain). The browser
+      connects to the socket server directly.
+   5. On the **WEB** service set `NEXT_PUBLIC_WS_URL=https://<worker-domain>` and redeploy the
+      web service. `NEXT_PUBLIC_*` is inlined at BUILD time, so this needs a rebuild — setting it
+      without redeploying changes nothing.
+   6. Deploy the worker. Success looks like `/healthz` answering
+      `{"ok":true,"db":{"status":"ok"},"redis":{"status":"ok"},"namespace":"/ws/trading"}` and the
+      log showing:
+         `[ws] listening on http://0.0.0.0:4001 — namespace /ws/trading, path /ws/socket.io`
+         `[deriv.adapter] authenticated ***-0065 (DEMO) via an account OTP socket`
+
+   **This exact path was verified locally before being written down here** (worker on the current
+   commit, kill switch engaged, demo account registered): `/healthz` ok, OTP authentication
+   succeeded, and a client that joined `market:frxXAUUSD` received **25 live Deriv ticks in 25
+   seconds** through the platform's own socket server. On production the same page currently reads
+   "Disconnected" — that is this missing service and nothing else.
 2. **Supervise the first order.** With the worker up and a DEMO connection: watch
    Admin → Bot control (live feed), confirm one `STAKE_ALLOCATED` audit row with the stake,
    notional and bounds, then confirm the position's notional in the AUM dashboard matches
