@@ -147,6 +147,61 @@ export function mapDerivCandles(payload: unknown): { candles: Candle[]; skipped:
   return { candles: candles.sort((a, b) => a.time - b.time), skipped };
 }
 
+/**
+ * Deriv `active_symbols` payload → instrument metadata.
+ *
+ * The CURRENT surface names the fields `underlying_symbol` /
+ * `underlying_symbol_name`; the retired one used `symbol` / `display_name`. The
+ * old names are still accepted as a fallback so a payload from either surface is
+ * read correctly — and so an empty instrument list can only ever mean "the
+ * broker sent none", never "we looked for the wrong key". That distinction cost
+ * a chart its instrument picker once.
+ *
+ * Exported because the PUBLIC market-data client reads the same list: one
+ * mapper, so the console's symbol picker and the chart's cannot disagree.
+ */
+export function mapDerivActiveSymbols(payload: unknown): InstrumentInfo[] {
+  const instruments: InstrumentInfo[] = [];
+
+  for (const entry of asArray(payload)) {
+    const raw = asRecord(entry);
+    if (!raw) continue;
+
+    const symbol =
+      typeof raw.underlying_symbol === 'string'
+        ? raw.underlying_symbol
+        : typeof raw.symbol === 'string'
+          ? raw.symbol
+          : null;
+    if (!symbol) continue;
+
+    const displayName =
+      typeof raw.underlying_symbol_name === 'string'
+        ? raw.underlying_symbol_name
+        : typeof raw.display_name === 'string'
+          ? raw.display_name
+          : symbol;
+    const pipSize = isFiniteNumber(raw.pip_size)
+      ? raw.pip_size
+      : isFiniteNumber(raw.pip)
+        ? raw.pip
+        : 0;
+
+    instruments.push({
+      symbol,
+      displayName,
+      market: typeof raw.market === 'string' ? raw.market : 'unknown',
+      submarket: typeof raw.submarket === 'string' ? raw.submarket : 'unknown',
+      pipSize,
+      // Tradable = the venue is open AND the instrument is not suspended. The
+      // previous `||` made a suspended instrument on an open venue look tradable.
+      isTradable: raw.exchange_is_open === 1 && raw.is_trading_suspended !== 1,
+    });
+  }
+
+  return instruments;
+}
+
 /** Deriv multipliers are quoted per contract type; these are the two we submit. */
 const MULTUP = 'MULTUP';
 const MULTDOWN = 'MULTDOWN';
@@ -608,21 +663,8 @@ export class DerivBrokerAdapter implements BrokerAdapter {
     );
 
     const map = new Map<string, InstrumentInfo>();
-    for (const entry of asArray(response.active_symbols)) {
-      const raw = asRecord(entry);
-      const symbol = typeof raw?.symbol === 'string' ? raw.symbol : null;
-      if (!raw || !symbol) continue;
-      map.set(symbol, {
-        symbol,
-        displayName: typeof raw.display_name === 'string' ? raw.display_name : symbol,
-        market: typeof raw.market === 'string' ? raw.market : 'unknown',
-        submarket: typeof raw.submarket === 'string' ? raw.submarket : 'unknown',
-        pipSize: isFiniteNumber(raw.pip) ? raw.pip : 0,
-        isTradable:
-          raw.exchange_is_open === 1 ||
-          raw.exchange_is_open === true ||
-          raw.is_trading_suspended === 0,
-      });
+    for (const instrument of mapDerivActiveSymbols(response.active_symbols)) {
+      map.set(instrument.symbol, instrument);
     }
 
     this.instruments = map;

@@ -14,15 +14,20 @@ import {
   listTrades,
 } from '@/server/modules/account/account.service';
 import { requireSessionUser } from '@/server/modules/auth/session';
+import { listPublicSymbols } from '@/server/modules/market/public-market.service';
 
 /**
  * Live trading (server component).
  *
  * Loads the account's positions and investments through the service layer, then
- * hands them to three client panels. The instrument list offered by the chart
- * is derived from this account's own positions and trade history — the panel
- * never offers an instrument the account has no broker relationship with, and
- * the candles route returns an empty series rather than a synthetic one.
+ * hands them to three client panels.
+ *
+ * The chart's instrument list starts with what this account has actually traded
+ * and then continues with the broker's own instrument list. That second half is
+ * why a brand-new account can see a chart at all: candles come from the PUBLIC
+ * market feed, so an empty chart was never a data problem, only a missing
+ * selection. The candles route still returns an empty series rather than a
+ * synthetic one.
  */
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +46,19 @@ export default async function DashboardTradingPage() {
     listTrades(user.id, { take: INSTRUMENT_SAMPLE }),
     listActivity(user.id, ACTIVITY_TAKE),
   ]);
+
+  // The broker's instrument list, read from its public feed. A failure here is
+  // NOT fatal and never invented: the chart falls back to traded instruments.
+  let availableInstruments: string[] = [];
+  try {
+    availableInstruments = (await listPublicSymbols())
+      .map((instrument) => instrument.symbol)
+      .sort((a, b) => a.localeCompare(b));
+  } catch (err) {
+    console.warn(
+      `[dashboard/trading] instrument list unavailable: ${err instanceof Error ? err.message : err}`,
+    );
+  }
 
   const openPositions = positions.filter((position) => position.status === 'OPEN');
 
@@ -90,6 +108,7 @@ export default async function DashboardTradingPage() {
       <TradingPanel
         investments={panelInvestments}
         instruments={instruments}
+        availableInstruments={availableInstruments}
         investmentId={activeInvestment?.id ?? null}
         initialPositions={openPositions}
       />

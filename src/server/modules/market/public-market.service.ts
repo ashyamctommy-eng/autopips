@@ -5,9 +5,10 @@ import {
 } from '@/server/modules/broker/deriv.client';
 import {
   GRANULARITY_SECONDS,
+  mapDerivActiveSymbols,
   mapDerivCandles,
 } from '@/server/modules/broker/deriv.adapter';
-import type { Candle, Quote } from '@/server/modules/broker/broker.types';
+import type { Candle, InstrumentInfo, Quote } from '@/server/modules/broker/broker.types';
 
 /**
  * Deriv PUBLIC market data — prices and history, with no account attached.
@@ -132,46 +133,24 @@ export async function getPublicCandles(
   return candles;
 }
 
-export interface PublicSymbol {
-  symbol: string;
-  displayName: string;
-  market: string;
-  marketDisplayName: string;
-}
-
 /**
  * The instruments the broker actually offers.
  *
  * `product_type` is NOT sent: the current endpoint rejects it outright
- * ("Properties not allowed: product_type"), which is why the console's symbol
- * list came back empty.
+ * ("Properties not allowed: product_type"). The payload is mapped by the same
+ * function the authorised path uses, so the field-name change on Deriv's side
+ * (`underlying_symbol`) cannot make one path see instruments and the other none.
  */
-export async function listPublicSymbols(): Promise<PublicSymbol[]> {
+export async function listPublicSymbols(): Promise<InstrumentInfo[]> {
   const socket = await connection();
   const response = await socket.request<{ active_symbols?: unknown }>(
     { active_symbols: 'brief' },
     'public active_symbols',
   );
 
-  const rows = Array.isArray(response.active_symbols) ? response.active_symbols : [];
-  const symbols: PublicSymbol[] = [];
-  for (const row of rows) {
-    if (typeof row !== 'object' || row === null) continue;
-    const entry = row as Record<string, unknown>;
-    if (typeof entry.symbol !== 'string') continue;
-    symbols.push({
-      symbol: entry.symbol,
-      displayName: typeof entry.display_name === 'string' ? entry.display_name : entry.symbol,
-      market: typeof entry.market === 'string' ? entry.market : 'unknown',
-      marketDisplayName:
-        typeof entry.market_display_name === 'string'
-          ? entry.market_display_name
-          : typeof entry.market === 'string'
-            ? entry.market
-            : 'unknown',
-    });
-  }
-  return symbols;
+  return mapDerivActiveSymbols(response.active_symbols).sort((a, b) =>
+    a.symbol.localeCompare(b.symbol),
+  );
 }
 
 /**

@@ -55,10 +55,37 @@ export interface TradingPanelInvestment {
   status: InvestmentStatusValue;
 }
 
+/**
+ * Instruments the chart falls back to when the account has never traded.
+ *
+ * Market data is public, so an empty chart for a brand-new account was never a
+ * data problem — the panel simply had no instrument selected and therefore asked
+ * for nothing. These are real Deriv symbols (verified against the live feed).
+ */
+const PREFERRED_DEFAULT_INSTRUMENTS = ['frxXAUUSD', 'frxEURUSD', 'R_100'] as const;
+
+/** Traded instruments first, then the feed's list; a preference decides the default. */
+function defaultInstrument(traded: string[], available: string[]): string | null {
+  for (const preferred of PREFERRED_DEFAULT_INSTRUMENTS) {
+    if (traded.includes(preferred)) return preferred;
+  }
+  if (traded.length > 0) return traded[0]!;
+  for (const preferred of PREFERRED_DEFAULT_INSTRUMENTS) {
+    if (available.includes(preferred)) return preferred;
+  }
+  return available[0] ?? null;
+}
+
 export interface TradingPanelProps {
   investments: TradingPanelInvestment[];
   /** Instruments seen in this account's positions and trade history. */
   instruments: string[];
+  /**
+   * Instruments the broker offers, from its public feed. Used when this account
+   * has no traded instruments yet, so the chart has something real to draw
+   * instead of sitting empty behind a disabled selector.
+   */
+  availableInstruments?: string[];
   /** Investment whose realtime room this panel subscribes to (may be null). */
   investmentId: string | null;
   /**
@@ -175,11 +202,18 @@ const priceFormatter = new Intl.NumberFormat('en-US', {
 export function TradingPanel({
   investments,
   instruments,
+  availableInstruments = [],
   investmentId,
   initialPositions,
 }: TradingPanelProps) {
   const [roomId, setRoomId] = React.useState<string | null>(investmentId);
-  const [symbol, setSymbol] = React.useState<string | null>(instruments[0] ?? null);
+  const instrumentOptions = React.useMemo(
+    () => [...instruments, ...availableInstruments.filter((s) => !instruments.includes(s))],
+    [instruments, availableInstruments],
+  );
+  const [symbol, setSymbol] = React.useState<string | null>(() =>
+    defaultInstrument(instruments, availableInstruments),
+  );
   const [timeframe, setTimeframe] = React.useState<string>(TIMEFRAME_OPTIONS[4]);
 
   const [candles, setCandles] = React.useState<Candle[]>([]);
@@ -374,15 +408,17 @@ export function TradingPanel({
               <Select
                 value={symbol ?? undefined}
                 onValueChange={(value) => setSymbol(value)}
-                disabled={instruments.length === 0}
+                disabled={instrumentOptions.length === 0}
               >
                 <SelectTrigger id="trading-instrument">
                   <SelectValue
-                    placeholder={instruments.length === 0 ? 'No traded instruments' : 'Select'}
+                    placeholder={
+                      instrumentOptions.length === 0 ? 'No instruments available' : 'Select'
+                    }
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  {instruments.map((instrument) => (
+                  {instrumentOptions.map((instrument) => (
                     <SelectItem key={instrument} value={instrument}>
                       {instrument}
                     </SelectItem>
