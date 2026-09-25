@@ -116,7 +116,7 @@ async function bookProfit(investmentId: string, netPnL: string, label: string) {
     data: {
       investmentId,
       brokerId,
-      metaApiPositionId: `${FIXTURE_TAG}-${label}`,
+      derivContractId: `${FIXTURE_TAG}-${label}`,
       instrument: 'XAUUSD',
       direction: 'BUY',
       volume: '0.10',
@@ -135,7 +135,7 @@ describeDb('money-path races: concurrent check-then-act on withdrawableBalance',
     if (planId) return;
     const broker = await prisma.brokerConnection.create({
       data: {
-        metaApiAccountId: fixtureMetaApiAccountId('races'),
+        derivAccountId: fixtureMetaApiAccountId('races'),
         brokerName: 'Fixture Broker',
         environment: 'DEMO',
         maskedAccount: '***-0003',

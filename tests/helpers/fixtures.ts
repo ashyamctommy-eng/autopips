@@ -9,7 +9,7 @@ import type { User } from '@prisma/client';
  * SAFETY CONTRACT (why this file exists):
  *   * Every row this suite creates is tagged with a per-run unique prefix
  *     (`verify-suite-<runid>-`) on fields we can search on:
- *        User.email, TradingPlan.name, BrokerConnection.metaApiAccountId.
+ *        User.email, TradingPlan.name, BrokerConnection.derivAccountId.
  *   * `purgeFixtures()` deletes ONLY rows carrying the prefix, in FK-safe order,
  *     and reports how many rows each step removed.
  *   * `assertNoFixtureRowsLeft()` re-counts every table afterwards so a failed
@@ -134,7 +134,7 @@ export async function purgeFixtures(): Promise<PurgeReport> {
     : 0;
 
   const brokerConnections = await prisma.brokerConnection.deleteMany({
-    where: { metaApiAccountId: { startsWith: FIXTURE_ACCOUNT_PREFIX } },
+    where: { derivAccountId: { startsWith: FIXTURE_ACCOUNT_PREFIX } },
   });
 
   const removedUsers = await prisma.user.deleteMany({ where: { email: { startsWith: FIXTURE_EMAIL_PREFIX } } });
@@ -187,7 +187,7 @@ export async function countFixtureResidue(): Promise<FixtureResidue> {
 
   const [plans, brokerConnections, investments, deposits, withdrawals, tradeRecords, auditLogs] = await Promise.all([
     prisma.tradingPlan.count({ where: { name: { startsWith: FIXTURE_PLAN_NAME_PREFIX } } }),
-    prisma.brokerConnection.count({ where: { metaApiAccountId: { startsWith: FIXTURE_ACCOUNT_PREFIX } } }),
+    prisma.brokerConnection.count({ where: { derivAccountId: { startsWith: FIXTURE_ACCOUNT_PREFIX } } }),
     prisma.investment.count({ where: { userId: { in: userIds } } }),
     prisma.deposit.count({ where: { userId: { in: userIds } } }),
     prisma.withdrawal.count({ where: { userId: { in: userIds } } }),

@@ -90,7 +90,7 @@ export interface BrokerSyncResult {
 export interface BrokerRemovalResult {
   removed: boolean;
   id: string;
-  metaApiAccountId: string;
+  derivAccountId: string;
 }
 
 /** `AuditLog` row joined with its actor — src/server/modules/audit/audit.service.ts. */

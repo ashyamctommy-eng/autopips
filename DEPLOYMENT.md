@@ -74,7 +74,7 @@ Files added by this deployment work, all at the repository root:
 * Ports 80 and 443 open to the internet. **Postgres 5432, Redis 6379, 3000 and
   4001 must NOT be exposed** — compose publishes 3000/4001 on `127.0.0.1` only.
 * Outbound HTTPS (443): Deriv's WebSocket endpoint
-  (`wss://ws.derivws.com`, TLS on 443), `api.nowpayments.io`, your S3 endpoint, and
+  (`api.derivws.com`, TLS on 443), `api.nowpayments.io`, your S3 endpoint, and
   `fonts.googleapis.com` /
   `fonts.gstatic.com` **at image build time** (`next/font/google` downloads the
   Inter and JetBrains Mono subsets during `next build`; the build fails without
@@ -173,7 +173,7 @@ The same file refuses to boot if a variable named like a secret is prefixed with
 | --- | --- | --- | --- | --- |
 | `DERIV_APP_ID` | yes | no (public) | The `app_id` registered at <https://api.deriv.com>, sent in the WebSocket URL. | `1089` |
 | `DERIV_API_TOKEN` | optional at boot | **secret** | The account API token. Without it the platform still streams public market data but cannot authenticate, read balance or trade. Can also be set at runtime in **Admin → Platform settings** (env stays the fallback). | Deriv dashboard → *API token* |
-| `DERIV_API_URL` | no (default `wss://ws.derivws.com/websockets/v3`) | no | WebSocket endpoint. Override only for a Deriv-hosted/alternate origin. | `wss://ws.derivws.com/websockets/v3` |
+| `DERIV_API_URL` | no (default `wss://api.derivws.com/trading/v1/options/ws/public`) | no | Public market-data socket. The retired `ws.derivws.com` host is refused at boot. Override only to route through a proxy. | `wss://api.derivws.com/trading/v1/options/ws/public` |
 | `DERIV_MULTIPLIER` | no (default `100`) | no | Multiplier used for `MULTUP`/`MULTDOWN` contracts. | `100` |
 | `BROKER_SYNC_INTERVAL` | no (default `15`) | no | Seconds between broker state polls in the sync worker (floored at 5 s in code). | `15` |
 | `BROKER_CONNECT_TIMEOUT` | no (default `120`) | no | Seconds to wait for the broker connection (Deriv WebSocket authorise) before a cycle gives up. | `120` |
@@ -446,7 +446,14 @@ scrubbed from error messages before they are logged.
    a token the platform still streams public market data, but cannot authenticate
    (`authorize`), read `balance`/`portfolio`, or trade; the admin broker screen
    says so rather than pretending to be connected.
-3. `DERIV_API_URL` defaults to `wss://ws.derivws.com/websockets/v3`. Override it
+3. A connection is registered in Admin → Broker connections with the **trading account id**
+   (`DOT94640065`, `ROT92685247`) — NOT the Deriv user number, and a Personal Access Token
+   (`pat_…`) with read + trade scopes. The probe authenticates by exchanging the PAT for a
+   one-time account socket (`POST /trading/v1/options/accounts/{id}/otp`), so a bad token or a
+   wrong account id is reported in Deriv's own words.
+4. `DERIV_API_URL` defaults to `wss://api.derivws.com/trading/v1/options/ws/public`, and
+   `DERIV_REST_URL` to `https://api.derivws.com`. A configured URL pointing at the retired
+   `ws.derivws.com` / `ws.binaryws.com` hosts is REFUSED at boot, with the replacement named. Override them
    only for a Deriv-hosted mirror, and keep the outbound TLS/443 allowance from §2.
 4. **Register the connection in the admin UI** (`POST /api/v1/admin/brokers`, or
    `/admin/brokers`). The token is stored AES-256-GCM encrypted with

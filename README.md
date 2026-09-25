@@ -1,7 +1,10 @@
 # Autopipsz — autopips.pro
 
 Managed algorithmic trading platform. Client capital is mirrored onto **Deriv**
-accounts through Deriv's WebSocket API (`wss://ws.derivws.com/websockets/v3`),
+accounts through Deriv's WebSocket API
+(`wss://api.derivws.com/trading/v1/options/ws/public` for public market data, and
+a per-account OTP-issued socket for trading — Deriv retired the old `ws.derivws.com`
+host, which now answers Cloudflare 520 to every request),
 settlements run through **NOWPayments.io**, and every figure the platform reports is
 derived from a persisted, verified record.
 

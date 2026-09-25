@@ -176,7 +176,7 @@ async function runCycle(): Promise<void> {
 
     for (const [strategyId, config] of enabled) {
       for (const conn of connections) {
-        if (config.brokerAccountIds && config.brokerAccountIds.length > 0 && !config.brokerAccountIds.includes(conn.metaApiAccountId)) {
+        if (config.brokerAccountIds && config.brokerAccountIds.length > 0 && !config.brokerAccountIds.includes(conn.derivAccountId)) {
           continue;
         }
         const adapter = await ensureBrokerConnected(await getAdapterForConnection(conn));

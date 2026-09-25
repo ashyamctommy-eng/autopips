@@ -155,7 +155,7 @@ async function closedTrade(investmentId: string, netPnL: string, label: string) 
     data: {
       investmentId,
       brokerId,
-      metaApiPositionId: `${FIXTURE_TAG}-${label}`,
+      derivContractId: `${FIXTURE_TAG}-${label}`,
       instrument: 'XAUUSD',
       direction: 'BUY',
       volume: '0.10',
@@ -174,7 +174,7 @@ describeDb('money-path fixes: partial credit, races under load, cross-surface eq
     await purgeFixtures();
     const broker = await prisma.brokerConnection.create({
       data: {
-        metaApiAccountId: fixtureMetaApiAccountId('fixes'),
+        derivAccountId: fixtureMetaApiAccountId('fixes'),
         brokerName: 'Fixture Broker',
         environment: 'DEMO',
         maskedAccount: '***-0004',

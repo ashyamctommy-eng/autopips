@@ -54,7 +54,7 @@ import type { BrokerConnectionDTO } from '@/types/api';
 type Environment = 'LIVE' | 'DEMO';
 
 interface AddFormState {
-  metaApiAccountId: string;
+  derivAccountId: string;
   brokerName: string;
   environment: Environment;
   token: string;
@@ -67,7 +67,7 @@ interface SyncReport {
 }
 
 function emptyForm(): AddFormState {
-  return { metaApiAccountId: '', brokerName: 'Deriv', environment: 'DEMO', token: '' };
+  return { derivAccountId: '', brokerName: 'Deriv', environment: 'DEMO', token: '' };
 }
 
 function liveStateFor(status: string): LiveDotState {
@@ -142,7 +142,7 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
   };
 
   const submitAdd = async () => {
-    if (form.metaApiAccountId.trim() === '' || form.brokerName.trim() === '' || form.token.trim() === '') {
+    if (form.derivAccountId.trim() === '' || form.brokerName.trim() === '' || form.token.trim() === '') {
       setFormError('Account id, broker name and Deriv API token are all required.');
       return;
     }
@@ -155,7 +155,7 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
       const created = await adminRequest<BrokerConnectionDTO>('/api/v1/admin/brokers', {
         method: 'POST',
         body: {
-          metaApiAccountId: form.metaApiAccountId.trim(),
+          derivAccountId: form.derivAccountId.trim(),
           brokerName: form.brokerName.trim(),
           environment: form.environment,
           token: form.token,
@@ -470,8 +470,8 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
               <Label htmlFor="broker-account-id">Deriv account id (loginid)</Label>
               <Input
                 id="broker-account-id"
-                value={form.metaApiAccountId}
-                onChange={(event) => setForm({ ...form, metaApiAccountId: event.target.value })}
+                value={form.derivAccountId}
+                onChange={(event) => setForm({ ...form, derivAccountId: event.target.value })}
                 placeholder="e.g. CR1234567 (live) or VRTC1234567 (demo)"
                 autoComplete="off"
                 spellCheck={false}

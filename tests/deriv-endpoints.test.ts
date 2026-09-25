@@ -4,8 +4,10 @@ import {
   DERIV_PUBLIC_WS_URL,
   DERIV_REST_BASE_URL,
   DERIV_RETIRED_HOSTS,
+  isDemoAccountSocketUrl,
   isRetiredDerivHost,
 } from '@/server/modules/broker/deriv.endpoints';
+import { buildSocketUrl } from '@/server/modules/broker/deriv.client';
 import { mapDerivCandles } from '@/server/modules/broker/deriv.adapter';
 
 /**
@@ -122,5 +124,47 @@ describe('candle mapping refuses to invent data', () => {
       { ...good, epoch: 2 },
     ]);
     expect(candles.map((candle) => candle.time)).toEqual([1, 2, 3]);
+  });
+});
+
+/**
+ * AUTHENTICATED SOCKET URLS
+ *
+ * The account half of Deriv's API is an OTP exchange over REST: the response
+ * carries a ready-to-use socket URL, `wss://api.derivws.com/trading/v1/options/ws/demo?otp=…`.
+ * Two things about it are easy to get wrong, and both were.
+ */
+describe('OTP socket URLs', () => {
+  it('keeps an existing query string when adding app_id', () => {
+    const built = buildSocketUrl(
+      'wss://api.derivws.com/trading/v1/options/ws/demo?otp=abc123',
+      '1089',
+    );
+    // The old string concatenation produced `…?otp=abc123?app_id=1089`, where the
+    // otp parameter swallowed the app id and the socket was rejected.
+    expect(built).toContain('otp=abc123');
+    expect(built).toContain('app_id=1089');
+    expect(built).not.toContain('?app_id');
+    expect(new URL(built).searchParams.get('otp')).toBe('abc123');
+  });
+
+  it('adds app_id to a plain URL', () => {
+    expect(buildSocketUrl('wss://example.test/ws', '42')).toBe('wss://example.test/ws?app_id=42');
+  });
+
+  it('does not duplicate an app_id the URL already carries', () => {
+    const built = buildSocketUrl('wss://example.test/ws?app_id=7', '42');
+    expect(new URL(built).searchParams.getAll('app_id')).toEqual(['7']);
+  });
+
+  it('reads the demo/real signal from the URL Deriv issued, and never guesses', () => {
+    expect(isDemoAccountSocketUrl('wss://api.derivws.com/trading/v1/options/ws/demo?otp=x')).toBe(
+      true,
+    );
+    expect(isDemoAccountSocketUrl('wss://api.derivws.com/trading/v1/options/ws/real?otp=x')).toBe(
+      false,
+    );
+    expect(isDemoAccountSocketUrl('wss://api.derivws.com/trading/v1/options/ws/public')).toBe(false);
+    expect(isDemoAccountSocketUrl('nonsense')).toBe(false);
   });
 });

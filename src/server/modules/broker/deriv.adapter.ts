@@ -1,5 +1,10 @@
 import { ApiError } from '@/lib/http';
 import { maskAccount } from '@/lib/crypto/credential-cipher';
+import {
+  DERIV_PUBLIC_WS_URL,
+  DERIV_REST_BASE_URL,
+  isDemoAccountSocketUrl,
+} from '@/server/modules/broker/deriv.endpoints';
 import { getSettingNumber } from '@/server/modules/settings/settings.service';
 
 import {
@@ -149,13 +154,19 @@ const MULTDOWN = 'MULTDOWN';
 /** Deriv caps `ticks_history` count; larger requests are split by the API. */
 const MAX_CANDLES = 5_000;
 
+/** Ceiling for the REST OTP exchange, when the environment sets nothing. */
+const DEFAULT_REST_TIMEOUT_MS = 15_000;
+
 export interface DerivBrokerAdapterConfig {
-  /** Deriv login id (e.g. "CR1234567") when the connection row knows it. */
+  /** Deriv TRADING ACCOUNT id (e.g. "DOT94640065"), not the Deriv user number. */
   loginId: string | null;
   appId: string;
-  /** Null = market data only (charts work, trading does not). */
+  /** Personal Access Token (`pat_…`). Null = market data only. */
   token: string | null;
+  /** Public market-data socket, used when there is no token to authenticate. */
   url?: string;
+  /** REST base for the account side — the OTP exchange that authenticates a socket. */
+  restUrl?: string;
   /** Contract multiplier for MULTUP/MULTDOWN. Defaults to 100. */
   multiplier?: number;
   /** Account currency; when absent it is read from the authorised account. */
@@ -204,6 +215,8 @@ export class DerivBrokerAdapter implements BrokerAdapter {
   private handlers: BrokerEventHandlers = {};
 
   private authorized: AuthorizedAccount | null = null;
+  /** Whether the OTP-issued socket is for a demo account (from its URL path). */
+  private socketIsVirtual: boolean | null = null;
   private instruments: Map<string, InstrumentInfo> | null = null;
   private instrumentsCachedAt = 0;
 
@@ -212,7 +225,6 @@ export class DerivBrokerAdapter implements BrokerAdapter {
   /** Last portfolio snapshot, for the position-delta diff. */
   private portfolio = new Map<string, BrokerPosition>();
   private balanceSubscribed = false;
-  private portfolioSubscribed = false;
   private lastBalance: number | null = null;
 
   /** Deriv's active_symbols cache TTL — instrument metadata changes rarely. */
@@ -227,30 +239,8 @@ export class DerivBrokerAdapter implements BrokerAdapter {
 
   async connect(handlers: BrokerEventHandlers): Promise<void> {
     this.handlers = handlers;
-
-    if (!this.client) {
-      this.client = new DerivClient({
-        appId: this.config.appId,
-        ...(this.config.url ? { url: this.config.url } : {}),
-        ...(this.config.connectTimeoutMs ? { connectTimeoutMs: this.config.connectTimeoutMs } : {}),
-        onClose: (reason) => {
-          // Subscriptions die with the socket; drop our bookkeeping so the next
-          // request re-establishes them instead of believing they are live.
-          this.tickSubscriptions.clear();
-          this.balanceSubscribed = false;
-          this.portfolioSubscribed = false;
-          this.portfolio.clear();
-          void this.handlers.onConnectionState?.({
-            connected: false,
-            state: `DISCONNECTED (${reason})`,
-          });
-        },
-      });
-    }
-
-    await this.client.connect();
-    if (this.config.token) await this.authorize();
-
+    await this.ensureSocket();
+    await this.authorize();
     await this.subscribeAccountStreams();
     this.emitConnectionState(true);
   }
@@ -258,7 +248,6 @@ export class DerivBrokerAdapter implements BrokerAdapter {
   async disconnect(): Promise<void> {
     this.tickSubscriptions.clear();
     this.balanceSubscribed = false;
-    this.portfolioSubscribed = false;
     this.portfolio.clear();
     this.authorized = null;
     this.lastBalance = null;
@@ -277,14 +266,138 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       throw ApiError.brokerUnavailable('Deriv adapter is not connected.');
     }
     if (!client.isConnected()) {
-      // A reconnect drops Deriv-side subscriptions: re-authorise and re-subscribe
-      // so a caller never sees a half-dead connection.
-      await client.connect();
-      if (this.config.token) await this.authorize();
+      // A reconnect drops Deriv-side subscriptions (and, with OTP, the account
+      // authentication itself): re-open, re-authenticate and re-subscribe so a
+      // caller never sees a half-dead connection.
+      this.client = null;
+      this.authorized = null;
+      await this.ensureSocket();
+      await this.authorize();
       await this.subscribeAccountStreams();
       this.emitConnectionState(true);
+      return this.client!;
     }
     return client;
+  }
+
+  /**
+   * The socket this adapter talks on, opened if needed.
+   *
+   * WITH a token the socket must be the one Deriv issues for THAT account: an
+   * OTP is obtained over REST and the returned URL is used verbatim. Deriv's
+   * older `authorize` message is not part of that surface — authentication now
+   * happens when the socket is issued, which is also why the account id is
+   * validated by Deriv itself rather than by a post-hoc comparison.
+   *
+   * WITHOUT a token there is nothing to authenticate, so the public
+   * market-data socket is used and every account/trading call refuses.
+   */
+  private async ensureSocket(): Promise<DerivClient> {
+    if (this.client?.isConnected()) return this.client;
+
+    const issued = this.config.token ? await this.requestAccountSocket() : null;
+    this.socketIsVirtual = issued?.isVirtual ?? null;
+
+    this.client = new DerivClient({
+      appId: this.config.appId,
+      url: issued?.url ?? this.config.url ?? DERIV_PUBLIC_WS_URL,
+      ...(this.config.connectTimeoutMs ? { connectTimeoutMs: this.config.connectTimeoutMs } : {}),
+      onClose: (reason) => {
+        // Subscriptions die with the socket; drop our bookkeeping so the next
+        // request re-establishes them instead of believing they are live.
+        this.tickSubscriptions.clear();
+        this.balanceSubscribed = false;
+        this.portfolio.clear();
+        void this.handlers.onConnectionState?.({
+          connected: false,
+          state: `DISCONNECTED (${reason})`,
+        });
+      },
+    });
+
+    await this.client.connect();
+    return this.client;
+  }
+
+  /**
+   * REST: exchange the Personal Access Token for a one-time, account-scoped
+   * socket URL (`wss://api.derivws.com/trading/v1/options/ws/demo?otp=…`).
+   *
+   * The OTP endpoint requires the `trade` scope, so a successful exchange IS the
+   * capability check — there is no scope list to read back, and inventing one
+   * would be a claim about the token that nothing verified.
+   */
+  private async requestAccountSocket(): Promise<{ url: string; isVirtual: boolean }> {
+    const token = this.config.token;
+    const loginId = this.config.loginId?.trim() ?? '';
+
+    if (!token) throw ApiError.brokerUnavailable('No Deriv API token is configured.');
+    if (!loginId) {
+      throw ApiError.brokerUnavailable(
+        'A Deriv connection needs the trading account id (e.g. DOT94640065 or ROT92685247) — the Deriv user number is not an account.',
+      );
+    }
+
+    const base = (this.config.restUrl ?? DERIV_REST_BASE_URL).replace(/\/+$/, '');
+    const timeout = this.config.connectTimeoutMs ?? DEFAULT_REST_TIMEOUT_MS;
+
+    let response: Response;
+    try {
+      response = await fetch(`${base}/trading/v1/options/accounts/${encodeURIComponent(loginId)}/otp`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          // Required when authenticating with a PAT; without it Deriv cannot
+          // tell which application is asking.
+          'Deriv-App-ID': this.config.appId,
+          accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(timeout),
+      });
+    } catch (err) {
+      throw ApiError.brokerUnavailable(
+        `Could not reach Deriv at ${base}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const body = (await response.json().catch(() => null)) as {
+      data?: { url?: unknown };
+      errors?: Array<{ message?: unknown; code?: unknown }>;
+    } | null;
+
+    if (!response.ok) {
+      // Deriv's OWN words: "Invalid or missing authentication credentials"
+      // (token) and "Invalid account ID format" (login id) are different
+      // problems, and a single generic sentence would hide which one it is.
+      const detail =
+        Array.isArray(body?.errors) && body.errors.length > 0
+          ? body.errors
+              .map((error) => (typeof error?.message === 'string' ? error.message : null))
+              .filter(Boolean)
+              .join('; ')
+          : null;
+      throw ApiError.brokerUnavailable(
+        `Deriv refused a session for ${maskAccount(loginId)} (HTTP ${response.status})${detail ? `: ${detail}` : '.'}`,
+      );
+    }
+
+    const raw = typeof body?.data?.url === 'string' ? body.data.url : null;
+    if (!raw) {
+      throw ApiError.brokerUnavailable('Deriv returned no WebSocket URL for that account.');
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw ApiError.brokerUnavailable('Deriv returned an unparseable WebSocket URL; refusing it.');
+    }
+    if (parsed.protocol !== 'wss:') {
+      // A credential is carried in that URL: an unencrypted socket would leak it.
+      throw ApiError.brokerUnavailable('Deriv returned a non-TLS WebSocket URL; refusing it.');
+    }
+
+    return { url: raw, isVirtual: isDemoAccountSocketUrl(raw) };
   }
 
   private emitConnectionState(connected: boolean): void {
@@ -296,58 +409,67 @@ export class DerivBrokerAdapter implements BrokerAdapter {
 
   /* ─────────────────────────────── auth ───────────────────────────────── */
 
-  private async authorize(): Promise<AuthorizedAccount> {
+  private async authorize(): Promise<AuthorizedAccount | null> {
+    if (!this.config.token) return null;
     if (this.authorized) return this.authorized;
-    const client = await this.clientOrConnect();
 
-    const response = await client.request<{ authorize?: Record<string, unknown> }>(
-      { authorize: this.config.token },
-      'authorize',
+    const client = await this.ensureSocket();
+    const loginId = this.config.loginId?.trim() ?? '';
+
+    // The first call on an OTP-issued socket is also the proof it is live: a
+    // socket that was not properly issued answers with an error.
+    const response = await client.request<{ balance?: Record<string, unknown> }>(
+      { balance: 1 },
+      'balance',
     );
-    const raw = asRecord(response.authorize);
-    if (!raw) throw ApiError.brokerUnavailable('Deriv did not return an authorised account.');
+    const raw = asRecord(response.balance);
 
-    const loginId = typeof raw.loginid === 'string' ? raw.loginid : null;
-    if (!loginId) throw ApiError.brokerUnavailable('Deriv authorised a token with no login id.');
-
-    // A connection row pins the login id: an authorised account that does not
-    // match it means the token belongs to a different account, and trading the
-    // wrong account is worse than not trading at all.
-    if (this.config.loginId && this.config.loginId !== loginId) {
+    const reported = typeof raw?.loginid === 'string' ? raw.loginid : null;
+    if (reported && reported !== loginId) {
+      // Trading the wrong account is worse than not trading: refuse rather than
+      // reconcile.
       throw ApiError.brokerUnavailable(
-        `Deriv token belongs to ${maskAccount(loginId)}, not the configured account.`,
+        `Deriv answered for ${maskAccount(reported)}, not the configured account.`,
       );
     }
 
-    const scopes = asArray(raw.scopes).filter((s): s is string => typeof s === 'string');
-
     this.authorized = {
-      loginId,
-      currency: typeof raw.currency === 'string' ? raw.currency : (this.config.currency ?? 'USD'),
-      isVirtual: raw.is_virtual === 1 || raw.is_virtual === true,
-      scopes,
-      balance: isFiniteNumber(raw.balance) ? raw.balance : null,
+      loginId: reported ?? loginId,
+      currency: typeof raw?.currency === 'string' ? raw.currency : (this.config.currency ?? 'USD'),
+      isVirtual: this.socketIsVirtual === true,
+      // Not reported by this surface: the OTP exchange already required `trade`.
+      scopes: [],
+      balance: raw && isFiniteNumber(raw.balance) ? raw.balance : null,
     };
     this.lastBalance = this.authorized.balance;
 
     console.info(
-      `[deriv.adapter] authorised ${maskAccount(loginId)} (${this.authorized.isVirtual ? 'DEMO' : 'LIVE'}, scopes: ${scopes.join(',') || 'none'})`,
+      `[deriv.adapter] authenticated ${maskAccount(this.authorized.loginId)} (${this.authorized.isVirtual ? 'DEMO' : 'LIVE'}) via an account OTP socket`,
     );
     return this.authorized;
   }
 
-  private requireTradingAuth(): AuthorizedAccount {
-    const authorized = this.authorized;
+  /**
+   * Trading capability, ensured rather than assumed.
+   *
+   * It AUTHENTICATES first: `authorize()` is the OTP exchange, so on a cold
+   * adapter the capability question cannot be answered without it. Answering "no
+   * token" for a configured connection would be wrong, and answering "allowed"
+   * without a live session would be a lie.
+   */
+  private async requireTradingAuth(): Promise<AuthorizedAccount> {
+    const authorized = await this.authorize();
     if (!authorized) {
       throw ApiError.brokerUnavailable(
         'Deriv is not authenticated — set DERIV_API_TOKEN (or the admin console setting) to trade.',
       );
     }
-    if (!authorized.scopes.includes('trade')) {
-      throw ApiError.brokerUnavailable(
-        `The Deriv token for ${maskAccount(authorized.loginId)} has no 'trade' scope.`,
-      );
-    }
+    /*
+     * No scope check here on purpose. The OTP exchange this adapter now uses is
+     * the trading endpoint and requires the `trade` scope: a socket exists only
+     * if the token already passed that gate. Re-reading a scope list that the
+     * new surface does not return would mean inventing one.
+     */
     return authorized;
   }
 
@@ -367,12 +489,18 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       });
     }
 
-    if (!this.portfolioSubscribed) {
-      this.portfolioSubscribed = true;
-      await client.subscribe({ portfolio: 1 }, 'portfolio', (message) => {
-        this.handlePortfolio(message);
-      });
-    }
+    /*
+     * PORTFOLIO IS NOT SUBSCRIBABLE on this surface.
+     *
+     * `{ portfolio: 1, subscribe: 1 }` is rejected outright —
+     * "InputValidationFailed: Properties not allowed: subscribe" — while the
+     * plain request is accepted, so positions are POLLED instead of pushed:
+     * `getOpenPositions()` feeds the same delta detector on every read, and the
+     * broker-sync worker performs those reads on BROKER_SYNC_INTERVAL.
+     *
+     * The alternative (subscribing anyway and swallowing the error) would leave
+     * positionOpened/Closed events silently dead while the logs looked clean.
+     */
   }
 
   private handlePortfolio(message: Record<string, unknown>): void {
@@ -674,6 +802,12 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       const position = this.mapContract(contract);
       if (position) positions.push(position);
     }
+
+    // Feed the delta detector the snapshot we just read: this surface does not
+    // push portfolio updates, so the poll is what keeps onPositionOpened/
+    // Updated/Closed honest for anything watching the socket.
+    this.handlePortfolio({ portfolio: { contracts } });
+
     return positions;
   }
 
@@ -779,7 +913,7 @@ export class DerivBrokerAdapter implements BrokerAdapter {
     stake: number;
     multiplier?: number;
   }): Promise<OrderCost | null> {
-    const authorized = await this.authorize();
+    const authorized = await this.requireTradingAuth();
     const client = await this.clientOrConnect();
 
     const response = await client.request<{ proposal?: Record<string, unknown> }>(
@@ -831,7 +965,7 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       };
     }
 
-    const authorized = this.requireTradingAuth();
+    const authorized = await this.requireTradingAuth();
     const client = await this.clientOrConnect();
     const multiplier = request.multiplier ?? this.config.multiplier ?? 100;
 
@@ -901,7 +1035,7 @@ export class DerivBrokerAdapter implements BrokerAdapter {
    * the amount returned, not the exit spot or the profit.
    */
   async closePosition(positionId: string, _volume?: number): Promise<ClosePositionResult> {
-    this.requireTradingAuth();
+    await this.requireTradingAuth();
     const client = await this.clientOrConnect();
 
     const contractId = Number(positionId);

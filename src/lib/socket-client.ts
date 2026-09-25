@@ -84,7 +84,7 @@ export interface PositionUpdate {
   positionId?: string;
   /** DTO field (`PositionDTO.id`). */
   id?: string;
-  metaApiPositionId?: string | null;
+  derivContractId?: string | null;
   investmentId?: string | null;
   instrument?: string;
   direction?: string;

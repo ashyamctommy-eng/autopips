@@ -136,7 +136,7 @@ async function closedTrade(investmentId: string, netPnL: string, label: string) 
     data: {
       investmentId,
       brokerId,
-      metaApiPositionId: `${FIXTURE_TAG}-${label}`,
+      derivContractId: `${FIXTURE_TAG}-${label}`,
       instrument: 'XAUUSD',
       direction: 'BUY',
       volume: '0.10',
@@ -156,7 +156,7 @@ describeDb('accounting adversarial probes: can the corrected ledger be broken?',
 
     const broker = await prisma.brokerConnection.create({
       data: {
-        metaApiAccountId: fixtureMetaApiAccountId('adversarial'),
+        derivAccountId: fixtureMetaApiAccountId('adversarial'),
         brokerName: 'Fixture Broker',
         environment: 'DEMO',
         maskedAccount: '***-0002',
@@ -219,7 +219,7 @@ describeDb('accounting adversarial probes: can the corrected ledger be broken?',
       data: {
         investmentId: active.id,
         brokerId,
-        metaApiPositionId: `${FIXTURE_TAG}-rich-open`,
+        derivContractId: `${FIXTURE_TAG}-rich-open`,
         instrument: 'XAUUSD',
         direction: 'BUY',
         volume: '1.00',

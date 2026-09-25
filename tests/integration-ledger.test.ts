@@ -274,7 +274,7 @@ describeDb('ledger integration: account snapshot from real ledger rows', () => {
 
     const broker = await prisma.brokerConnection.create({
       data: {
-        metaApiAccountId: fixtureMetaApiAccountId('ledger'),
+        derivAccountId: fixtureMetaApiAccountId('ledger'),
         brokerName: 'Fixture Broker',
         environment: 'DEMO',
         maskedAccount: '***-0000',
@@ -335,7 +335,7 @@ describeDb('ledger integration: account snapshot from real ledger rows', () => {
       data: {
         investmentId: active.id,
         brokerId: broker.id,
-        metaApiPositionId: `${FIXTURE_TAG}-pos-1`,
+        derivContractId: `${FIXTURE_TAG}-pos-1`,
         instrument: 'XAUUSD',
         direction: 'BUY',
         volume: '0.10',
@@ -354,7 +354,7 @@ describeDb('ledger integration: account snapshot from real ledger rows', () => {
       data: {
         investmentId: active.id,
         brokerId: broker.id,
-        metaApiPositionId: `${FIXTURE_TAG}-pos-2`,
+        derivContractId: `${FIXTURE_TAG}-pos-2`,
         instrument: 'XAUUSD',
         direction: 'SELL',
         volume: '0.05',
@@ -375,7 +375,7 @@ describeDb('ledger integration: account snapshot from real ledger rows', () => {
       data: {
         investmentId: active.id,
         brokerId: broker.id,
-        metaApiPositionId: `${FIXTURE_TAG}-pos-3`,
+        derivContractId: `${FIXTURE_TAG}-pos-3`,
         instrument: 'XAUUSD',
         direction: 'BUY',
         volume: '0.20',
@@ -801,7 +801,7 @@ describeDb('ledger integration: account snapshot from real ledger rows', () => {
       data: {
         investmentId: fixture.activeInvestmentId,
         brokerId: fixture.brokerId,
-        metaApiPositionId: `${FIXTURE_TAG}-pos-mutation-open`,
+        derivContractId: `${FIXTURE_TAG}-pos-mutation-open`,
         instrument: 'EURUSD',
         direction: 'SELL',
         volume: '1.00',
@@ -826,7 +826,7 @@ describeDb('ledger integration: account snapshot from real ledger rows', () => {
       data: {
         investmentId: fixture.activeInvestmentId,
         brokerId: fixture.brokerId,
-        metaApiPositionId: `${FIXTURE_TAG}-pos-mutation-closed`,
+        derivContractId: `${FIXTURE_TAG}-pos-mutation-closed`,
         instrument: 'EURUSD',
         direction: 'SELL',
         volume: '1.00',
@@ -1124,7 +1124,7 @@ describeDb('ledger integration: account snapshot from real ledger rows', () => {
       data: {
         investmentId: fixture.activeInvestmentId,
         brokerId: fixture.brokerId,
-        metaApiPositionId: `${FIXTURE_TAG}-pos-loss`,
+        derivContractId: `${FIXTURE_TAG}-pos-loss`,
         instrument: 'XAUUSD',
         direction: 'BUY',
         volume: '0.10',

@@ -178,9 +178,12 @@ model Withdrawal {
 }
 
 model BrokerConnection {
-  id               String   @id @default(uuid())
-  metaApiAccountId String   @unique
-  brokerName       String // e.g. "Exness", "ICMarkets"
+  id             String   @id @default(uuid())
+  /// Deriv TRADING ACCOUNT id (e.g. "DOT94640065" / "ROT92685247") — NOT the
+  /// Deriv user number, and not a MetaApi account id (the MetaApi bridge was
+  /// removed; the trade token is keyed by this value in Redis).
+  derivAccountId String   @unique
+  brokerName     String // e.g. "Deriv"
   environment      String // "LIVE" or "DEMO"
   maskedAccount    String // "***-9012"
   /// Broker-reported snapshot. NULL means the broker did not report the figure
@@ -203,7 +206,8 @@ model TradeRecord {
   investment        Investment       @relation(fields: [investmentId], references: [id], onDelete: Cascade)
   brokerId          String
   broker            BrokerConnection @relation(fields: [brokerId], references: [id])
-  metaApiPositionId String?
+  /// Deriv contract id for the position, when the broker reports one.
+  derivContractId   String?
   instrument        String // e.g. "XAUUSD"
   direction         String // "BUY" | "SELL"
   volume            Decimal          @db.Decimal(18, 5) // Lot size
@@ -219,7 +223,7 @@ model TradeRecord {
   openedAt          DateTime         @default(now())
   closedAt          DateTime?
 
-  @@unique([brokerId, metaApiPositionId])
+  @@unique([brokerId, derivContractId])
   @@index([investmentId])
   @@index([status])
   @@index([instrument])
@@ -230,7 +234,7 @@ model AuditLog {
   id        String   @id @default(uuid())
   userId    String?
   user      User?    @relation(fields: [userId], references: [id])
-  action    String // e.g. "KYC_APPROVED", "WITHDRAWAL_REQUESTED", "METAAPI_ORDER_FILLED"
+  action    String // e.g. "KYC_APPROVED", "WITHDRAWAL_REQUESTED", "BROKER_ORDER_FILLED"
   details   Json
   ipAddress String?
   createdAt DateTime @default(now())

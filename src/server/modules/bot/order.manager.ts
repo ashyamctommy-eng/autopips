@@ -50,8 +50,8 @@ function signalClaimKey(signalId: string): string {
 }
 
 /** Highest master-account equity seen, used as the drawdown peak. */
-function masterPeakEquityKey(metaApiAccountId: string): string {
-  return rkey('master-peak-equity', metaApiAccountId);
+function masterPeakEquityKey(derivAccountId: string): string {
+  return rkey('master-peak-equity', derivAccountId);
 }
 
 /** How long a processed signal is remembered (broker time is irrelevant here). */
@@ -244,7 +244,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
   }
 
   const conn = await prisma.brokerConnection.findUnique({
-    where: { metaApiAccountId: signal.brokerAccountId },
+    where: { derivAccountId: signal.brokerAccountId },
   });
   if (!conn) {
     await recordAudit({
@@ -327,7 +327,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
 
   // Drawdown peak: highest equity this master account has reached. Operational
   // state (Redis), never a trade value — seeded from the current ledger sum.
-  const storedPeak = await redis.get(masterPeakEquityKey(conn.metaApiAccountId));
+  const storedPeak = await redis.get(masterPeakEquityKey(conn.derivAccountId));
   const peakFromStore = storedPeak !== null && Number.isFinite(Number(storedPeak)) ? D(storedPeak) : null;
   const peakEquity = peakFromStore && peakFromStore.greaterThan(currentEquity) ? peakFromStore : currentEquity;
 
@@ -405,7 +405,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
   // state (the schema has no peak-equity column); it is seeded from the ledger.
   const masterNow = D(account.equity).greaterThan(currentEquity) ? D(account.equity) : currentEquity;
   if (!peakFromStore || peakFromStore.lessThan(masterNow)) {
-    await redis.set(masterPeakEquityKey(conn.metaApiAccountId), masterNow.toString());
+    await redis.set(masterPeakEquityKey(conn.derivAccountId), masterNow.toString());
   }
 
   if (!spec) {
@@ -573,7 +573,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
           data: {
             investmentId: allocation.investmentId,
             brokerId: conn.id,
-            metaApiPositionId: result.positionId,
+            derivContractId: result.positionId,
             instrument: request.symbol,
             direction: request.direction,
             volume: toPrismaDecimal(result.volume ?? allocation.clientVolume, 5),
@@ -669,9 +669,9 @@ export async function closePositionForInvestment(input: ClosePositionInput): Pro
 
   const trade = await prisma.tradeRecord.findUnique({
     where: {
-      brokerId_metaApiPositionId: {
+      brokerId_derivContractId: {
         brokerId: input.brokerConnectionId,
-        metaApiPositionId: input.positionId,
+        derivContractId: input.positionId,
       },
     },
   });
@@ -689,7 +689,7 @@ export async function closePositionForInvestment(input: ClosePositionInput): Pro
       details: {
         brokerConnectionId: conn.id,
         investmentId: input.investmentId,
-        metaApiPositionId: input.positionId,
+        derivContractId: input.positionId,
         phase: 'close_position',
         errorCode: result.errorCode ?? null,
         brokerMessage: result.brokerMessage ?? null,
@@ -720,7 +720,7 @@ export async function closePositionForInvestment(input: ClosePositionInput): Pro
       details: {
         brokerConnectionId: conn.id,
         investmentId: input.investmentId,
-        metaApiPositionId: input.positionId,
+        derivContractId: input.positionId,
         requestedVolume: input.volume ?? null,
         note: 'Position is still open at the broker; TradeRecord stays OPEN until the closing deal set is complete.',
       },
@@ -738,7 +738,7 @@ export async function closePositionForInvestment(input: ClosePositionInput): Pro
         details: {
           brokerConnectionId: conn.id,
           investmentId: input.investmentId,
-          metaApiPositionId: input.positionId,
+          derivContractId: input.positionId,
           phase: 'close_position_closure',
           note: 'Broker reported no closing deal yet; TradeRecord left OPEN for the sync cycle.',
         },
@@ -763,7 +763,7 @@ export async function closePositionForInvestment(input: ClosePositionInput): Pro
       {
         brokerConnectionId: conn.id,
         investmentId: input.investmentId,
-        metaApiPositionId: input.positionId,
+        derivContractId: input.positionId,
         netPnL: netPnL ?? null,
       },
       investmentRooms(input.investmentId),

@@ -13,7 +13,7 @@ import type { BrokerAdapter, Quote } from '@/server/modules/broker/broker.types'
  */
 
 const mocks = vi.hoisted(() => ({
-  connection: { id: 'conn-1', metaApiAccountId: 'acct-1' } as Record<string, unknown> | null,
+  connection: { id: 'conn-1', derivAccountId: 'acct-1' } as Record<string, unknown> | null,
   subscribe: vi.fn(),
   unsubscribe: vi.fn(),
   connected: true,
@@ -62,7 +62,7 @@ const QUOTE: Quote = { symbol: 'XAUUSD', bid: 1999.5, ask: 2000.5, time: 1_800_0
 
 beforeEach(async () => {
   mocks.connected = true;
-  mocks.connection = { id: 'conn-1', metaApiAccountId: 'acct-1' };
+  mocks.connection = { id: 'conn-1', derivAccountId: 'acct-1' };
   mocks.findFirst.mockImplementation(async () => mocks.connection);
   mocks.subscribe.mockReset().mockImplementation(async () => QUOTE);
   mocks.unsubscribe.mockReset().mockImplementation(async () => undefined);
@@ -125,7 +125,7 @@ describe('failure handling', () => {
     expect(mocks.subscribe).not.toHaveBeenCalled();
 
     // The next acquire must retry rather than inherit a broken entry.
-    mocks.connection = { id: 'conn-1', metaApiAccountId: 'acct-1' };
+    mocks.connection = { id: 'conn-1', derivAccountId: 'acct-1' };
     expect(await market.acquireMarketSymbol('XAUUSD')).toBe(true);
     expect(mocks.subscribe).toHaveBeenCalledTimes(1);
   });

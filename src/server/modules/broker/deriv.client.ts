@@ -76,6 +76,27 @@ export interface DerivSubscribeResult {
   first: Record<string, unknown>;
 }
 
+/**
+ * Append `app_id` to a socket URL that may ALREADY carry a query string.
+ *
+ * This matters now: an authenticated socket URL is issued by Deriv's OTP
+ * endpoint as `wss://…/ws/demo?otp=…`. The old string concatenation
+ * (`${url}?app_id=…`) produced `…?otp=abc?app_id=123` — a URL whose `otp`
+ * parameter swallowed the app id, so the socket was rejected or unauthenticated.
+ * Using the URL parser sets the parameter instead of appending text.
+ */
+export function buildSocketUrl(base: string, appId: string): string {
+  try {
+    const url = new URL(base);
+    if (!url.searchParams.has('app_id')) url.searchParams.set('app_id', appId);
+    return url.toString();
+  } catch {
+    // Not a parseable URL: let the socket report it, rather than throwing here
+    // with a message that hides what was configured.
+    return base;
+  }
+}
+
 export interface DerivClientOptions {
   appId: string;
   url?: string;
@@ -148,7 +169,7 @@ export class DerivClient {
   async connect(): Promise<void> {
     if (this.isConnected()) return;
 
-    const url = `${this.options.url}?app_id=${encodeURIComponent(this.options.appId)}`;
+    const url = buildSocketUrl(this.options.url, this.options.appId);
     const socket = new WebSocket(url);
     this.socket = socket;
     this.closeNotified = false;

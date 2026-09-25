@@ -761,7 +761,7 @@ export async function updatePlan(
 function toBrokerDTO(row: BrokerConnection, latencyMs: number | null = null): BrokerConnectionDTO {
   return {
     id: row.id,
-    metaApiAccountId: row.metaApiAccountId,
+    derivAccountId: row.derivAccountId,
     brokerName: row.brokerName,
     environment: row.environment,
     maskedAccount: row.maskedAccount,
@@ -1048,7 +1048,7 @@ export async function forceCloseTrade(input: {
       id: true,
       investmentId: true,
       brokerId: true,
-      metaApiPositionId: true,
+      derivContractId: true,
       instrument: true,
       status: true,
     },
@@ -1057,7 +1057,7 @@ export async function forceCloseTrade(input: {
   if (trade.status !== 'OPEN') {
     throw ApiError.conflict(`Trade ${trade.id} is ${trade.status}; only an OPEN trade can be force-closed.`);
   }
-  if (!trade.metaApiPositionId) {
+  if (!trade.derivContractId) {
     throw ApiError.conflict(
       'This trade has no broker position id, so there is nothing to close at the broker.',
     );
@@ -1068,13 +1068,13 @@ export async function forceCloseTrade(input: {
 
   const adapter = await ensureBrokerConnected(await getAdapterForConnection(connection));
 
-  const result = await adapter.closePosition(trade.metaApiPositionId);
+  const result = await adapter.closePosition(trade.derivContractId);
 
   let settled = false;
   let netPnL: number | null = null;
 
   if (result.ok && supportsPositionClosure(adapter)) {
-    const closure = await adapter.getPositionClosure(trade.metaApiPositionId);
+    const closure = await adapter.getPositionClosure(trade.derivContractId);
     if (closure) {
       const applied = await applyPositionClosure(connection.id, closure);
       settled = applied !== null;
@@ -1090,7 +1090,7 @@ export async function forceCloseTrade(input: {
       tradeId: trade.id,
       investmentId: trade.investmentId,
       instrument: trade.instrument,
-      brokerPositionId: trade.metaApiPositionId,
+      brokerPositionId: trade.derivContractId,
       ok: result.ok,
       settled,
       netPnL,

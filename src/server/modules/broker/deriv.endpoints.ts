@@ -45,3 +45,19 @@ export function isRetiredDerivHost(url: string): boolean {
     return false;
   }
 }
+
+/**
+ * Whether an OTP-issued socket is for a DEMO account.
+ *
+ * Deriv hands back `wss://api.derivws.com/trading/v1/options/ws/demo?otp=…` (or
+ * `…/real`), and the new surface does not report `is_virtual` on `balance` the
+ * way the retired `authorize` reply did. The account type therefore comes from
+ * the URL Deriv itself issued — read, never guessed.
+ */
+export function isDemoAccountSocketUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, '').endsWith('/demo');
+  } catch {
+    return false;
+  }
+}

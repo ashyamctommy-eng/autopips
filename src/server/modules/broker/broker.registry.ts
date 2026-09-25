@@ -12,12 +12,12 @@
  * The Prisma schema deliberately has no token column on `BrokerConnection`, so the
  * per-connection Deriv API token is stored AES-256-GCM encrypted (`encryptCredential`)
  * under the Redis key
- *   `autopips:broker-token:<metaApiAccountId>`
+ *   `autopips:broker-token:<derivAccountId>`
  *
  * NOTE on the cipher *purpose* string: it is still the literal `'metaapi'`, kept
  * deliberately. It is part of the key-derivation input, so renaming it would make
  * every already-encrypted token undecryptable. The DB column name
- * (`metaApiAccountId`) is likewise still the historical one; both are identifiers
+ * (`derivAccountId`) is likewise still the historical one; both are identifiers
  * with data in them, not branding, and they change only with a migration.
  * Redis is not durable storage for a credential: keys can be evicted and a Redis
  * dump is a wider blast radius than a single DB column.
@@ -65,35 +65,35 @@ import type {
 import type { ActivitySeverity, BotActivity } from '../bot/bot.types';
 
 /** Redis namespace for the encrypted per-account MetaApi token. */
-export function brokerTokenKey(metaApiAccountId: string): string {
-  return rkey('broker-token', metaApiAccountId);
+export function brokerTokenKey(derivAccountId: string): string {
+  return rkey('broker-token', derivAccountId);
 }
 
 /** Encrypt + persist the MetaApi token for one account. See the header note. */
-export async function saveBrokerToken(metaApiAccountId: string, token: string): Promise<void> {
+export async function saveBrokerToken(derivAccountId: string, token: string): Promise<void> {
   if (!token || token.trim().length === 0) {
     throw ApiError.badRequest('A MetaApi token is required to register a broker connection.');
   }
-  await redis.set(brokerTokenKey(metaApiAccountId), encryptCredential(token, 'metaapi'));
+  await redis.set(brokerTokenKey(derivAccountId), encryptCredential(token, 'metaapi'));
 }
 
 /** Read + decrypt the stored token. Returns null when nothing is stored. */
-export async function loadBrokerToken(metaApiAccountId: string): Promise<string | null> {
-  const stored = await redis.get(brokerTokenKey(metaApiAccountId));
+export async function loadBrokerToken(derivAccountId: string): Promise<string | null> {
+  const stored = await redis.get(brokerTokenKey(derivAccountId));
   if (!stored) return null;
   try {
     return decryptCredential(stored, 'metaapi');
   } catch (err) {
     console.error(
-      `[broker.registry] stored token for account ${metaApiAccountId} could not be decrypted:`,
+      `[broker.registry] stored token for account ${derivAccountId} could not be decrypted:`,
       err instanceof Error ? err.message : err,
     );
     return null;
   }
 }
 
-export async function deleteBrokerToken(metaApiAccountId: string): Promise<void> {
-  await redis.del(brokerTokenKey(metaApiAccountId));
+export async function deleteBrokerToken(derivAccountId: string): Promise<void> {
+  await redis.del(brokerTokenKey(derivAccountId));
 }
 
 // ---------------------------------------------------------------- adapter cache
@@ -113,11 +113,11 @@ function asEnvironment(value: string): BrokerEnvironment {
  * caller connects it with `ensureBrokerConnected`.
  */
 export async function getAdapterForConnection(conn: BrokerConnection): Promise<BrokerAdapter> {
-  const cached = adapterCache.get(conn.metaApiAccountId);
+  const cached = adapterCache.get(conn.derivAccountId);
   if (cached) return cached;
 
   const env = serverEnv();
-  const stored = await loadBrokerToken(conn.metaApiAccountId);
+  const stored = await loadBrokerToken(conn.derivAccountId);
   // Per-connection token first, then the platform token: admin console →
   // Settings, then DERIV_API_TOKEN. A token is OPTIONAL — without one the
   // adapter still streams public market data for the charts and simply cannot
@@ -125,21 +125,22 @@ export async function getAdapterForConnection(conn: BrokerConnection): Promise<B
   const token = stored ?? (getSetting('deriv.api_token') || env.DERIV_API_TOKEN || null);
 
   const adapter = new DerivBrokerAdapter({
-    loginId: conn.metaApiAccountId,
+    loginId: conn.derivAccountId,
     appId: env.DERIV_APP_ID,
     token: token && token.trim().length > 0 ? token : null,
     url: env.DERIV_API_URL,
+    restUrl: env.DERIV_REST_URL,
     multiplier: env.DERIV_MULTIPLIER,
     connectTimeoutMs: env.BROKER_CONNECT_TIMEOUT * 1000,
   });
-  adapterCache.set(conn.metaApiAccountId, adapter);
+  adapterCache.set(conn.derivAccountId, adapter);
   return adapter;
 }
 
 /** Drops the cached adapter (used after a connection is re-added or removed). */
-export async function evictAdapter(metaApiAccountId: string): Promise<void> {
-  const adapter = adapterCache.get(metaApiAccountId);
-  adapterCache.delete(metaApiAccountId);
+export async function evictAdapter(derivAccountId: string): Promise<void> {
+  const adapter = adapterCache.get(derivAccountId);
+  adapterCache.delete(derivAccountId);
   if (adapter) {
     try {
       await adapter.disconnect();
@@ -287,7 +288,7 @@ export function brokerEventHandlers(accountId: string): BrokerEventHandlers {
 // --------------------------------------------------------------- admin mutation
 
 const addBrokerConnectionSchema = z.object({
-  metaApiAccountId: z.string().min(1).max(128),
+  derivAccountId: z.string().min(1).max(128),
   brokerName: z.string().min(1).max(64),
   environment: z.enum(['LIVE', 'DEMO']),
   token: z.string().min(1),
@@ -307,46 +308,47 @@ export type AddBrokerConnectionInput = z.input<typeof addBrokerConnectionSchema>
 export async function addBrokerConnection(input: AddBrokerConnectionInput): Promise<BrokerConnection> {
   const parsed = addBrokerConnectionSchema.parse(input);
 
-  await evictAdapter(parsed.metaApiAccountId);
-  await saveBrokerToken(parsed.metaApiAccountId, parsed.token);
+  await evictAdapter(parsed.derivAccountId);
+  await saveBrokerToken(parsed.derivAccountId, parsed.token);
 
   const env = serverEnv();
   const adapter = new DerivBrokerAdapter({
-    loginId: parsed.metaApiAccountId,
+    loginId: parsed.derivAccountId,
     appId: env.DERIV_APP_ID,
     token: parsed.token,
     url: env.DERIV_API_URL,
+    restUrl: env.DERIV_REST_URL,
     multiplier: env.DERIV_MULTIPLIER,
     connectTimeoutMs: env.BROKER_CONNECT_TIMEOUT * 1000,
   });
 
   let state: BrokerAccountState;
   try {
-    await adapter.connect(brokerEventHandlers(parsed.metaApiAccountId));
+    await adapter.connect(brokerEventHandlers(parsed.derivAccountId));
     state = await adapter.getAccountState();
   } catch (err) {
-    await deleteBrokerToken(parsed.metaApiAccountId);
+    await deleteBrokerToken(parsed.derivAccountId);
     await recordAudit({
       action: AUDIT.BROKER_ERROR,
       userId: parsed.adminUserId,
       ipAddress: parsed.ip ?? null,
       details: {
-        metaApiAccountId: parsed.metaApiAccountId,
+        derivAccountId: parsed.derivAccountId,
         phase: 'add_probe',
         error: err instanceof Error ? err.message : String(err),
       },
     });
     throw ApiError.brokerUnavailable(
-      `Could not read account information for Deriv account ${parsed.metaApiAccountId}; nothing was saved.`,
+      `Could not read account information for Deriv account ${parsed.derivAccountId}; nothing was saved.`,
     );
   }
 
-  adapterCache.set(parsed.metaApiAccountId, adapter);
+  adapterCache.set(parsed.derivAccountId, adapter);
 
   const row = await prisma.brokerConnection.upsert({
-    where: { metaApiAccountId: parsed.metaApiAccountId },
+    where: { derivAccountId: parsed.derivAccountId },
     create: {
-      metaApiAccountId: parsed.metaApiAccountId,
+      derivAccountId: parsed.derivAccountId,
       brokerName: parsed.brokerName,
       environment: parsed.environment,
       maskedAccount: state.maskedAccount,
@@ -372,7 +374,7 @@ export async function addBrokerConnection(input: AddBrokerConnectionInput): Prom
     ipAddress: parsed.ip ?? null,
     details: {
       brokerConnectionId: row.id,
-      metaApiAccountId: row.metaApiAccountId,
+      derivAccountId: row.derivAccountId,
       brokerName: row.brokerName,
       environment: row.environment,
       maskedAccount: row.maskedAccount,
@@ -423,14 +425,14 @@ export async function updateBrokerSnapshot(id: string, state: BrokerAccountState
 export async function removeBrokerConnection(
   id: string,
   meta?: { ip?: string | null; adminUserId?: string },
-): Promise<{ removed: boolean; id: string; metaApiAccountId: string }> {
+): Promise<{ removed: boolean; id: string; derivAccountId: string }> {
   const conn = await prisma.brokerConnection.findUnique({ where: { id } });
   if (!conn) throw ApiError.notFound('Broker connection not found.');
 
   const tradeCount = await prisma.tradeRecord.count({ where: { brokerId: id } });
 
-  await deleteBrokerToken(conn.metaApiAccountId);
-  await evictAdapter(conn.metaApiAccountId);
+  await deleteBrokerToken(conn.derivAccountId);
+  await evictAdapter(conn.derivAccountId);
 
   if (tradeCount === 0) {
     await prisma.brokerConnection.delete({ where: { id } });
@@ -447,14 +449,14 @@ export async function removeBrokerConnection(
     ipAddress: meta?.ip ?? null,
     details: {
       brokerConnectionId: conn.id,
-      metaApiAccountId: conn.metaApiAccountId,
+      derivAccountId: conn.derivAccountId,
       maskedAccount: conn.maskedAccount,
       rowDeleted: tradeCount === 0,
       retainedTradeRecords: tradeCount,
     },
   });
 
-  return { removed: tradeCount === 0, id: conn.id, metaApiAccountId: conn.metaApiAccountId };
+  return { removed: tradeCount === 0, id: conn.id, derivAccountId: conn.derivAccountId };
 }
 
 /** Every stored connection, for the admin screens and the sync cycle. */

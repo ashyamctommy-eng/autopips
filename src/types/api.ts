@@ -95,7 +95,7 @@ export interface InvestmentDTO {
 
 export interface PositionDTO {
   id: string;
-  metaApiPositionId: string | null;
+  derivContractId: string | null;
   investmentId: string;
   instrument: string;
   direction: 'BUY' | 'SELL' | string;
@@ -188,7 +188,7 @@ export interface ActivityEventDTO {
 
 export interface BrokerConnectionDTO {
   id: string;
-  metaApiAccountId: string;
+  derivAccountId: string;
   brokerName: string;
   environment: 'LIVE' | 'DEMO' | string;
   maskedAccount: string;

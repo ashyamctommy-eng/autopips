@@ -26,7 +26,7 @@ export const dynamic = 'force-dynamic';
 
 const createBrokerSchema = z
   .object({
-    metaApiAccountId: z.string().trim().min(1, 'A MetaApi account id is required.').max(128),
+    derivAccountId: z.string().trim().min(1, 'A MetaApi account id is required.').max(128),
     brokerName: z.string().trim().min(1, 'A broker name is required.').max(64),
     environment: z.enum(['LIVE', 'DEMO']),
     token: z
@@ -55,7 +55,7 @@ export const POST = handler(async (request: Request) => {
   // The connection is only persisted after a successful live account probe
   // (see addBrokerConnection) — a placeholder balance/mask never reaches the UI.
   const created = await addBrokerConnection({
-    metaApiAccountId: body.metaApiAccountId,
+    derivAccountId: body.derivAccountId,
     brokerName: body.brokerName,
     environment: body.environment,
     token: body.token,

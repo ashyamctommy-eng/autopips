@@ -55,13 +55,13 @@ import {
 import type { BrokerAdapter, BrokerPosition } from './broker.types';
 
 /** Redis watermark: the newest deal timestamp this connection has processed. */
-function dealWatermarkKey(metaApiAccountId: string): string {
-  return rkey('broker-deal-watermark', metaApiAccountId);
+function dealWatermarkKey(derivAccountId: string): string {
+  return rkey('broker-deal-watermark', derivAccountId);
 }
 
 /** Redis counter of consecutive failed sync cycles (drives the ERROR state). */
-function syncFailuresKey(metaApiAccountId: string): string {
-  return rkey('broker-sync-failures', metaApiAccountId);
+function syncFailuresKey(derivAccountId: string): string {
+  return rkey('broker-sync-failures', derivAccountId);
 }
 
 /**
@@ -104,8 +104,8 @@ export function supportsPositionClosure(
 
 // ----------------------------------------------------------------- watermarks
 
-async function readWatermark(metaApiAccountId: string): Promise<Date> {
-  const stored = await redis.get(dealWatermarkKey(metaApiAccountId));
+async function readWatermark(derivAccountId: string): Promise<Date> {
+  const stored = await redis.get(dealWatermarkKey(derivAccountId));
   if (stored) {
     const parsed = new Date(stored);
     if (!Number.isNaN(parsed.getTime())) return parsed;
@@ -113,8 +113,8 @@ async function readWatermark(metaApiAccountId: string): Promise<Date> {
   return new Date(Date.now() - DEFAULT_DEAL_LOOKBACK_MS);
 }
 
-async function writeWatermark(metaApiAccountId: string, at: Date): Promise<void> {
-  await redis.set(dealWatermarkKey(metaApiAccountId), at.toISOString());
+async function writeWatermark(derivAccountId: string, at: Date): Promise<void> {
+  await redis.set(dealWatermarkKey(derivAccountId), at.toISOString());
 }
 
 // ----------------------------------------------------------------- roll-ups
@@ -222,7 +222,7 @@ async function upsertOpenTradeRecord(
 
   const existing = await prisma.tradeRecord.findUnique({
     where: {
-      brokerId_metaApiPositionId: { brokerId: connectionId, metaApiPositionId: position.positionId },
+      brokerId_derivContractId: { brokerId: connectionId, derivContractId: position.positionId },
     },
   });
 
@@ -231,7 +231,7 @@ async function upsertOpenTradeRecord(
       data: {
         investmentId,
         brokerId: connectionId,
-        metaApiPositionId: position.positionId,
+        derivContractId: position.positionId,
         instrument: position.instrument,
         direction: position.direction,
         volume: toPrismaDecimal(position.volume, 5),
@@ -297,7 +297,7 @@ export async function applyPositionClosure(
 
   const trade = await prisma.tradeRecord.findUnique({
     where: {
-      brokerId_metaApiPositionId: { brokerId: connectionId, metaApiPositionId: closure.positionId },
+      brokerId_derivContractId: { brokerId: connectionId, derivContractId: closure.positionId },
     },
   });
   if (!trade || trade.status !== 'OPEN') return null;
@@ -340,7 +340,7 @@ export async function applyPositionClosure(
       brokerConnectionId: connectionId,
       investmentId: trade.investmentId,
       tradeId: trade.id,
-      metaApiPositionId: closure.positionId,
+      derivContractId: closure.positionId,
       dealIds: closure.dealIds,
       exitPrice: closure.exitPrice,
       closingVolume: closure.closingVolume,
@@ -429,7 +429,7 @@ export async function syncBrokerConnection(conn: BrokerConnection): Promise<Sync
   }
 
   // 3. deals since the watermark --------------------------------------------
-  const watermark = await readWatermark(conn.metaApiAccountId);
+  const watermark = await readWatermark(conn.derivAccountId);
   const deals = await adapter.getDealsSince(watermark);
   summary.deals = deals.length;
 
@@ -439,7 +439,7 @@ export async function syncBrokerConnection(conn: BrokerConnection): Promise<Sync
   // row whose position is no longer open at the broker (catches a missed window).
   const openRows = await prisma.tradeRecord.findMany({
     where: { brokerId: conn.id, status: 'OPEN' },
-    select: { id: true, investmentId: true, metaApiPositionId: true },
+    select: { id: true, investmentId: true, derivContractId: true },
   });
   const candidates = new Set<string>();
   for (const deal of deals) {
@@ -447,8 +447,8 @@ export async function syncBrokerConnection(conn: BrokerConnection): Promise<Sync
     candidates.add(deal.positionId);
   }
   for (const row of openRows) {
-    if (row.metaApiPositionId && !openPositionIds.has(row.metaApiPositionId)) {
-      candidates.add(row.metaApiPositionId);
+    if (row.derivContractId && !openPositionIds.has(row.derivContractId)) {
+      candidates.add(row.derivContractId);
     }
   }
 
@@ -459,7 +459,7 @@ export async function syncBrokerConnection(conn: BrokerConnection): Promise<Sync
       console.warn('[broker.sync] adapter cannot report position closures; skipping deal closures.');
     } else {
       for (const positionId of candidates) {
-        const investmentId = openRows.find((row) => row.metaApiPositionId === positionId)?.investmentId;
+        const investmentId = openRows.find((row) => row.derivContractId === positionId)?.investmentId;
         if (!investmentId) {
           summary.unattributed += 1;
           continue;
@@ -500,7 +500,7 @@ export async function syncBrokerConnection(conn: BrokerConnection): Promise<Sync
       (acc, deal) => (deal.executedAt.getTime() > acc.getTime() ? deal.executedAt : acc),
       watermark,
     );
-    await writeWatermark(conn.metaApiAccountId, newest);
+    await writeWatermark(conn.derivAccountId, newest);
   }
 
   return summary;
@@ -526,18 +526,18 @@ export async function runSyncCycle(): Promise<{
   for (const conn of connections) {
     try {
       const summary = await syncBrokerConnection(conn);
-      await redis.del(syncFailuresKey(conn.metaApiAccountId));
+      await redis.del(syncFailuresKey(conn.derivAccountId));
       results.push({ connectionId: conn.id, summary });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const failures = await redis.incr(syncFailuresKey(conn.metaApiAccountId));
+      const failures = await redis.incr(syncFailuresKey(conn.derivAccountId));
       results.push({ connectionId: conn.id, error: message });
 
       await recordAuditSafe({
         action: AUDIT.BROKER_ERROR,
         details: {
           brokerConnectionId: conn.id,
-          metaApiAccountId: conn.metaApiAccountId,
+          derivAccountId: conn.derivAccountId,
           maskedAccount: conn.maskedAccount,
           consecutiveFailures: failures,
           error: message,
@@ -562,7 +562,7 @@ export async function runSyncCycle(): Promise<{
           action: AUDIT.BROKER_ERROR,
           details: {
             brokerConnectionId: conn.id,
-            metaApiAccountId: conn.metaApiAccountId,
+            derivAccountId: conn.derivAccountId,
             state: 'ERROR',
             consecutiveFailures: failures,
             note: 'Connection flagged ERROR after repeated failures; excluded from further sync cycles until an admin re-adds it.',

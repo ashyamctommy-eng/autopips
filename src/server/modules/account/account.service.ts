@@ -49,7 +49,7 @@ type InvestmentWithPlan = Investment & { plan: TradingPlan };
 export interface TradeDTO {
   id: string;
   investmentId: string;
-  metaApiPositionId: string | null;
+  derivContractId: string | null;
   instrument: string;
   direction: string;
   volume: number;
@@ -299,7 +299,7 @@ function toPositionDTO(trade: TradeRecord): PositionDTO {
 
   return {
     id: trade.id,
-    metaApiPositionId: trade.metaApiPositionId,
+    derivContractId: trade.derivContractId,
     investmentId: trade.investmentId,
     instrument: trade.instrument,
     direction: trade.direction,
@@ -342,7 +342,7 @@ function toTradeDTO(trade: TradeRecord): TradeDTO {
   return {
     id: trade.id,
     investmentId: trade.investmentId,
-    metaApiPositionId: trade.metaApiPositionId,
+    derivContractId: trade.derivContractId,
     instrument: trade.instrument,
     direction: trade.direction,
     volume: num(trade.volume),

@@ -267,7 +267,7 @@ describeDb('money path e2e: deposit → invest → trade → withdraw → paid (
 
     const broker = await prisma.brokerConnection.create({
       data: {
-        metaApiAccountId: fixtureMetaApiAccountId('money-path'),
+        derivAccountId: fixtureMetaApiAccountId('money-path'),
         brokerName: 'Fixture Broker',
         environment: 'DEMO',
         maskedAccount: '***-0001',
@@ -401,7 +401,7 @@ describeDb('money path e2e: deposit → invest → trade → withdraw → paid (
       data: {
         investmentId,
         brokerId,
-        metaApiPositionId: `${FIXTURE_TAG}-money-path-pos-1`,
+        derivContractId: `${FIXTURE_TAG}-money-path-pos-1`,
         instrument: 'XAUUSD',
         direction: 'BUY',
         volume: '0.10',
