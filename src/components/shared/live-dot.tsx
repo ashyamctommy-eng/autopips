@@ -2,11 +2,12 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
-export type LiveDotState = 'connected' | 'disconnected' | 'paused' | 'connecting' | 'error';
+export type LiveDotState = 'connected' | 'disconnected' | 'paused' | 'connecting' | 'reconnecting' | 'error';
 
 const STATE_CLASS: Record<LiveDotState, string> = {
   connected: 'bg-profit',
   connecting: 'bg-warn',
+  reconnecting: 'bg-warn',
   paused: 'bg-warn',
   disconnected: 'bg-muted',
   error: 'bg-loss',
@@ -17,6 +18,10 @@ const STATE_LABEL: Record<LiveDotState, string> = {
   disconnected: 'Disconnected',
   paused: 'Paused',
   connecting: 'Connecting',
+  // "Paused" was used for "the client is retrying the connection", which reads
+  // as "the bot has been paused" — an operator stopped trading on that reading.
+  // The dot now says what it is doing.
+  reconnecting: 'Reconnecting',
   error: 'Error',
 };
 

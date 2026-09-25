@@ -185,7 +185,10 @@ function dotState(status: TradingSocketStatus): LiveDotState {
     case 'connecting':
       return 'connecting';
     case 'reconnecting':
-      return 'paused';
+      // NOT 'paused': that word belongs to the bot's own control state, and
+      // showing it for a socket retry made a connection problem look like a
+      // deliberate trading stop.
+      return 'reconnecting';
     case 'error':
       return 'error';
     default:
