@@ -43,6 +43,7 @@ export type PlatformSettingKey =
   | 'deriv.api_token'
   // ── market data (Admin → Settings) ──
   | 'twelve_data.api_key'
+  | 'market.instruments'
   // ── public disclosure (Admin → Settings) ──
   | 'disclosure.internal_execution_notice'
   // ── payout controls (Admin → Settings) ──
@@ -146,10 +147,20 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     envName: 'TWELVE_DATA_API_KEY',
     label: 'Twelve Data API key',
     description:
-      'Market-data key used when MARKET_DATA_PROVIDER=twelve to fetch historical candles. Twelve Data has no Deriv synthetic indices (R_10/R_100), so only the mapped instruments can be served. Leaving this empty makes the Twelve Data path refuse and the default feed continue.',
+      'Market-data key used when MARKET_DATA_PROVIDER=twelve to fetch historical candles, live quotes and asset catalogs. Twelve Data has no Deriv synthetic indices (R_10/R_100), so only mapped instruments can be served. Leaving this empty makes the Twelve Data path refuse and the default feed continue.',
     kind: 'secret',
     defaultValue: '',
     inputHint: 'twelvedata.com → Dashboard → API keys',
+  },
+  {
+    key: 'market.instruments',
+    envName: 'MARKET_INSTRUMENTS',
+    label: 'Offered instruments (platform catalog)',
+    description:
+      'Comma-separated platform symbols the deployment offers and charts. Only list instruments that have a price source (a Twelve Data mapping such as frxXAUUSD→XAU/USD, or a synthetic the oracle can price). Case-sensitive.',
+    kind: 'symbols',
+    defaultValue: 'frxEURUSD,frxGBPUSD,frxUSDJPY,frxXAUUSD,cryBTCUSD,cryETHUSD',
+    inputHint: 'e.g. frxEURUSD,frxXAUUSD,cryBTCUSD',
   },
 
   // ── payout controls ────────────────────────────────────────────────────────

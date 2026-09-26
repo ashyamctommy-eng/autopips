@@ -129,10 +129,14 @@ const schema = z.object({
    * positions are refused outright while the mode is `broker`.
    */
   EXECUTION_MODE: z.preprocess(
-    // Same rule as the feed selector: empty means "use the default" (broker),
-    // a typo fails loudly rather than silently booking trades internally.
+    // Same rule as the feed selector: empty means "use the default", a typo fails
+    // loudly rather than silently booking trades on the wrong venue.
+    //
+    // DEFAULT IS `internal`: the platform executes on its own book (Deriv order
+    // placement and external balance syncing were retired). `broker` remains
+    // available so the previous path can be restored by setting one variable.
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-    z.enum(['internal', 'broker']).default('broker'),
+    z.enum(['internal', 'broker']).default('internal'),
   ),
 
   // Risk

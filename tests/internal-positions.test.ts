@@ -6,6 +6,7 @@ import {
   positionExitTrigger,
 } from '@/server/modules/positions/position.math';
 import { buildEquityFromAggregates } from '@/server/accounting/ledger';
+import { markPriceFromQuote } from '@/server/modules/market/quote-fanout';
 
 /**
  * Internal position economics (`EXECUTION_MODE=internal`).
@@ -170,5 +171,26 @@ describe('positions in the single equity formula', () => {
       deductedFees: 0,
     });
     expect(equity.toFixed(2)).toBe('900.00');
+  });
+});
+
+describe('markPriceFromQuote (tick fan-out)', () => {
+  it('uses the single price for a synthetic quote', () => {
+    expect(markPriceFromQuote({ bid: null, ask: null, quote: 1234.5 })).toBe(1234.5);
+  });
+
+  it('uses the MID for a bid/ask quote, so an entry is not marked down by the spread', () => {
+    expect(markPriceFromQuote({ bid: 1.1, ask: 1.1002, quote: null })).toBeCloseTo(1.1001, 6);
+  });
+
+  it('falls back to whichever side is present', () => {
+    expect(markPriceFromQuote({ bid: 2, ask: null, quote: null })).toBe(2);
+    expect(markPriceFromQuote({ bid: null, ask: 3, quote: null })).toBe(3);
+  });
+
+  it('returns null when there is no usable price (never a fabricated 0)', () => {
+    expect(markPriceFromQuote({ bid: null, ask: null, quote: null })).toBeNull();
+    expect(markPriceFromQuote({ bid: 0, ask: 0, quote: 0 })).toBeNull();
+    expect(markPriceFromQuote({ bid: Number.NaN, ask: null, quote: null })).toBeNull();
   });
 });
