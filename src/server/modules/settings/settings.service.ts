@@ -43,6 +43,8 @@ export type PlatformSettingKey =
   | 'deriv.api_token'
   // ── market data (Admin → Settings) ──
   | 'twelve_data.api_key'
+  // ── public disclosure (Admin → Settings) ──
+  | 'disclosure.internal_execution_notice'
   // ── payout controls (Admin → Settings) ──
   | 'payout.daily_cap_usd'
   | 'payout.address_allowlist'
@@ -56,7 +58,21 @@ export type PlatformSettingKey =
   | 'risk.allowed_symbols'
   | 'risk.min_payout_percentage';
 
-type SettingKind = 'secret' | 'url' | 'list' | 'symbols' | 'addresses' | 'number' | 'boolean' | 'text';
+type SettingKind =
+  | 'secret'
+  | 'url'
+  | 'list'
+  | 'symbols'
+  | 'addresses'
+  | 'number'
+  | 'boolean'
+  | 'text'
+  /**
+   * Multi-paragraph prose (a public disclosure). Unlike `text` (500 chars,
+   * single-line) this preserves line breaks and allows a real document, and the
+   * console renders it as a textarea.
+   */
+  | 'longtext';
 
 interface SettingDefinition {
   key: PlatformSettingKey;
@@ -246,6 +262,24 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     defaultValue: '',
     inputHint: 'e.g. frxXAUUSD,R_100',
   },
+  {
+    key: 'disclosure.internal_execution_notice',
+    envName: 'DISCLOSURE_INTERNAL_EXECUTION_NOTICE',
+    label: 'Internal execution disclosure',
+    description:
+      'Shown on the public Risk page in place of the broker wording WHEN EXECUTION_MODE=internal, so the page always describes how this deployment actually executes. Paragraphs are separated by a blank line. Have changes reviewed by counsel.',
+    kind: 'longtext',
+    defaultValue: `Autopipsz is not a broker, a bank or a venue. When you open a position, Autopipsz is your counterparty: the position is a contract between you and Autopipsz, priced from independent third-party market data. No order is placed on any external exchange or broker.
+
+Why this matters. Because Autopipsz takes the other side of your position, profit on a winning position is paid by Autopipsz and a loss is retained by Autopipsz. This differs from a brokerage, where your counterparty is the market. Autopipsz's ability to pay what it owes you is therefore a risk you carry, alongside market risk.
+
+Autopipsz is not a licensed venue. Positions are not traded on any regulated exchange, and no exchange, clearing house or compensation scheme stands behind them. There is no investor-compensation or deposit-protection cover, and no guarantee that Autopipsz can meet its obligations.
+
+Synthetic indices (R_10, R_100 and volatility indices) are priced from a public market feed and are not traded on any venue.
+
+Pricing is sourced from independent third-party market-data providers. Historical bars and live quotes are used as published by those providers and are not set by Autopipsz; a feed outage can delay or prevent a position from being priced, opened or closed.`,
+    inputHint: 'Paragraphs separated by a blank line.',
+  },
 ] as const;
 
 const DEFINITIONS_BY_KEY = new Map<string, SettingDefinition>(
@@ -289,6 +323,18 @@ function validateValue(def: SettingDefinition, value: string): string {
       throw ApiError.badRequest(`${def.label} must be true or false.`);
     }
     return normalised;
+  }
+
+  if (def.kind === 'longtext') {
+    // Public prose: line breaks are meaningful (a blank line separates
+    // paragraphs), so the value is NOT collapsed — only trimmed.
+    if (trimmed.length < 40) {
+      throw ApiError.badRequest(`${def.label} is too short to be a disclosure.`);
+    }
+    if (trimmed.length > 8000) {
+      throw ApiError.badRequest(`${def.label} is limited to 8000 characters.`);
+    }
+    return trimmed;
   }
 
   if (def.kind === 'text') {
@@ -514,6 +560,12 @@ export interface AdminSettingView {
   description: string;
   kind: SettingKind;
   secret: boolean;
+  /**
+   * The definition's built-in default. Used to seed a `longtext` editor so the
+   * admin edits the real text instead of an empty box. Never secret material
+   * (a secret definition's default is always empty).
+   */
+  defaultValue: string;
   inputHint: string;
   /** Where the effective value comes from right now. */
   source: 'console' | 'environment' | 'unset';
@@ -557,6 +609,7 @@ export async function listAdminSettings(): Promise<AdminSettingView[]> {
       description: def.description,
       kind: def.kind,
       secret: def.kind === 'secret',
+      defaultValue: def.defaultValue,
       inputHint: def.inputHint,
       source: fromConsole ? 'console' : envValue ? 'environment' : 'unset',
       display,

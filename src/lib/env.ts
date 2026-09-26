@@ -102,7 +102,12 @@ const schema = z.object({
    * so flipping this is an operator decision tied to which instruments are listed.
    * Live ticks are unaffected by this value.
    */
-  MARKET_DATA_PROVIDER: z.enum(['deriv', 'twelve']).default('deriv'),
+  MARKET_DATA_PROVIDER: z.preprocess(
+    // An EMPTY variable (common: a platform injects it unset) must mean "use the
+    // default", not "invalid". A non-empty TYPO still fails loudly.
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.enum(['deriv', 'twelve']).default('deriv'),
+  ),
   /**
    * Twelve Data key. OPTIONAL: without it the Twelve Data path refuses (loudly)
    * and the default Deriv feed is used, so a deployment is never broken by a
@@ -123,7 +128,12 @@ const schema = z.object({
    * deliberate act, and turning it off restores the previous path. Internal
    * positions are refused outright while the mode is `broker`.
    */
-  EXECUTION_MODE: z.enum(['internal', 'broker']).default('broker'),
+  EXECUTION_MODE: z.preprocess(
+    // Same rule as the feed selector: empty means "use the default" (broker),
+    // a typo fails loudly rather than silently booking trades internally.
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.enum(['internal', 'broker']).default('broker'),
+  ),
 
   // Risk
   RISK_MASTER_EQUITY_FLOOR_USD: z.coerce.number().nonnegative().default(0),
