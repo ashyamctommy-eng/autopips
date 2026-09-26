@@ -14,12 +14,14 @@ import type {
 } from '@/types/api';
 import {
   buildEquityFromAggregates,
+  CLOSED_POSITION_STATUSES,
   CREDITED_PAYMENT_STATUSES,
   DEBITED_PAYMENT_STATUSES,
   DEPLOYED_INVESTMENT_STATUSES,
   getOpenExposure,
   getPlatformLedger,
   getRealizedPnlToday,
+  OPEN_POSITION_STATUSES,
 } from '@/server/accounting/ledger';
 import { getPlatformTradingStats, getStrategyStats } from '@/server/accounting/strategy-stats';
 import { AUDIT, listAudit, recordAudit } from '@/server/modules/audit/audit.service';
@@ -225,8 +227,15 @@ async function aggregateUserLedgers(
   const result = new Map<string, { capitalUsd: number; equity: number }>();
   if (userIds.length === 0) return result;
 
-  const [portfolioTotals, deployedTotals, investmentRows, withdrawalTotals, depositTotals] =
-    await Promise.all([
+  const [
+    portfolioTotals,
+    deployedTotals,
+    investmentRows,
+    withdrawalTotals,
+    depositTotals,
+    openPositionTotals,
+    closedPositionTotals,
+  ] = await Promise.all([
       // unrealized P/L + fees live on every non-cancelled investment
       prisma.investment.groupBy({
         by: ['userId'],
@@ -253,6 +262,18 @@ async function aggregateUserLedgers(
         where: { userId: { in: userIds }, status: { in: [...CREDITED_PAYMENT_STATUSES] } },
         _sum: { amountUsd: true },
       }),
+      // Internal positions, same terms as the ledger: OPEN stake is deployed and
+      // OPEN pnl is unrealized, CLOSED pnl is realized.
+      prisma.position.groupBy({
+        by: ['userId'],
+        where: { userId: { in: userIds }, status: { in: [...OPEN_POSITION_STATUSES] } },
+        _sum: { stake: true, pnl: true },
+      }),
+      prisma.position.groupBy({
+        by: ['userId'],
+        where: { userId: { in: userIds }, status: { in: [...CLOSED_POSITION_STATUSES] } },
+        _sum: { pnl: true },
+      }),
     ]);
 
   const ownerByInvestment = new Map(investmentRows.map((row) => [row.id, row.userId]));
@@ -275,6 +296,8 @@ async function aggregateUserLedgers(
 
   const portfolioByUser = new Map(portfolioTotals.map((row) => [row.userId, row]));
   const deployedByUser = new Map(deployedTotals.map((row) => [row.userId, row]));
+  const openPositionsByUser = new Map(openPositionTotals.map((row) => [row.userId, row]));
+  const closedPositionsByUser = new Map(closedPositionTotals.map((row) => [row.userId, row]));
   const withdrawalsByUser = new Map(
     withdrawalTotals.map((row) => [row.userId, D(row._sum.amountUsd)]),
   );
@@ -284,15 +307,20 @@ async function aggregateUserLedgers(
 
   for (const userId of userIds) {
     const portfolio = portfolioByUser.get(userId);
-    const deployed = D(deployedByUser.get(userId)?._sum.capitalUsd);
+    const openPositions = openPositionsByUser.get(userId);
+    const closedPositions = closedPositionsByUser.get(userId);
+    // Deployed = investments + OPEN position stakes (the ledger's partition).
+    const deployed = D(deployedByUser.get(userId)?._sum.capitalUsd).plus(
+      D(openPositions?._sum.stake),
+    );
 
     // Same single formula implementation as the client-facing ledger.
     const { equity } = buildEquityFromAggregates({
       creditedDeposits: depositsByUser.get(userId) ?? 0,
       paidWithdrawals: withdrawalsByUser.get(userId) ?? 0,
       deployedCapital: deployed,
-      realizedPnL: realizedByUser.get(userId) ?? 0,
-      unrealizedPnL: D(portfolio?._sum.unrealizedPnL),
+      realizedPnL: D(realizedByUser.get(userId) ?? 0).plus(D(closedPositions?._sum.pnl)),
+      unrealizedPnL: D(portfolio?._sum.unrealizedPnL).plus(D(openPositions?._sum.pnl)),
       deductedFees: D(portfolio?._sum.feesDeducted),
     });
 

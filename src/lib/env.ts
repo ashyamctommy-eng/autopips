@@ -111,6 +111,20 @@ const schema = z.object({
   TWELVE_DATA_API_KEY: z.string().min(1).optional().or(z.literal('')),
   TWELVE_DATA_API_BASE: z.string().url().default('https://api.twelvedata.com'),
 
+  // Execution venue
+  /**
+   * Where a client trade is executed.
+   *
+   * `broker` (DEFAULT, the previous behaviour) places orders through the broker
+   * adapter. `internal` books the trade as a `Position` on the platform's own
+   * book and never contacts a broker for execution or balances.
+   *
+   * Defaults to `broker` so this is REVERSIBLE: turning internal execution on is a
+   * deliberate act, and turning it off restores the previous path. Internal
+   * positions are refused outright while the mode is `broker`.
+   */
+  EXECUTION_MODE: z.enum(['internal', 'broker']).default('broker'),
+
   // Risk
   RISK_MASTER_EQUITY_FLOOR_USD: z.coerce.number().nonnegative().default(0),
   RISK_MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(50),
