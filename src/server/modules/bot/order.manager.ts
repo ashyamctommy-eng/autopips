@@ -23,8 +23,9 @@ import { ApiError } from '@/lib/http';
 import { D, toPrismaDecimal, usd } from '@/lib/money';
 import { prisma } from '@/lib/prisma';
 import { redis, rkey } from '@/lib/redis';
+import { claimOnceDurable, releaseClaimDurable } from '@/lib/idempotency';
 import { publishActivity, publishTradeEvent } from '@/server/ws/event-bus';
-import { AUDIT, recordAudit, recordAuditSafe } from '../audit/audit.service';
+import { AUDIT, AUDIT_PAYOUT, recordAudit, recordAuditSafe } from '../audit/audit.service';
 import {
   ensureBrokerConnected,
   getAdapterForConnection,
@@ -54,7 +55,10 @@ import type {
 
 /** Signals already handled by this platform (idempotency guard). */
 function signalClaimKey(signalId: string): string {
-  return rkey('signal-claimed', signalId);
+  // A plain, stable key. Deliberately NOT namespaced with the Redis key helper:
+  // the durable claim row stores it verbatim, and the deposit/payout claims use
+  // the same convention (`ipn:<...>`, `payout-ipn:<...>`).
+  return `signal-claimed:${signalId}`;
 }
 
 /** Highest master-account equity seen, used as the drawdown peak. */
@@ -276,14 +280,44 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'BROKER_UNAVAILABLE', allocations: [], outcomes: [] };
   }
 
-  // Duplicate protection: the claim is taken before the first broker call, so two
-  // replicas racing on the same signal cannot both submit orders.
-  const claimed = await redis.set(claimKey, '1', 'EX', SIGNAL_CLAIM_TTL_SECONDS, 'NX');
-  const duplicate = claimed === null;
+  // Duplicate protection: the claim is taken before the first broker call, so
+  // two replicas racing on the same signal cannot both submit orders. The claim
+  // is DURABLE and Postgres-backed: a Redis flush used to make the guard forget,
+  // and a re-delivered signal then released a SECOND live broker order — a real
+  // position, not a bookkeeping error.
+  const claim = await claimOnceDurable(claimKey, SIGNAL_CLAIM_TTL_SECONDS);
+
+  if (claim.retryable) {
+    // The guard could not be evaluated. Skipping the signal is the only safe
+    // action — trading without a claim is exactly how a duplicate order happens —
+    // but it must be LOUD, because a silently skipped signal is missed exposure.
+    await recordAuditSafe({
+      action: AUDIT_PAYOUT.SIGNAL_CLAIM_DEGRADED,
+      details: { ...configClaim, authority: claim.authority, outcome: 'SIGNAL_SKIPPED' },
+    });
+    await publishActivity(
+      makeActivity(
+        'SIGNAL_CLAIM_UNAVAILABLE',
+        `Signal ${signal.signalId} was not traded: the idempotency guard could not be read. It can be re-run once the database is reachable.`,
+        'error',
+        { ...configClaim, outcome: 'SIGNAL_SKIPPED' },
+        investmentRooms(null),
+      ),
+    );
+    return {
+      signalId: signal.signalId,
+      status: 'REJECTED',
+      reason: 'SIGNAL_CLAIM_UNAVAILABLE',
+      allocations: [],
+      outcomes: [],
+    };
+  }
+
+  const duplicate = !claim.claimed;
 
   const account = await readAccountOrReport(adapter, conn, configClaim);
   if (!account) {
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'ACCOUNT_STATE_UNAVAILABLE', allocations: [], outcomes: [] };
   }
 
@@ -309,7 +343,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
         investmentRooms(null),
       ),
     );
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     return { signalId: signal.signalId, status: 'REJECTED', reason, allocations: [], outcomes: [] };
   }
 
@@ -324,7 +358,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
       action: AUDIT.BROKER_ERROR,
       details: { ...configClaim, phase: 'execute_signal.open_positions', error: message },
     });
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'POSITIONS_UNAVAILABLE', allocations: [], outcomes: [] };
   }
 
@@ -422,7 +456,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
 
   if (!decision.passed) {
     // The signal never reached the broker, so the claim is released for a retry.
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     await publishActivity(
       makeActivity(
         'SIGNAL_REJECTED',
@@ -483,14 +517,16 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
   } else {
     if (!spec) {
       // Unreachable when the risk gate passed (SYMBOL_NOT_TRADABLE would have fired),
-      // but the pipeline must not continue without a real specification.
+      // but the pipeline must not continue without a real specification — and the
+      // claim must be released so a fixed retry is not blocked for the full TTL.
+      if (claim.claimed) await releaseClaimDurable(claimKey);
       return { signalId: signal.signalId, status: 'NO_ALLOCATIONS', reason: 'NO_SYMBOL_SPEC', decision, allocations: [], outcomes: [] };
     }
 
     if (account.equity === null) {
       // Sizing scales client lots against master equity; without a figure that is
       // not a scale factor, it is a division by an unknown.
-      if (claimed !== null) await redis.del(claimKey);
+      if (claim.claimed) await releaseClaimDurable(claimKey);
       return {
         signalId: signal.signalId,
         status: 'NO_CONNECTION',
@@ -550,7 +586,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
 
   const executable = allocations.filter((allocation) => !allocation.skipped);
   if (executable.length === 0) {
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     await publishActivity(
       makeActivity(
         'SIGNAL_NO_ALLOCATION',

@@ -39,6 +39,7 @@ export type ApiErrorCode =
   | 'RISK_REJECTED'
   | 'BROKER_UNAVAILABLE'
   | 'PAYMENT_ERROR'
+  | 'SERVICE_UNAVAILABLE'
   | 'INTERNAL';
 
 export const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH'] as const;

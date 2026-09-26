@@ -26,6 +26,8 @@ export const FOOTER_PLATFORM_LINKS: readonly FooterLink[] = [
 ];
 
 export const FOOTER_LEGAL_LINKS: readonly FooterLink[] = [
+  { href: '/terms', label: 'Terms of service' },
+  { href: '/privacy', label: 'Privacy policy' },
   { href: '/risk', label: 'Risk disclosure' },
   { href: '/faq#returns', label: 'Are returns guaranteed?' },
   { href: '/faq#data', label: 'Data we store' },

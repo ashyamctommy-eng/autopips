@@ -26,8 +26,13 @@ export const POST = handler(async (request: Request) => {
   const ip = clientIp(request);
 
   // Bound the blast radius of a flood from one source. Generous enough that a
-  // legitimate provider retry burst is never dropped.
-  const limit = await rateLimit(`ipn:${ip ?? 'unknown'}`, 120, 60);
+  // legitimate provider retry burst is never dropped. `onInfraFailure: 'allow'`
+  // is deliberate: the HMAC below is the authentication, and a 429 while Redis
+  // is down would make the provider stop delivering a deposit callback the
+  // platform still owes the client.
+  const limit = await rateLimit(`ipn:${ip ?? 'unknown'}`, 120, 60, {
+    onInfraFailure: 'allow',
+  });
   if (!limit.allowed) throw ApiError.rateLimited('Too many IPN deliveries.');
 
   const rawBody = await request.text();

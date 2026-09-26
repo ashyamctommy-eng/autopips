@@ -72,6 +72,7 @@ model User {
   withdrawals Withdrawal[]
   investments Investment[]
   auditLogs   AuditLog[]
+  consents    UserConsent[]
 
   @@index([role])
   @@index([kycStatus])
@@ -365,4 +366,94 @@ model PlatformSetting {
   updatedAt DateTime @updatedAt
 
   @@index([updatedAt])
+}
+
+/// Which legal instrument a consent record refers to.
+///
+/// A closed enum on purpose: a free-text document name would let a client
+/// "accept" something the platform never published, and the whole point of this
+/// table is to prove WHICH document, at WHICH version, was accepted.
+enum LegalDocumentType {
+  TERMS_OF_SERVICE
+  PRIVACY_POLICY
+  RISK_DISCLOSURE
+}
+
+/// A published legal instrument, versioned.
+///
+/// Immutable once published: a new revision is a NEW row with a new `version`,
+/// never an edit, so a consent recorded against v1 can always be read back as
+/// exactly what the client saw. `contentHash` is the SHA-256 of the exact body
+/// text served at `url` for that version, which is what makes the record
+/// verifiable rather than merely declarative.
+model LegalDocument {
+  id            String            @id @default(uuid())
+  type          LegalDocumentType
+  /// Monotonic label for the revision, e.g. "2026-09-26".
+  version       String
+  title         String
+  /// Canonical public path, e.g. "/terms".
+  url           String
+  /// SHA-256 (hex) of the exact text a client accepts at this version.
+  contentHash   String
+  effectiveFrom DateTime
+  createdAt     DateTime          @default(now())
+  consents      UserConsent[]
+
+  @@unique([type, version])
+  @@index([type, effectiveFrom])
+}
+
+/// One client's acceptance of one legal document version.
+///
+/// This is the evidence a regulator asks for: WHO accepted, WHAT exactly
+/// (document + version + content hash), WHEN, and from WHERE. `ipAddress` and
+/// `userAgent` are retained for exactly that reason and are never surfaced to
+/// other clients. A row is written only on an explicit, affirmative acceptance —
+/// there is no "implied consent" path.
+model UserConsent {
+  id              String            @id @default(uuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentId      String
+  document        LegalDocument     @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  /// Denormalised so a consent can be audited without joining, and so a future
+  /// document row cannot be re-pointed under an existing acceptance.
+  documentType    LegalDocumentType
+  documentVersion String
+  contentHash     String
+  acceptedAt      DateTime          @default(now())
+  ipAddress       String?
+  userAgent       String?
+  /// "REGISTRATION" | "RECONSENT" | "ADMIN_RECORDED".
+  method          String
+
+  /// One acceptance per user per document version. Re-accepting the SAME version
+  /// is a no-op; accepting a NEW version adds a row, so the full consent history
+  /// survives.
+  @@unique([userId, documentId])
+  @@index([userId, acceptedAt])
+  @@index([documentType, documentVersion])
+}
+
+/// Durable single-use claim (replay / idempotency guard).
+///
+/// WHY THIS IS IN POSTGRES AND NOT REDIS
+///   Redis is the fast path, but it is not durable: it is evictable, flushable
+///   and can be down. Every money-critical claim used to live ONLY in Redis, and
+///   two real failure modes followed:
+///     * Redis *down* → the claim helper failed closed, so a signed deposit
+///       callback was acknowledged as a duplicate and the credit was silently
+///       dropped until someone polled for it;
+///     * Redis *flushed* → the claim vanished, so a re-delivered trade signal
+///       could place a second live broker order.
+///   Postgres is the authority for "has this already happened"; Redis is only an
+///   accelerator in front of it. Rows are TTL'd by `expiresAt` and swept lazily
+///   on the next claim for the same key.
+model IdempotencyClaim {
+  key       String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }

@@ -137,6 +137,37 @@ export const AUDIT_PAYOUT = {
   WITHDRAWAL_PAYOUT_REFUSED: 'WITHDRAWAL_PAYOUT_REFUSED',
   /** A signature-valid IPN whose shape matched neither a deposit nor a payout. */
   IPN_UNRECOGNISED: 'IPN_UNRECOGNISED',
+  /**
+   * The durable replay guard had to be resolved without Redis.
+   *
+   * A Redis outage used to make the guard fail closed and silently drop a
+   * signed deposit callback. It now falls through to Postgres, and this row is
+   * the operator's signal that Redis was degraded while a money callback was
+   * still processed correctly.
+   */
+  IPN_REPLAY_GUARD_DEGRADED: 'IPN_REPLAY_GUARD_DEGRADED',
+  /**
+   * An AUTOMATED payout was refused because the account could not cover it.
+   *
+   * Raised before any provider call, so nothing left the treasury. The client's
+   * equity is unchanged and the withdrawal stays approved, awaiting an operator.
+   */
+  WITHDRAWAL_SETTLEMENT_BLOCKED: 'WITHDRAWAL_SETTLEMENT_BLOCKED',
+  /**
+   * A settlement was recorded for an account that no longer covers it.
+   *
+   * This is an EVIDENCE-only alert: the provider (or an operator) has already
+   * moved the money, so the ledger must record reality and cannot refuse. It
+   * exists so an uncovered payout is loud instead of a quiet negative equity.
+   */
+  WITHDRAWAL_SETTLEMENT_UNCOVERED: 'WITHDRAWAL_SETTLEMENT_UNCOVERED',
+  /**
+   * The trade-signal idempotency guard had to be resolved without Redis.
+   *
+   * The durable claim in Postgres is what stops a Redis flush from re-placing a
+   * live broker order; this row records that the degraded path was used.
+   */
+  SIGNAL_CLAIM_DEGRADED: 'SIGNAL_CLAIM_DEGRADED',
 } as const;
 
 /**

@@ -44,7 +44,16 @@ import type { SessionUser } from '@/types/api';
  */
 
 /** Fields the API accepts (mapped from zod issues and wired to aria attributes). */
-const REGISTER_FIELDS = ['fullName', 'email', 'country', 'phone', 'password'] as const;
+const REGISTER_FIELDS = [
+  'fullName',
+  'email',
+  'country',
+  'phone',
+  'password',
+  'acceptedTerms',
+  'acceptedPrivacy',
+  'acceptedRiskDisclosure',
+] as const;
 type RegisterField = (typeof REGISTER_FIELDS)[number];
 type FieldErrors = Partial<Record<RegisterField | 'confirmPassword', string>>;
 
@@ -55,6 +64,9 @@ interface FormValues {
   phone: string;
   password: string;
   confirmPassword: string;
+  acceptedTerms: boolean;
+  acceptedPrivacy: boolean;
+  acceptedRiskDisclosure: boolean;
 }
 
 const EMPTY_FORM: FormValues = {
@@ -64,6 +76,9 @@ const EMPTY_FORM: FormValues = {
   phone: '',
   password: '',
   confirmPassword: '',
+  acceptedTerms: false,
+  acceptedPrivacy: false,
+  acceptedRiskDisclosure: false,
 };
 
 const STRENGTH_TEXT: Record<PasswordStrengthTone, string> = {
@@ -124,6 +139,14 @@ function validate(values: FormValues): FieldErrors {
     errors.confirmPassword = 'The two passwords do not match.';
   }
 
+  // Legal acceptance is part of the contract, not a nicety: the server rejects a
+  // signup without it, and this mirrors the same three requirements locally.
+  if (!values.acceptedTerms) errors.acceptedTerms = 'You must accept the Terms of Service.';
+  if (!values.acceptedPrivacy) errors.acceptedPrivacy = 'You must accept the Privacy Policy.';
+  if (!values.acceptedRiskDisclosure) {
+    errors.acceptedRiskDisclosure = 'You must acknowledge the Risk Disclosure.';
+  }
+
   return errors;
 }
 
@@ -171,11 +194,17 @@ export function RegisterForm({ className }: RegisterFormProps) {
       fullName: string;
       country: string;
       phone?: string;
+      acceptedTerms: boolean;
+      acceptedPrivacy: boolean;
+      acceptedRiskDisclosure: boolean;
     } = {
       email: values.email.trim().toLowerCase(),
       password: values.password,
       fullName: values.fullName.trim(),
       country: values.country,
+      acceptedTerms: values.acceptedTerms,
+      acceptedPrivacy: values.acceptedPrivacy,
+      acceptedRiskDisclosure: values.acceptedRiskDisclosure,
     };
     // The API's schema is `.optional()` with `min(6)`, so an empty string must
     // be omitted rather than sent.
@@ -484,6 +513,129 @@ export function RegisterForm({ className }: RegisterFormProps) {
             {...errorProps('confirmPassword')}
           />
         </Field>
+
+        <fieldset className="flex flex-col gap-3 rounded-lg border border-line bg-base-900/40 p-3">
+          <legend className="px-1 text-xs font-medium uppercase tracking-wide text-brand-300">
+            Legal
+          </legend>
+
+          <div className="flex flex-col gap-1">
+            <label htmlFor="register-accept-terms" className="flex items-start gap-3 text-sm">
+              <input
+                id="register-accept-terms"
+                name="acceptedTerms"
+                type="checkbox"
+                required
+                checked={values.acceptedTerms}
+                onChange={(event) => update('acceptedTerms', event.target.checked)}
+                disabled={busy}
+                aria-invalid={Boolean(fieldErrors.acceptedTerms)}
+                aria-describedby={
+                  fieldErrors.acceptedTerms ? 'register-accept-terms-error' : undefined
+                }
+                className="mt-0.5 size-4 shrink-0 accent-brand"
+              />
+              <span className="leading-relaxed text-base-100">
+                I have read and accept the{' '}
+                <Link
+                  href="/terms"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-brand-300 underline-offset-4 hover:underline"
+                >
+                  Terms of Service
+                </Link>
+                .
+              </span>
+            </label>
+            {fieldErrors.acceptedTerms ? (
+              <p id="register-accept-terms-error" className="pl-7 text-xs text-loss-400">
+                {fieldErrors.acceptedTerms}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label htmlFor="register-accept-privacy" className="flex items-start gap-3 text-sm">
+              <input
+                id="register-accept-privacy"
+                name="acceptedPrivacy"
+                type="checkbox"
+                required
+                checked={values.acceptedPrivacy}
+                onChange={(event) => update('acceptedPrivacy', event.target.checked)}
+                disabled={busy}
+                aria-invalid={Boolean(fieldErrors.acceptedPrivacy)}
+                aria-describedby={
+                  fieldErrors.acceptedPrivacy ? 'register-accept-privacy-error' : undefined
+                }
+                className="mt-0.5 size-4 shrink-0 accent-brand"
+              />
+              <span className="leading-relaxed text-base-100">
+                I have read and accept the{' '}
+                <Link
+                  href="/privacy"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-brand-300 underline-offset-4 hover:underline"
+                >
+                  Privacy Policy
+                </Link>
+                .
+              </span>
+            </label>
+            {fieldErrors.acceptedPrivacy ? (
+              <p id="register-accept-privacy-error" className="pl-7 text-xs text-loss-400">
+                {fieldErrors.acceptedPrivacy}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="register-accept-risk"
+              className="flex items-start gap-3 text-sm"
+            >
+              <input
+                id="register-accept-risk"
+                name="acceptedRiskDisclosure"
+                type="checkbox"
+                required
+                checked={values.acceptedRiskDisclosure}
+                onChange={(event) => update('acceptedRiskDisclosure', event.target.checked)}
+                disabled={busy}
+                aria-invalid={Boolean(fieldErrors.acceptedRiskDisclosure)}
+                aria-describedby={
+                  fieldErrors.acceptedRiskDisclosure ? 'register-accept-risk-error' : undefined
+                }
+                className="mt-0.5 size-4 shrink-0 accent-brand"
+              />
+              <span className="leading-relaxed text-base-100">
+                I have read and understood the{' '}
+                <Link
+                  href="/risk"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-brand-300 underline-offset-4 hover:underline"
+                >
+                  Risk Disclosure
+                </Link>{' '}
+                and accept that trading can lose money, including all of the capital I allocate.
+              </span>
+            </label>
+            {fieldErrors.acceptedRiskDisclosure ? (
+              <p id="register-accept-risk-error" className="pl-7 text-xs text-loss-400">
+                {fieldErrors.acceptedRiskDisclosure}
+              </p>
+            ) : null}
+          </div>
+
+          <p className="text-xs leading-relaxed text-muted">
+            Your acceptance is recorded with the document version, a content hash, the time, your IP
+            address and your browser user-agent, so there is a verifiable record of what you
+            accepted.
+          </p>
+        </fieldset>
 
         <Button type="submit" variant="primary" size="lg" disabled={busy} aria-busy={busy}>
           {busy ? <Spinner size="sm" label="Creating account" /> : <UserPlus aria-hidden />}
