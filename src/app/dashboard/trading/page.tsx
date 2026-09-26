@@ -101,7 +101,7 @@ export default async function DashboardTradingPage({
     <Section width="wide" className="flex flex-col gap-6">
       <PageHeader
         title="Live trading"
-        description="Broker candles, realtime position deltas and the strategy engine's own event stream — all read from verified broker data."
+        description="Market Feed candles, realtime position deltas and the strategy engine's own event stream — all read from verified market data."
         breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Live trading' }]}
         actions={
           <Button asChild variant="secondary" size="sm">

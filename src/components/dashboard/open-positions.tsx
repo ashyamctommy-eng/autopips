@@ -122,7 +122,7 @@ export function OpenPositions({
           const meta = DIRECTION_META[position.direction?.toUpperCase() ?? ''];
           if (!meta) {
             return (
-              <Badge variant="outline" title="Direction reported by the broker was not recognised">
+              <Badge variant="outline" title="The reported direction for this position was not recognised">
                 {position.direction}
               </Badge>
             );
@@ -156,7 +156,7 @@ export function OpenPositions({
           const current = formatPrice(position.currentPrice);
           if (current === null) {
             return (
-              <UnknownValue explanation="The broker has not reported a live price for this position. The entry price is deliberately not shown here, because it is not the current price." />
+              <UnknownValue explanation="The Market Feed has not reported a live price for this position. The entry price is deliberately not shown here, because it is not the current price." />
             );
           }
           return <span className="tabular-nums text-base-100">{current}</span>;
@@ -186,7 +186,7 @@ export function OpenPositions({
           const unknown = !live && (value === null || value === undefined || value === 0);
           if (unknown) {
             return (
-              <UnknownValue explanation="No live P/L has been reported for this position yet. A zero here would read as break-even, and the broker bridge has not measured one." />
+              <UnknownValue explanation="No live P/L has been reported for this position yet. A zero here would read as break-even, and the Market Feed has not measured one." />
             );
           }
           return <SignedUsd value={value} />;

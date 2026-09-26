@@ -372,8 +372,8 @@ export function TradingPanel({
 
   const emptyMessage =
     source === 'unavailable'
-      ? 'The market-data feed could not be reached just now — no candles are being shown rather than a filled-in guess.'
-      : 'The broker returned no candles for this instrument in the selected window.';
+      ? 'The Market Feed could not be reached just now — no candles are being shown rather than a filled-in guess.'
+      : 'The Market Feed returned no candles for this instrument in the selected window.';
 
   return (
     <div className="grid gap-4 lg:grid-cols-3">
@@ -383,7 +383,7 @@ export function TradingPanel({
             <div>
               <CardTitle>Live chart</CardTitle>
               <p className="mt-1 text-xs leading-relaxed text-muted">
-                Candles come from the broker&apos;s public market feed. An empty series is shown as
+                Candles come from the Market Feed. An empty series is shown as
                 empty — never filled in, interpolated or approximated.
               </p>
             </div>
@@ -396,7 +396,7 @@ export function TradingPanel({
               {brokerState ? (
                 <StatusBadge status={brokerState} kind="broker" />
               ) : (
-                <span className="text-xs text-muted">No broker event yet</span>
+                <span className="text-xs text-muted">No feed event yet</span>
               )}
             </div>
           </div>

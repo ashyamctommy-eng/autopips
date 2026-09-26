@@ -354,7 +354,7 @@ export function CandlestickChart({
               {timeframe}
             </span>
           ) : null}
-          <span className="ml-auto text-[0.68rem] text-muted">Broker feed</span>
+          <span className="ml-auto text-[0.68rem] text-muted">Market Feed</span>
         </div>
       )}
       <div className="relative" style={{ height }}>
