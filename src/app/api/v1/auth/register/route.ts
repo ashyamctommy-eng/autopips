@@ -35,13 +35,26 @@ const bodySchema = z.object({
 /** 5 registrations per IP per 15 minutes. */
 const REGISTER_LIMIT = { limit: 5, windowSeconds: 900 } as const;
 
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code?: unknown }).code === 'P2002'
-  );
+/**
+ * True only for a UNIQUE violation on `User.email` — not for any other P2002.
+ *
+ * The registration transaction now also writes `LegalDocument` and `UserConsent`
+ * rows; a collision on one of those must not be reported to the user as "that
+ * email is already registered".
+ */
+function isEmailUniqueViolation(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  if ((err as { code?: unknown }).code !== 'P2002') return false;
+
+  const target = (err as { meta?: { target?: unknown } }).meta?.target;
+  if (Array.isArray(target)) {
+    return target.map(String).some((field) => field.toLowerCase().includes('email'));
+  }
+  if (typeof target === 'string') return target.toLowerCase().includes('email');
+
+  // Prisma reports the constrained field(s) for Postgres. If it is somehow
+  // absent, do NOT guess "email taken" — surface the real error instead.
+  return false;
 }
 
 /**
@@ -80,17 +93,24 @@ async function createAccount(
         },
       });
 
-      await recordCurrentConsents(tx, {
-        userId: user.id,
-        ipAddress: context.ipAddress,
-        userAgent: context.userAgent,
-        method: 'REGISTRATION',
-      });
+      await recordCurrentConsents(
+        tx,
+        {
+          userId: user.id,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
+          method: 'REGISTRATION',
+        },
+        // A brand-new account must have ALL consent rows or none: an incomplete
+        // write aborts the transaction, so no account can exist without a record
+        // of what it accepted.
+        { requireAll: true },
+      );
 
       return user;
     });
   } catch (err) {
-    if (isUniqueViolation(err)) {
+    if (isEmailUniqueViolation(err)) {
       throw ApiError.conflict('An account with that email already exists.');
     }
     throw err;

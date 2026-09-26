@@ -10,6 +10,7 @@ import {
 } from '@/server/modules/settings/settings.service';
 import { D, toPrismaDecimal, usd, type Decimal, type Numeric } from '@/lib/money';
 import { claimOnceDurable, type ClaimResult } from '@/lib/idempotency';
+import { alertOps } from '@/lib/ops-alert';
 import { assetMeta } from '@/lib/contracts';
 import { AUDIT, AUDIT_PAYOUT, recordAudit, recordAuditSafe } from '@/server/modules/audit/audit.service';
 import {
@@ -233,11 +234,29 @@ async function auditUncoveredSettlement(input: {
       ...report,
     },
   });
+
+  // An uncovered settlement is a money event an operator must see now, not just
+  // a row in the audit log. Deduped and OFF unless OPS_ALERT_WEBHOOK_URL is set.
+  void alertOps({
+    title: 'Withdrawal settled uncovered',
+    severity: 'critical',
+    detail: {
+      withdrawalId: input.withdrawalId,
+      userId: input.userId,
+      stage: input.stage,
+      amountUsd: input.amountUsd.toNumber(),
+      equityUsd: report.equityUsd,
+      surplusUsd: report.surplusUsd,
+    },
+  }).catch(() => {
+    // alertOps never throws by contract; this is belt and braces.
+  });
 }
 
 /**
- * Record that a money-critical replay guard was resolved without Redis (the
- * durable Postgres path). Evidence, not a client event; never throws.
+ * Record that a money-critical replay guard could NOT be evaluated (Postgres
+ * unreachable). Evidence, not a client event; never throws. A `retryable` claim
+ * is the only degraded outcome now — a plain duplicate is not recorded here.
  */
 async function auditDegradedClaim(
   claim: ClaimResult,
@@ -248,7 +267,7 @@ async function auditDegradedClaim(
     details: Record<string, unknown>;
   },
 ): Promise<void> {
-  if (!claim.redisUnavailable && !claim.databaseUnavailable) return;
+  if (!claim.retryable) return;
   await recordAuditSafe({
     action: AUDIT_PAYOUT.IPN_REPLAY_GUARD_DEGRADED,
     userId: context.userId,
@@ -256,9 +275,7 @@ async function auditDegradedClaim(
     details: {
       surface: context.surface,
       authority: claim.authority,
-      redisUnavailable: claim.redisUnavailable,
-      databaseUnavailable: claim.databaseUnavailable,
-      claimed: claim.claimed,
+      outcome: 'RETRY_REQUESTED',
       ...context.details,
     },
   });
@@ -995,16 +1012,25 @@ export async function handleIpn(input: HandleIpnInput): Promise<HandleIpnResult>
     `ipn:${payload.paymentId}:${payload.paymentStatus}`,
     86_400,
   );
-  await auditDegradedClaim(claim, {
-    surface: 'DEPOSIT_IPN',
-    userId: deposit.userId,
-    ip,
-    details: {
-      depositId: deposit.id,
-      paymentId: payload.paymentId,
-      providerStatus: payload.paymentStatus,
-    },
-  });
+  if (claim.retryable) {
+    // The guard could not be evaluated. Do NOT pretend this is a duplicate (that
+    // silently drops the credit) and do NOT process it unguarded (that risks a
+    // double credit). Answer 503 so NOWPayments redelivers once Postgres is back;
+    // crediting is idempotent by assignment, so a redelivery is safe.
+    await auditDegradedClaim(claim, {
+      surface: 'DEPOSIT_IPN',
+      userId: deposit.userId,
+      ip,
+      details: {
+        depositId: deposit.id,
+        paymentId: payload.paymentId,
+        providerStatus: payload.paymentStatus,
+      },
+    });
+    throw ApiError.serviceUnavailable(
+      'The deposit replay guard is temporarily unavailable; the callback was not processed and should be redelivered.',
+    );
+  }
   if (!claim.claimed) {
     return {
       duplicate: true,
@@ -1202,12 +1228,19 @@ async function reconcilePayoutIpn(input: ReconcilePayoutIpnInput): Promise<Handl
   // before any row is touched. It is keyed on OUR withdrawal id and the provider
   // status, so it cannot collide with the deposit keyspace.
   const claim = await claimOnceDurable(`payout-ipn:${row.id}:${providerStatus}`, 86_400);
-  await auditDegradedClaim(claim, {
-    surface: 'PAYOUT_IPN',
-    userId: row.userId,
-    ip,
-    details: { withdrawalId: row.id, providerStatus, providerPayoutId: payload.payoutId },
-  });
+  if (claim.retryable) {
+    // Same reasoning as the deposit path: record the evidence, do not touch the
+    // row, and ask the provider to redeliver.
+    await auditDegradedClaim(claim, {
+      surface: 'PAYOUT_IPN',
+      userId: row.userId,
+      ip,
+      details: { withdrawalId: row.id, providerStatus, providerPayoutId: payload.payoutId },
+    });
+    throw ApiError.serviceUnavailable(
+      'The payout replay guard is temporarily unavailable; the callback was not processed and should be redelivered.',
+    );
+  }
   if (!claim.claimed) {
     return { duplicate: true, matched: true, withdrawalId: row.id, status: row.status, credited: false };
   }

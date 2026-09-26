@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@/lib/prisma';
 import {
   currentLegalDocuments,
+  type CurrentLegalDocument,
   type LegalDocumentTypeValue,
 } from './legal.documents';
 
@@ -42,20 +43,32 @@ export interface PublishedDocumentRef {
   contentHash: string;
 }
 
-/**
- * Publish (idempotently) the current document revisions and return their row ids.
- *
- * An existing row is NEVER updated: a revision is a new version, and rewriting
- * the hash of a version someone already accepted would invalidate that record.
- */
-export async function ensureLegalDocumentsPublished(
-  db: LegalDb = prisma,
-): Promise<Map<LegalDocumentTypeValue, PublishedDocumentRef>> {
-  const published = new Map<LegalDocumentTypeValue, PublishedDocumentRef>();
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === 'P2002'
+  );
+}
 
-  for (const doc of currentLegalDocuments()) {
+/**
+ * Publish ONE revision, tolerating a concurrent first-time insert.
+ *
+ * Prisma's `upsert` is not always a native `INSERT … ON CONFLICT` (the empty
+ * `update` makes it emulated in some versions), so two concurrent registrations
+ * on a cold start can collide on `LegalDocument_type_version_key`. The row exists
+ * either way — read it back instead of failing a signup over bookkeeping.
+ */
+async function publishDocument(
+  db: LegalDb,
+  doc: CurrentLegalDocument,
+): Promise<PublishedDocumentRef> {
+  const where = { type_version: { type: doc.type, version: doc.version } } as const;
+  const select = { id: true, version: true, contentHash: true } as const;
+
+  try {
     const row = await db.legalDocument.upsert({
-      where: { type_version: { type: doc.type, version: doc.version } },
+      where,
       create: {
         type: doc.type,
         version: doc.version,
@@ -67,9 +80,35 @@ export async function ensureLegalDocumentsPublished(
       // Deliberately empty: publishing is append-only, so a re-run can never
       // rewrite what an existing consent refers to.
       update: {},
-      select: { id: true, version: true, contentHash: true },
+      select,
     });
-    published.set(doc.type, { id: row.id, version: row.version, contentHash: row.contentHash });
+    return { id: row.id, version: row.version, contentHash: row.contentHash };
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const existing = await db.legalDocument.findUnique({ where, select });
+      if (existing) {
+        return { id: existing.id, version: existing.version, contentHash: existing.contentHash };
+      }
+    }
+    throw err;
+  }
+}
+
+/**
+ * Publish (idempotently) the current document revisions and return their row ids.
+ *
+ * An existing row is NEVER updated: a revision is a new version, and rewriting
+ * the hash of a version someone already accepted would invalidate that record.
+ * Takes the transaction client explicitly — publishing and consent capture must
+ * share the same transaction as the account insert.
+ */
+export async function ensureLegalDocumentsPublished(
+  db: LegalDb,
+): Promise<Map<LegalDocumentTypeValue, PublishedDocumentRef>> {
+  const published = new Map<LegalDocumentTypeValue, PublishedDocumentRef>();
+
+  for (const doc of currentLegalDocuments()) {
+    published.set(doc.type, await publishDocument(db, doc));
   }
 
   return published;
@@ -92,6 +131,7 @@ export interface ConsentCaptureContext {
 export async function recordCurrentConsents(
   db: LegalDb,
   context: ConsentCaptureContext,
+  options: { requireAll?: boolean } = {},
 ): Promise<number> {
   const published = await ensureLegalDocumentsPublished(db);
 
@@ -111,6 +151,16 @@ export async function recordCurrentConsents(
   });
 
   const inserted = await db.userConsent.createMany({ data: rows, skipDuplicates: true });
+
+  // On a first-time capture every row must land; `skipDuplicates` exists so a
+  // RE-consent of the same version is a no-op, not so a partial registration can
+  // commit. Throwing here aborts the surrounding transaction.
+  if (options.requireAll && inserted.count !== rows.length) {
+    throw new Error(
+      `Consent capture incomplete: expected ${rows.length} rows, wrote ${inserted.count}.`,
+    );
+  }
+
   return inserted.count;
 }
 

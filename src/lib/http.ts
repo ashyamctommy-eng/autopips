@@ -52,6 +52,15 @@ export class ApiError extends Error {
   static paymentError(message = 'Payment provider error.') {
     return new ApiError('PAYMENT_ERROR', message, 502);
   }
+  /**
+   * 503 — a dependency could not be evaluated, so the request should be retried.
+   * Deliberately distinct from a 500: the caller is told "not now", not "never".
+   * Used by the IPN webhook when the durable replay guard cannot be read, so the
+   * provider redelivers instead of the platform silently discarding the callback.
+   */
+  static serviceUnavailable(message = 'Service temporarily unavailable.') {
+    return new ApiError('SERVICE_UNAVAILABLE', message, 503);
+  }
   static internal(message = 'Internal server error.') {
     return new ApiError('INTERNAL', message, 500);
   }

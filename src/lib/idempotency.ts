@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/prisma';
-import { redis, rkey } from '@/lib/redis';
 
 /**
  * Durable single-use claims for money-critical work.
@@ -14,87 +13,85 @@ import { redis, rkey } from '@/lib/redis';
  *   • the payout IPN replay guard    (`payout-ipn:<withdrawalId>:<status>`)
  *   • the trade-signal idempotency guard (`signal-claimed:<signalId>`)
  *
- * For those, Redis is the wrong authority, in both directions:
+ * Redis is the wrong authority for those, in both directions:
  *
- *   Redis DOWN  → `claimOnce` catches and returns `false`, which every caller
- *                 interprets as "already processed". A signature-valid deposit
- *                 callback is then answered 200 and the client's credit is
- *                 silently dropped (recoverable only by a manual poll), and a
- *                 payout callback is ignored.
- *   Redis FLUSH → the key is gone, so `SET NX` succeeds again and a re-delivered
- *                 trade signal releases a SECOND live broker order — a real
- *                 position, not a bookkeeping error.
+ *   Redis DOWN   → `claimOnce` catches and returns `false`, which every caller
+ *                  interprets as "already processed". A signature-valid deposit
+ *                  callback is then answered 200 and the client's credit is
+ *                  silently dropped (recoverable only by a manual poll).
+ *   Redis FLUSH  → the key is gone, so `SET NX` succeeds again and a re-delivered
+ *                  trade signal releases a SECOND live broker order.
  *
- * So Postgres owns the answer to "has this already happened", and Redis is kept
- * only as a cheap pre-filter. A Redis outage degrades performance, never
- * correctness: the claim still works, it just pays for a row instead of a
- * round-trip to the cache.
+ * DESIGN: POSTGRES IS THE SOLE DECISION-MAKER.
+ *   A `IdempotencyClaim` row (primary key = the claim key) is the only thing that
+ *   decides whether work has already happened. There is deliberately NO Redis
+ *   pre-filter, because a cache that can say "already done" while the durable
+ *   record says otherwise is exactly how a lost deposit or a duplicate order
+ *   happens: a Redis key set by a failed attempt (or left behind by a partial
+ *   release) would veto every retry for the TTL. One indexed insert is cheap for
+ *   this traffic, and it is correct in every failure mode.
  *
- * SEMANTICS
- *   `claimed: true`  → this caller won the slot and must do the work.
- *   `claimed: false` → someone already did it (or is doing it); the caller must
- *                      treat the work as done and NOT repeat it.
+ * OUTCOMES
+ *   claimed: true               → this caller won the slot and must do the work.
+ *   duplicate: true             → the work has already been done; do NOT repeat.
+ *   retryable: true             → Postgres could not be read, so the claim is
+ *                                 UNEVALUABLE. This is neither "done" nor "do
+ *                                 it": a caller with a retrying source (a
+ *                                 provider webhook) must ask for a redelivery,
+ *                                 and a caller without one (a trade signal) must
+ *                                 skip the work and say so loudly. Never treat
+ *                                 this as duplicate, and never proceed.
  *
- * The one case where the guard cannot be honoured is Postgres itself being
- * unreachable. Then:
- *   • if Redis *did* record the claim, the work proceeds (Redis is a witness);
- *   • otherwise the claim FAILS CLOSED. This asymmetry is deliberate: a lost
- *     deposit callback is recoverable and a lost signal can be re-run, but a
- *     double credit and a duplicate live order are not.
+ * The distinction matters: inventing a "duplicate" here is what silently drops
+ * money, and proceeding unclaimed is what doubles an order.
  */
-
-export type ClaimAuthority = 'redis' | 'database' | 'degraded';
 
 export interface ClaimResult {
   /** True when this caller won the single-use slot. */
   claimed: boolean;
   /** True when the slot was already taken (the normal "replay" answer). */
   duplicate: boolean;
-  /** Where the decision was actually made. `degraded` means both stores were unavailable. */
-  authority: ClaimAuthority;
-  /** True when Redis could not be reached for this claim. */
-  redisUnavailable: boolean;
-  /** True when Postgres could not be reached for this claim. */
-  databaseUnavailable: boolean;
+  /** True when the claim could not be evaluated (Postgres unreachable). */
+  retryable: boolean;
+  authority: 'database' | 'degraded';
 }
 
-function redisKey(key: string): string {
-  return rkey('once', key);
+const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+let lastSweepAt = 0;
+
+/**
+ * Delete claims whose TTL has passed.
+ *
+ * `expiresAt` is indexed, so this is a bounded range delete. It runs at most
+ * once per process per `SWEEP_INTERVAL_MS`, fire-and-forget, so a hot claim path
+ * never waits on it. Without it, a key that is never claimed again would linger
+ * forever; the per-key sweep inside `claimOnceDurable` only handles keys that
+ * are reused.
+ */
+async function sweepExpiredClaims(now: Date): Promise<void> {
+  if (now.getTime() - lastSweepAt < SWEEP_INTERVAL_MS) return;
+  lastSweepAt = now.getTime();
+  try {
+    await prisma.idempotencyClaim.deleteMany({ where: { expiresAt: { lt: now } } });
+  } catch (err) {
+    // Housekeeping only: never surface this to the claim's caller.
+    console.error(
+      '[idempotency] expired-claim sweep failed:',
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
 
 /**
- * Claim a single-use slot, backed by Postgres and accelerated by Redis.
+ * Claim a single-use slot, backed by Postgres.
  *
- * @param key       Caller-namespaced key, e.g. `ipn:<paymentId>:<status>`.
+ * @param key        Caller-namespaced key, e.g. `ipn:<paymentId>:<status>`.
  * @param ttlSeconds How long the claim is binding. Also bounds the row lifetime.
  */
 export async function claimOnceDurable(key: string, ttlSeconds: number): Promise<ClaimResult> {
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
 
-  // (1) Redis pre-filter. A *present* key is a definitive duplicate and lets us
-  // skip the database entirely; a successful SET is only a hint, never the
-  // final answer, because a previous claim may have been written while Redis was
-  // down (so the key would be absent even though the work was already done).
-  let redisUnavailable = false;
-  let redisSawDuplicate = false;
-  try {
-    const set = await redis.set(redisKey(key), '1', 'EX', ttlSeconds, 'NX');
-    redisSawDuplicate = set === null;
-  } catch {
-    redisUnavailable = true;
-  }
-
-  if (redisSawDuplicate) {
-    return {
-      claimed: false,
-      duplicate: true,
-      authority: 'redis',
-      redisUnavailable: false,
-      databaseUnavailable: false,
-    };
-  }
-
-  // (2) Postgres is the authority.
   try {
     const inserted = await prisma.idempotencyClaim.createMany({
       data: [{ key, expiresAt }],
@@ -102,20 +99,16 @@ export async function claimOnceDurable(key: string, ttlSeconds: number): Promise
     });
 
     if (inserted.count === 1) {
-      await bestEffortRedisClaim(key, ttlSeconds);
-      return {
-        claimed: true,
-        duplicate: false,
-        authority: 'database',
-        redisUnavailable,
-        databaseUnavailable: false,
-      };
+      void sweepExpiredClaims(now);
+      return { claimed: true, duplicate: false, retryable: false, authority: 'database' };
     }
 
-    // Row exists. If it is an expired leftover, sweep it and try exactly once
-    // more, so a key can be reused after its TTL without a background sweeper.
+    // A row already exists. If it is an EXPIRED leftover, sweep it and try
+    // exactly once more, so a key can be reused after its TTL. The retry is safe
+    // under concurrency: only the caller whose DELETE matched this row's TTL runs
+    // it, and the re-insert is primary-key guarded.
     const swept = await prisma.idempotencyClaim.deleteMany({
-      where: { key, expiresAt: { lt: new Date() } },
+      where: { key, expiresAt: { lt: now } },
     });
     if (swept.count === 1) {
       const retried = await prisma.idempotencyClaim.createMany({
@@ -123,42 +116,20 @@ export async function claimOnceDurable(key: string, ttlSeconds: number): Promise
         skipDuplicates: true,
       });
       if (retried.count === 1) {
-        await bestEffortRedisClaim(key, ttlSeconds);
-        return {
-          claimed: true,
-          duplicate: false,
-          authority: 'database',
-          redisUnavailable,
-          databaseUnavailable: false,
-        };
+        return { claimed: true, duplicate: false, retryable: false, authority: 'database' };
       }
     }
 
-    return {
-      claimed: false,
-      duplicate: true,
-      authority: 'database',
-      redisUnavailable,
-      databaseUnavailable: false,
-    };
+    return { claimed: false, duplicate: true, retryable: false, authority: 'database' };
   } catch (err) {
-    // (3) Postgres unavailable. There is no safe "allow" here: the whole point
-    // of the durable row is that it is the authority, and we could not read it.
-    // Fail CLOSED so the callers treat the work as already done — the documented
-    // recovery path is the reconcile poll (deposits) or an operator re-run
-    // (signals), whereas a double credit or a duplicate order has no undo.
+    // Postgres is unreachable. There is no safe "allow" here, and it is not a
+    // duplicate either: report it as UNEVALUABLE so the caller can choose the
+    // right action (ask the provider to redeliver, or skip and alert).
     console.error(
       `[idempotency] durable claim failed for "${key}":`,
       err instanceof Error ? err.message : err,
     );
-
-    return {
-      claimed: false,
-      duplicate: true,
-      authority: 'degraded',
-      redisUnavailable,
-      databaseUnavailable: true,
-    };
+    return { claimed: false, duplicate: false, retryable: true, authority: 'degraded' };
   }
 }
 
@@ -168,6 +139,9 @@ export async function claimOnceDurable(key: string, ttlSeconds: number): Promise
  * Only used when the guarded work was NOT submitted (e.g. the broker was
  * unreachable before any order was placed), so the same signal can legitimately
  * be retried. Never use this to "un-process" work that has already happened.
+ *
+ * Not owner-scoped: it deletes by key. That is safe because every caller releases
+ * in the same request/turn that took the claim, and the TTL bounds any window.
  */
 export async function releaseClaimDurable(key: string): Promise<void> {
   try {
@@ -177,19 +151,5 @@ export async function releaseClaimDurable(key: string): Promise<void> {
       `[idempotency] failed to release claim "${key}":`,
       err instanceof Error ? err.message : err,
     );
-  }
-  try {
-    await redis.del(redisKey(key));
-  } catch {
-    // Redis is a cache; the durable row is already gone.
-  }
-}
-
-/** Populate the Redis pre-filter after a durable claim. Best effort only. */
-async function bestEffortRedisClaim(key: string, ttlSeconds: number): Promise<void> {
-  try {
-    await redis.set(redisKey(key), '1', 'EX', ttlSeconds, 'NX');
-  } catch {
-    // Absent by design: the durable row is the authority.
   }
 }

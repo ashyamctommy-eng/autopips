@@ -21,8 +21,11 @@ export const dynamic = 'force-dynamic';
  *   route traffic to it. Collapsing them into one fail-closed check is what makes
  *   a deployment flap: a brief dependency blip restarts a process that was
  *   recovering fine. So this endpoint is honest about what it observes and still
- *   answers 200, while `/api/v1/health` keeps the hard 503 gate that Railway's
- *   `healthcheckPath` uses (see railway.toml).
+ *   answers 200, while `/api/v1/health` keeps the hard 503 gate for external
+ *   READINESS monitors. Railway's own `healthcheckPath` points HERE (see
+ *   railway.toml) — a Redis blip must not pull every web replica out of rotation
+ *   or fail an otherwise-good deploy; a genuinely unmigrated database is still
+ *   caught by the image entrypoint's `prisma migrate deploy`.
  *
  * `service` NAMES THE TIER THAT ANSWERED. That field is the cheapest possible fix
  * for the failure this platform actually hit: a worker service that was built
