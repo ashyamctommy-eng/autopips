@@ -221,7 +221,7 @@ These are read by `src/lib/ops-alert.ts` and `scripts/backup-db.sh` — **not** 
 
 | Variable | Required | Secret | Purpose | Example |
 | --- | --- | --- | --- | --- |
-| `OPS_ALERT_WEBHOOK_URL` | no (default unset) | **secret** | Slack-compatible incoming-webhook URL for operational alerts. Unset/empty = alerting is a silent no-op. See §11.4. | Slack app → *Incoming Webhooks* URL |
+| `OPS_ALERT_WEBHOOK_URL` | no (default unset) | **secret** | Slack-compatible incoming-webhook URL for operational alerts. Unset/empty = alerting is a silent no-op, so this is safe to leave blank. **Set it on BOTH services**: the API 5xx hook runs on the web tier, while the hooks that report a bot runtime that stopped or never started run on the worker. See §11.4. | Slack app to *Incoming Webhooks* URL |
 | `BACKUP_DIR` | no (script default `./backups`) | no | Directory `scripts/backup-db.sh` writes timestamped `autopips-*.dump` files to. Use an absolute path on a mounted volume in production. | `/srv/backups` |
 | `BACKUP_RETENTION` | no (script default `14`) | no | How many dump files the script keeps; older ones are pruned after a successful dump. Must be ≥ 1. | `30` |
 
@@ -779,21 +779,37 @@ call, no throw — so the platform behaves exactly as it did before the module
 existed. Set it to a Slack-compatible incoming-webhook URL to receive a
 `{ text, ... }` JSON message.
 
-What pages today: a **5xx** returned by the API `handler()` wrapper
-(`src/lib/http.ts`) — the route, method, error code and error message only. No
-request body, no headers, no PII; detail values pass through a redaction guard
-that drops secret-ish keys and scrubs connection strings, tokens, long digit runs
-and email addresses.
+What pages today:
 
-The worker's `uncaughtException` / `unhandledRejection` handlers, `BROKER_ERROR`,
-`DEPOSIT_IPN_REJECTED` and bot `stopped` / `degraded` transitions are **not yet
-wired** to `alertOps`; they are still `console.*` plus an `AuditLog` row. Treat
-this as one wired path, not a complete alerting story.
+- **API 5xx** returned by the `handler()` wrapper (`src/lib/http.ts`) — the route,
+  method, error code and error message only.
+- **The worker's process-level failures** (`src/server/main.ts`):
+  `uncaughtException`, `unhandledRejection`, and a startup that failed before the
+  process could listen.
+- **A supervised runtime that stopped** after a successful start (`critical` — the
+  bot or the maturity sweep is no longer running) or **never started**
+  (`warning` — the supervisor is retrying with backoff). This is the signal that
+  previously did not exist at all: a worker that was alive but not trading.
+
+No request body, no headers and no PII are ever included; detail values pass
+through a redaction guard that drops secret-ish keys and scrubs connection
+strings, bearer tokens, long digit runs and email addresses.
+
+**Not yet wired**, and still `console.*` plus an `AuditLog` row only:
+`BROKER_ERROR` bursts, `DEPOSIT_IPN_REJECTED`, and bot `degraded` transitions.
+`/healthz` reports those — poll its `trading.status`, or `?strict=1` to have any
+non-`ok` verdict answer 503 — until they are hooked up.
 
 Delivery is fire-and-forget with a 3 s timeout; an identical title is delivered
 at most once per 5 minutes (Redis-backed, with an in-process fallback) so an
 error loop cannot page once per request. The URL is a secret: it is read
 server-side only and must never be given a `NEXT_PUBLIC_` prefix.
+
+It is deliberately **not** part of the boot contract in `src/lib/env.ts` and has
+no default: an unset value is a valid, silent configuration. Set it in the
+**worker** service variables as well as the web service — the runtime hooks that
+report a stopped or unstarted bot live on the worker, so a web-only value will
+alert on API errors and nothing else.
 
 ---
 

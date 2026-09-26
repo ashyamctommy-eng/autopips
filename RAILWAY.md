@@ -61,10 +61,13 @@ build. That is why the worker is created first.
    | `NOWPAYMENTS_IPN_SECRET` | from NOWPayments dashboard |
    | `DERIV_APP_ID` | the `app_id` from <https://api.deriv.com> |
    | `DERIV_API_TOKEN` | from the Deriv dashboard (optional at boot; can also be set in Admin → Platform settings) |
+   | `OPS_ALERT_WEBHOOK_URL` | *optional* — Slack-compatible incoming-webhook URL for operational alerts. Unset/empty means alerting is a silent no-op, so leaving it blank changes nothing. Set it on **both** services: the web tier reports API 5xx, the worker reports a bot runtime that stopped or never started. See `DEPLOYMENT.md` §11.4. |
 
-   > Every variable in `.env.example` must be present — `src/lib/env.ts` validates
-   > the whole contract at boot and **exits non-zero** if anything is missing or
-   > malformed. `scripts/preflight.sh` can check a local copy first.
+   > Every **required** variable in `.env.example` must be present — `src/lib/env.ts`
+   > validates the boot contract and **exits non-zero** if a required one is
+   > missing or malformed. The optional ones (`OPS_ALERT_WEBHOOK_URL`, `BACKUP_DIR`,
+   > `BACKUP_RETENTION`) are read where they are used and may be left unset.
+   > `scripts/preflight.sh` can check a local copy first.
 
 6. **Settings → Networking** → **Generate Domain**. Note it, e.g.
    `autopips-worker-production.up.railway.app`. **This is your `NEXT_PUBLIC_WS_URL`.**
