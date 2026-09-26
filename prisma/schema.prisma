@@ -71,6 +71,7 @@ model User {
   deposits    Deposit[]
   withdrawals Withdrawal[]
   investments Investment[]
+  positions   Position[]
   auditLogs   AuditLog[]
   consents    UserConsent[]
 
@@ -456,4 +457,77 @@ model IdempotencyClaim {
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+}
+
+/// Which way an internally-executed position is taken.
+enum PositionSide {
+  BUY
+  SELL
+}
+
+/// Lifecycle of an internally-executed position.
+///
+/// `CANCELLED` exists so a position that never became real (a rejected open, an
+/// operator void) is recorded rather than deleted — the audit trail must not
+/// have a gap.
+enum PositionStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+/// An INTERNALLY-EXECUTED position (`EXECUTION_MODE=internal`).
+///
+/// THE ECONOMICS (read this before changing any number)
+/// ---------------------------------------------------
+/// The platform is the counterparty: there is no broker order behind this row.
+/// `stake` is the money at risk and — exactly like the managed-trading doctrine
+/// settled in HANDOVER.md — the MAXIMUM the client can lose. `multiplier` turns
+/// the stake into an exposure:
+///
+///   notional = stake × multiplier
+///   pnl      = notional × ((price − entry) / entry) × (BUY ? 1 : −1)
+///   pnl      is CLAMPED at −stake  (a client can never owe more than the stake)
+///
+/// while the position is OPEN `pnl` is the live mark-to-market; on close it is
+/// frozen. The ledger reads it as follows, so NOTHING here is a second source of
+/// money truth:
+///
+///   OPEN   → stake joins the ledger's DEPLOYED capital, pnl joins UNREALIZED P/L
+///   CLOSED → pnl joins REALIZED P/L, and the stake returns to idle cash
+///
+/// Both directions are equity-neutral on open and on close; only the pnl moves
+/// equity. See `src/server/accounting/ledger.ts` (the single formula).
+model Position {
+  id           String         @id @default(uuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Platform symbol, e.g. `frxXAUUSD` or `cryBTCUSD`.
+  symbol       String
+  side         PositionSide
+  /// Money at risk — the maximum loss on this position, in USD.
+  stake        Decimal        @db.Decimal(18, 2)
+  /// Exposure multiple applied to the stake. 1 = spot-like.
+  multiplier   Decimal        @default(1.00) @db.Decimal(18, 2)
+  entryPrice   Decimal        @db.Decimal(18, 5)
+  /// Last mark from the price feed (or the entry price before the first tick).
+  currentPrice Decimal        @db.Decimal(18, 5)
+  stopLoss     Decimal?       @db.Decimal(18, 5)
+  takeProfit   Decimal?       @db.Decimal(18, 5)
+  /// Unrealized while OPEN (live mark), frozen once CLOSED.
+  pnl          Decimal        @default(0.00) @db.Decimal(18, 2)
+  status       PositionStatus @default(OPEN)
+  /// Which engine booked this. "INTERNAL" today; a broker tag leaves room for a
+  /// bridge later without changing the ledger contract.
+  executionMode String        @default("INTERNAL")
+  closePrice   Decimal?       @db.Decimal(18, 5)
+  closedAt     DateTime?
+  openedAt     DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  /// The wallet/ledger reads OPEN rows per user and the tick engine reads them
+  /// per symbol, so both access shapes are indexed.
+  @@index([userId, status])
+  @@index([symbol, status])
+  @@index([status])
 }

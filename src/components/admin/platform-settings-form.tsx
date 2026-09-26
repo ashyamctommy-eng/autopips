@@ -6,6 +6,7 @@ import { RotateCcw, Save } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
@@ -77,7 +78,12 @@ function SettingRow({
   setting: AdminSettingView;
   onUpdated: (next: AdminSettingView[]) => void;
 }) {
-  const [value, setValue] = React.useState('');
+  const isLongText = setting.kind === 'longtext';
+  // A longtext setting is EDITED IN PLACE: start from the current value, or the
+  // built-in default, rather than an empty box the admin would have to retype.
+  const [value, setValue] = React.useState(() =>
+    isLongText ? setting.display ?? setting.defaultValue : '',
+  );
   const [busy, setBusy] = React.useState(false);
   const [confirmingClear, setConfirmingClear] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -109,7 +115,7 @@ function SettingRow({
         const data = (body as { data?: { settings?: AdminSettingView[] } }).data;
         if (data?.settings) onUpdated(data.settings);
 
-        setValue('');
+        setValue(isLongText ? next ?? setting.defaultValue : '');
         setConfirmingClear(false);
         toast({
           title: successTitle,
@@ -126,7 +132,7 @@ function SettingRow({
         setBusy(false);
       }
     },
-    [onUpdated, setting.key, setting.label, setting.secret],
+    [isLongText, onUpdated, setting.defaultValue, setting.key, setting.label, setting.secret],
   );
 
   return (
@@ -146,7 +152,13 @@ function SettingRow({
 
       <p className="max-w-3xl text-xs leading-relaxed text-muted">{setting.description}</p>
 
-      {setting.display ? (
+      {isLongText ? (
+        <p className="text-xs text-muted">
+          {setting.source === 'console'
+            ? 'Currently using your saved text (edit below).'
+            : 'Currently using the built-in default text (shown below). Save to override it.'}
+        </p>
+      ) : setting.display ? (
         <p className="font-mono text-xs text-base-100">
           current: <span className="break-all">{setting.display}</span>
         </p>
@@ -161,21 +173,38 @@ function SettingRow({
           <Label htmlFor={fieldId} className="sr-only">
             {setting.label}
           </Label>
-          <Input
-            id={fieldId}
-            name={setting.key}
-            type={setting.secret ? 'password' : 'text'}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={
-              setting.display && setting.secret
-                ? 'Leave blank to keep the current value'
-                : setting.inputHint
-            }
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            disabled={busy}
-          />
+          {setting.kind === 'longtext' ? (
+            // Multi-paragraph prose (a public disclosure). A single-line input would
+            // hide the paragraph breaks, which are semantic on the page.
+            <Textarea
+              id={fieldId}
+              name={setting.key}
+              rows={12}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={setting.inputHint}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              disabled={busy}
+              className="font-mono text-xs leading-relaxed"
+            />
+          ) : (
+            <Input
+              id={fieldId}
+              name={setting.key}
+              type={setting.secret ? 'password' : 'text'}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={
+                setting.display && setting.secret
+                  ? 'Leave blank to keep the current value'
+                  : setting.inputHint
+              }
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              disabled={busy}
+            />
+          )}
         </div>
 
         <Button

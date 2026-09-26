@@ -92,6 +92,53 @@ const schema = z.object({
   /** Seconds to wait for a Deriv connection/authorisation. */
   BROKER_CONNECT_TIMEOUT: z.coerce.number().int().positive().default(120),
 
+  // Market data
+  /**
+   * Which feed answers historical candles. `deriv` (default) keeps the current
+   * public Deriv feed; `twelve` routes history through Twelve Data instead.
+   *
+   * A switch rather than a replacement on purpose: the two feeds do not carry the
+   * same universe (Twelve Data has no Deriv synthetic indices such as R_10/R_100),
+   * so flipping this is an operator decision tied to which instruments are listed.
+   * Live ticks are unaffected by this value.
+   */
+  MARKET_DATA_PROVIDER: z.preprocess(
+    // An EMPTY variable (common: a platform injects it unset) must mean "use the
+    // default", not "invalid". A non-empty TYPO still fails loudly.
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.enum(['deriv', 'twelve']).default('deriv'),
+  ),
+  /**
+   * Twelve Data key. OPTIONAL: without it the Twelve Data path refuses (loudly)
+   * and the default Deriv feed is used, so a deployment is never broken by a
+   * missing market-data key. May also be set at runtime in Admin → Settings.
+   */
+  TWELVE_DATA_API_KEY: z.string().min(1).optional().or(z.literal('')),
+  TWELVE_DATA_API_BASE: z.string().url().default('https://api.twelvedata.com'),
+
+  // Execution venue
+  /**
+   * Where a client trade is executed.
+   *
+   * `broker` (DEFAULT, the previous behaviour) places orders through the broker
+   * adapter. `internal` books the trade as a `Position` on the platform's own
+   * book and never contacts a broker for execution or balances.
+   *
+   * Defaults to `broker` so this is REVERSIBLE: turning internal execution on is a
+   * deliberate act, and turning it off restores the previous path. Internal
+   * positions are refused outright while the mode is `broker`.
+   */
+  EXECUTION_MODE: z.preprocess(
+    // Same rule as the feed selector: empty means "use the default", a typo fails
+    // loudly rather than silently booking trades on the wrong venue.
+    //
+    // DEFAULT IS `internal`: the platform executes on its own book (Deriv order
+    // placement and external balance syncing were retired). `broker` remains
+    // available so the previous path can be restored by setting one variable.
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.enum(['internal', 'broker']).default('internal'),
+  ),
+
   // Risk
   RISK_MASTER_EQUITY_FLOOR_USD: z.coerce.number().nonnegative().default(0),
   RISK_MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(50),
