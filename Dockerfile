@@ -138,15 +138,20 @@ USER node
 
 EXPOSE 3000
 
-# Liveness probe: the public marketing page (`GET /`). It does not touch the
-# database on a healthy deployment — DB/Redis readiness is probed by the worker
-# (`GET /healthz`) and by Postgres/Redis' own healthchecks in docker-compose.
+# Liveness probe: `/healthz` answers 200 whenever this process is serving HTTP,
+# and reports db/schema/redis/trading in the body. It is deliberately NOT
+# `/api/v1/health`: that endpoint answers 503 while Redis is unreachable, and a
+# container healthcheck that follows Redis makes an orchestrator RESTART a
+# healthy web process (and, on Railway, can fail an otherwise-good deploy)
+# because of a dependency the web tier does not need to serve a page. A really
+# unmigrated database is still caught before traffic: the entrypoint runs
+# `prisma migrate deploy` and exits non-zero.
 # Uses the *bound* port: managed platforms (Railway, Render) inject PORT and
-# the app binds to it, so a hardcoded 3000 here would report unhealthy on a
-# perfectly working deployment. `/api/v1/health` answers 503 while Postgres or
-# Redis is unreachable, and busybox wget exits non-zero on a 5xx.
+# the app binds `0.0.0.0:${PORT}` (`npm start` → `next start -H 0.0.0.0`, which
+# reads PORT), so a hardcoded 3000 here would report unhealthy on a perfectly
+# working deployment.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/v1/health" > /dev/null 2>&1 || exit 1
+    CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/healthz" > /dev/null 2>&1 || exit 1
 
 # The entrypoint runs `prisma migrate deploy` BEFORE the server accepts traffic
 # (and exits non-zero if it fails), so no replica can ever serve against an

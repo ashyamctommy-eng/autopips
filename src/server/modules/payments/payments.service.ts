@@ -9,7 +9,7 @@ import {
   resolvedPayoutTwoPersonApproval,
 } from '@/server/modules/settings/settings.service';
 import { D, toPrismaDecimal, usd, type Decimal, type Numeric } from '@/lib/money';
-import { claimOnce } from '@/lib/rate-limit';
+import { claimOnceDurable, type ClaimResult } from '@/lib/idempotency';
 import { assetMeta } from '@/lib/contracts';
 import { AUDIT, AUDIT_PAYOUT, recordAudit, recordAuditSafe } from '@/server/modules/audit/audit.service';
 import {
@@ -104,6 +104,164 @@ function isStaff(user: Pick<SessionUser, 'role'>): boolean {
 function assertVerifiedClient(user: SessionUser): void {
   if (isStaff(user)) return;
   if (user.kycStatus !== 'APPROVED') throw ApiError.kycRequired();
+}
+
+/* ────────────────────── execution safety: solvency ─────────────────────────
+ *
+ * A withdrawal is validated when it is REQUESTED, but money is only actually
+ * paid at broadcast/settlement time — and between those two moments the
+ * account can lose money. Without a re-check a reservation made against a
+ * healthy balance can be paid after a loss has landed, driving equity negative
+ * and paying out money the client no longer has.
+ *
+ * The measure used here is deliberately the strict one:
+ *
+ *   surplus = equity − deployedCapital − pendingWithdrawals
+ *
+ * i.e. "after every in-flight payout has left, is there anything left that was
+ * not committed to a strategy?". Requiring `surplus >= 0` means the platform
+ * will not settle a payout that is funded by capital currently deployed. It is
+ * more conservative than `withdrawableBalance` (which is floored at 0 and net
+ * of nothing else), which is what an execution gate should be.
+ */
+
+interface SolvencyReport {
+  /** False when the ledger could not be read at all. */
+  evaluated: boolean;
+  /** True only when evaluated AND the account covers all in-flight payouts. */
+  safe: boolean;
+  equityUsd: string;
+  deployedCapitalUsd: string;
+  pendingWithdrawalsUsd: string;
+  surplusUsd: string;
+}
+
+/** Tolerance for Decimal rounding only — a cent, not a policy allowance. */
+const SOLVENCY_TOLERANCE_USD = '-0.01';
+
+async function evaluateWithdrawalSolvency(userId: string): Promise<SolvencyReport> {
+  try {
+    const snapshot = await getAccountSnapshot(userId);
+    const surplus = snapshot.breakdown.equity
+      .minus(snapshot.activeCapital)
+      .minus(snapshot.pendingWithdrawals);
+    return {
+      evaluated: true,
+      safe: surplus.greaterThanOrEqualTo(D(SOLVENCY_TOLERANCE_USD)),
+      equityUsd: snapshot.breakdown.equity.toFixed(2),
+      deployedCapitalUsd: snapshot.activeCapital.toFixed(2),
+      pendingWithdrawalsUsd: snapshot.pendingWithdrawals.toFixed(2),
+      surplusUsd: surplus.toFixed(2),
+    };
+  } catch (err) {
+    console.error(
+      '[payments] withdrawal solvency could not be evaluated:',
+      err instanceof Error ? err.message : err,
+    );
+    return {
+      evaluated: false,
+      safe: false,
+      equityUsd: 'unavailable',
+      deployedCapitalUsd: 'unavailable',
+      pendingWithdrawalsUsd: 'unavailable',
+      surplusUsd: 'unavailable',
+    };
+  }
+}
+
+/**
+ * HARD pre-broadcast gate. Runs before ANY provider call, so a refusal means
+ * nothing left the treasury. Fails closed: an unevaluable ledger refuses the
+ * automated send and leaves the withdrawal approved for an operator.
+ */
+async function assertBroadcastSolvency(input: {
+  userId: string;
+  withdrawalId: string;
+  amountUsd: Decimal;
+  ip?: string | null;
+}): Promise<void> {
+  const report = await evaluateWithdrawalSolvency(input.userId);
+  if (report.evaluated && report.safe) return;
+
+  await recordAuditSafe({
+    action: AUDIT_PAYOUT.WITHDRAWAL_SETTLEMENT_BLOCKED,
+    userId: input.userId,
+    ipAddress: input.ip ?? null,
+    details: {
+      withdrawalId: input.withdrawalId,
+      stage: 'PRE_BROADCAST',
+      outcome: 'BLOCKED',
+      reason: report.evaluated ? 'ACCOUNT_NO_LONGER_COVERS_PAYOUT' : 'SOLVENCY_UNEVALUABLE',
+      amountUsd: input.amountUsd.toNumber(),
+      ...report,
+    },
+  });
+
+  throw ApiError.conflict(
+    report.evaluated
+      ? 'This account no longer covers the payout (deployed capital plus in-flight withdrawals exceed its equity), so the automated payout was not broadcast. Nothing left the treasury — review the account, then settle manually if appropriate.'
+      : 'The account ledger could not be read, so the automated payout was not broadcast. Nothing left the treasury — retry, or settle manually after checking the ledger.',
+  );
+}
+
+/**
+ * EVIDENCE-only check for settlements that CANNOT be refused (the provider, or
+ * an operator, has already moved the money). Records an uncovered settlement
+ * instead of blocking it, so reality is booked and an insolvent payout is loud.
+ * Never throws: an audit/ledger blip must not stop the ledger being updated.
+ */
+async function auditUncoveredSettlement(input: {
+  userId: string;
+  withdrawalId: string;
+  amountUsd: Decimal;
+  ip?: string | null;
+  stage: 'OPERATOR_RECORDED' | 'PROVIDER_IPN';
+}): Promise<void> {
+  const report = await evaluateWithdrawalSolvency(input.userId);
+  if (!report.evaluated || report.safe) return;
+
+  await recordAuditSafe({
+    action: AUDIT_PAYOUT.WITHDRAWAL_SETTLEMENT_UNCOVERED,
+    userId: input.userId,
+    ipAddress: input.ip ?? null,
+    details: {
+      withdrawalId: input.withdrawalId,
+      stage: input.stage,
+      outcome: 'RECORDED_UNCOVERED',
+      note: 'The payout was already moved by the provider or an operator, so it is booked as-is; equity is allowed to go negative rather than hiding the settlement.',
+      amountUsd: input.amountUsd.toNumber(),
+      ...report,
+    },
+  });
+}
+
+/**
+ * Record that a money-critical replay guard was resolved without Redis (the
+ * durable Postgres path). Evidence, not a client event; never throws.
+ */
+async function auditDegradedClaim(
+  claim: ClaimResult,
+  context: {
+    surface: 'DEPOSIT_IPN' | 'PAYOUT_IPN';
+    userId: string | null;
+    ip?: string | null;
+    details: Record<string, unknown>;
+  },
+): Promise<void> {
+  if (!claim.redisUnavailable && !claim.databaseUnavailable) return;
+  await recordAuditSafe({
+    action: AUDIT_PAYOUT.IPN_REPLAY_GUARD_DEGRADED,
+    userId: context.userId,
+    ipAddress: context.ip ?? null,
+    details: {
+      surface: context.surface,
+      authority: claim.authority,
+      redisUnavailable: claim.redisUnavailable,
+      databaseUnavailable: claim.databaseUnavailable,
+      claimed: claim.claimed,
+      ...context.details,
+    },
+  });
 }
 
 /** Finite, 2 decimal places, within [min, max]. Never a float artefact. */
@@ -704,11 +862,14 @@ export interface HandleIpnResult {
  *      same `claimOnce` discipline, keyed `payout-ipn:<withdrawalId>:<status>`,
  *      and its settlement is a compare-and-swap on the in-flight state, so a
  *      replayed payout callback cannot debit twice.
- * *   1. Redis `claimOnce("ipn:<payment_id>:<payment_status>", 86400)` gives each
- *      (payment, status) pair exactly one processing slot per 24h. NOWPayments
- *      retries deliveries; a retry — and any replay by an attacker who captured
- *      a legitimate body — hits the guard and returns `{duplicate:true}` before
- *      any row is touched.
+ *   1. A DURABLE single-use claim, `claimOnceDurable("ipn:<payment_id>:<payment_status>",
+ *      86400)`, gives each (payment, status) pair exactly one processing slot
+ *      per 24h. Postgres is the authority and Redis is only an accelerator, so
+ *      a Redis outage no longer makes the guard fail closed and silently drop a
+ *      signed credit; a Redis flush can no longer forget that a callback was
+ *      already processed. NOWPayments retries deliveries; a retry — and any
+ *      replay by an attacker who captured a legitimate body — hits the guard
+ *      and returns `{duplicate:true}` before any row is touched.
  *   2. The credited value is ASSIGNED, never incremented: amountUsd :=
  *      min(received, requested), so even a hypothetical double-process cannot
  *      accumulate. Crediting the same deposit twice in a row is idempotent by
@@ -716,9 +877,9 @@ export interface HandleIpnResult {
  *   3. Only CONFIRMED/FINISHED credit equity, and `confirmed` is followed by
  *      `finished` for the same payment — neither transition adds anything,
  *      because (2) holds.
- *   4. claimOnce fails CLOSED: if Redis is unreachable it returns false, which
- *      we treat as "already processed". A dropped IPN is recoverable (provider
- *      retry, or the reconcile poll above); a double credit is not.
+ *   4. The claim fails CLOSED only when BOTH Postgres and Redis are unreachable
+ *      AND no prior claim exists. A dropped IPN is recoverable (provider retry,
+ *      or the reconcile poll above); a double credit is not.
  */
 export async function handleIpn(input: HandleIpnInput): Promise<HandleIpnResult> {
   const { rawBody, signature, ip } = input;
@@ -824,8 +985,27 @@ export async function handleIpn(input: HandleIpnInput): Promise<HandleIpnResult>
   }
 
   // (c) REPLAY GUARD — the single-use slot for this (payment, status).
-  const claimed = await claimOnce(`ipn:${payload.paymentId}:${payload.paymentStatus}`, 86_400);
-  if (!claimed) {
+  //
+  // Durability note: this is Postgres-backed (`claimOnceDurable`). Previously a
+  // Redis-only `SET NX` failed closed on a Redis outage, so a valid, signed
+  // deposit callback was acknowledged as a duplicate and the client's credit was
+  // dropped until someone happened to poll. Now a Redis outage degrades the
+  // guard to a row write instead of losing the money.
+  const claim = await claimOnceDurable(
+    `ipn:${payload.paymentId}:${payload.paymentStatus}`,
+    86_400,
+  );
+  await auditDegradedClaim(claim, {
+    surface: 'DEPOSIT_IPN',
+    userId: deposit.userId,
+    ip,
+    details: {
+      depositId: deposit.id,
+      paymentId: payload.paymentId,
+      providerStatus: payload.paymentStatus,
+    },
+  });
+  if (!claim.claimed) {
     return {
       duplicate: true,
       matched: true,
@@ -1016,12 +1196,19 @@ async function reconcilePayoutIpn(input: ReconcilePayoutIpnInput): Promise<Handl
     return { duplicate: false, matched: true, withdrawalId: row.id, status: row.status, credited: false };
   }
 
-  // REPLAY GUARD — the same single-use-slot discipline as the deposit path. A
-  // retried (or captured-and-replayed) payout IPN hits this and returns
-  // `duplicate:true` before any row is touched. It is keyed on OUR withdrawal id
-  // and the provider status, so it cannot collide with the deposit keyspace.
-  const claimed = await claimOnce(`payout-ipn:${row.id}:${providerStatus}`, 86_400);
-  if (!claimed) {
+  // REPLAY GUARD — the same durable single-use-slot discipline as the deposit
+  // path (Postgres is the authority; Redis only accelerates). A retried (or
+  // captured-and-replayed) payout IPN hits this and returns `duplicate:true`
+  // before any row is touched. It is keyed on OUR withdrawal id and the provider
+  // status, so it cannot collide with the deposit keyspace.
+  const claim = await claimOnceDurable(`payout-ipn:${row.id}:${providerStatus}`, 86_400);
+  await auditDegradedClaim(claim, {
+    surface: 'PAYOUT_IPN',
+    userId: row.userId,
+    ip,
+    details: { withdrawalId: row.id, providerStatus, providerPayoutId: payload.payoutId },
+  });
+  if (!claim.claimed) {
     return { duplicate: true, matched: true, withdrawalId: row.id, status: row.status, credited: false };
   }
 
@@ -1063,6 +1250,18 @@ async function reconcilePayoutIpn(input: ReconcilePayoutIpnInput): Promise<Handl
   }
 
   const updated = await prisma.withdrawal.findUniqueOrThrow({ where: { id: row.id } });
+
+  // The provider has moved the money, so the settlement is booked regardless.
+  // If the account no longer covers it, that is recorded as evidence.
+  if (settled && applied) {
+    await auditUncoveredSettlement({
+      userId: row.userId,
+      withdrawalId: row.id,
+      amountUsd: usd(row.amountUsd),
+      ip,
+      stage: 'PROVIDER_IPN',
+    });
+  }
 
   await recordAudit({
     action: AUDIT_PAYOUT.WITHDRAWAL_PAYOUT_IPN,
@@ -1628,6 +1827,17 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
     }
     const settled = await prisma.withdrawal.findUniqueOrThrow({ where: { id: row.id } });
 
+    // The money has already left (an operator recorded the txHash), so this
+    // settlement MUST be booked. If the account no longer covers it, record that
+    // as evidence rather than refusing reality.
+    await auditUncoveredSettlement({
+      userId: row.userId,
+      withdrawalId: row.id,
+      amountUsd: usd(row.amountUsd),
+      ip,
+      stage: 'OPERATOR_RECORDED',
+    });
+
     await recordAudit({
       action: AUDIT.WITHDRAWAL_BROADCAST,
       userId: row.userId,
@@ -1708,6 +1918,19 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
         'Add it to the allow-list before broadcasting, or settle this payout manually.',
     );
   }
+
+  // EXECUTION SAFETY — re-check the ledger immediately before any provider
+  // call. The withdrawal was validated when it was REQUESTED, but losses can
+  // land between request and approval; the automated broadcast is the last
+  // point at which the platform can still refuse, so it does. A refusal here
+  // means nothing left the treasury, and the row stays approved (SENDING) for
+  // an operator to review.
+  await assertBroadcastSolvency({
+    userId: row.userId,
+    withdrawalId: row.id,
+    amountUsd: usd(approved.amountUsd),
+    ip,
+  });
 
   // STEP 1 — CONVERT USD → COIN before anything is broadcast. `amountUsd` is a
   // USD figure; POST /payout has no price/currency split, so sending it as the

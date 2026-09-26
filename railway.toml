@@ -34,9 +34,25 @@ preDeployCommand = ["npx prisma migrate deploy"]
 startCommand = "npm start"
 
 # Railway waits for this to return 2xx before switching traffic to the new
-# deployment. `/api/v1/health` answers 503 while Postgres or Redis is
-# unreachable, so a broken deploy is never promoted.
-healthcheckPath = "/api/v1/health"
+# deployment. This deliberately points at the LIVENESS endpoint, not at the
+# dependency-hardened readiness endpoint.
+#
+# WHY `/healthz` AND NOT `/api/v1/health` (2026-09-26):
+#   `/api/v1/health` answers 503 whenever Redis is unreachable. Redis is
+#   valuable but it is NOT required for the web tier to serve pages — making a
+#   Redis blip fail the platform's own healthcheck pulled every web replica out
+#   of rotation (and could fail an otherwise-good deploy), turning a degraded
+#   dependency into a total outage.
+#
+#   `/healthz` answers 200 for any process that is serving HTTP, and reports
+#   db/schema/redis/trading in its BODY. A genuinely un-migrated or unreachable
+#   database still fails the deploy earlier and harder: the image entrypoint runs
+#   `prisma migrate deploy` and exits non-zero (docker-entrypoint.sh), which
+#   fails the deployment before this probe is even consulted.
+#
+#   Keep `/api/v1/health` as the READINESS probe for external monitors (Uptime,
+#   Kubernetes) — use it when you want a hard 503 on a degraded dependency.
+healthcheckPath = "/healthz"
 healthcheckTimeout = 120
 
 restartPolicyType = "ON_FAILURE"

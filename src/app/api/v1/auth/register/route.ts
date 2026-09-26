@@ -6,6 +6,7 @@ import { rateLimit } from '@/lib/rate-limit';
 import { AUDIT, recordAuditSafe } from '@/server/modules/audit/audit.service';
 import { assertPasswordPolicy, hashPassword } from '@/server/modules/auth/password.service';
 import { toSessionUser } from '@/server/modules/auth/session-issue';
+import { recordCurrentConsents } from '@/server/modules/legal/legal.service';
 import type { User } from '@prisma/client';
 
 export const runtime = 'nodejs';
@@ -17,6 +18,18 @@ const bodySchema = z.object({
   fullName: z.string().trim().min(2).max(120),
   country: z.string().trim().min(2).max(56),
   phone: z.string().trim().min(6).max(32).optional(),
+  // Explicit affirmative acceptance of each instrument. `refine` (not
+  // `z.literal(true)`) so a false or missing value produces the field message
+  // the form shows, and so there is no accidental "undefined passes" path.
+  acceptedTerms: z.boolean().refine((value) => value === true, {
+    message: 'You must accept the Terms of Service.',
+  }),
+  acceptedPrivacy: z.boolean().refine((value) => value === true, {
+    message: 'You must accept the Privacy Policy.',
+  }),
+  acceptedRiskDisclosure: z.boolean().refine((value) => value === true, {
+    message: 'You must acknowledge the Risk Disclosure.',
+  }),
 });
 
 /** 5 registrations per IP per 15 minutes. */
@@ -35,20 +48,46 @@ function isUniqueViolation(err: unknown): boolean {
  * Inserts the account, translating the unique-email race into a 409. Two
  * concurrent sign-ups for one address must not produce a 500.
  */
-async function createAccount(input: {
-  email: string;
-  passwordHash: string;
-  fullName: string;
-  country: string;
-  phone: string | null;
-}): Promise<User> {
+interface CreateAccountContext {
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+/**
+ * Inserts the account AND its legal-consent records in ONE transaction, then
+ * translates the unique-email race into a 409. Two concurrent sign-ups for one
+ * address must not produce a 500; more importantly, a failed consent write
+ * rolls the account back, so no account can exist without a record of what it
+ * accepted.
+ */
+async function createAccount(
+  input: {
+    email: string;
+    passwordHash: string;
+    fullName: string;
+    country: string;
+    phone: string | null;
+  },
+  context: CreateAccountContext,
+): Promise<User> {
   try {
-    return await prisma.user.create({
-      data: {
-        ...input,
-        role: 'CLIENT',
-        kycStatus: 'NOT_SUBMITTED',
-      },
+    return await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          ...input,
+          role: 'CLIENT',
+          kycStatus: 'NOT_SUBMITTED',
+        },
+      });
+
+      await recordCurrentConsents(tx, {
+        userId: user.id,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+        method: 'REGISTRATION',
+      });
+
+      return user;
     });
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -100,18 +139,31 @@ export const POST = handler(async (request: Request) => {
 
   const passwordHash = await hashPassword(body.password);
 
-  const user = await createAccount({
-    email,
-    passwordHash,
-    fullName: body.fullName,
-    country: body.country,
-    phone: body.phone ?? null,
-  });
+  const user = await createAccount(
+    {
+      email,
+      passwordHash,
+      fullName: body.fullName,
+      country: body.country,
+      phone: body.phone ?? null,
+    },
+    {
+      ipAddress: ip,
+      userAgent: request.headers.get('user-agent'),
+    },
+  );
 
   await recordAuditSafe({
     action: AUDIT.AUTH_REGISTERED,
     userId: user.id,
-    details: { email: user.email, country: user.country },
+    details: {
+      email: user.email,
+      country: user.country,
+      // The consent rows are the evidence; naming the acceptance here keeps the
+      // security trail self-contained.
+      legalConsents: ['TERMS_OF_SERVICE', 'PRIVACY_POLICY', 'RISK_DISCLOSURE'],
+      consentMethod: 'REGISTRATION',
+    },
     ipAddress: ip,
   });
 

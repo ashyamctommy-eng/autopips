@@ -23,8 +23,9 @@ import { ApiError } from '@/lib/http';
 import { D, toPrismaDecimal, usd } from '@/lib/money';
 import { prisma } from '@/lib/prisma';
 import { redis, rkey } from '@/lib/redis';
+import { claimOnceDurable, releaseClaimDurable } from '@/lib/idempotency';
 import { publishActivity, publishTradeEvent } from '@/server/ws/event-bus';
-import { AUDIT, recordAudit, recordAuditSafe } from '../audit/audit.service';
+import { AUDIT, AUDIT_PAYOUT, recordAudit, recordAuditSafe } from '../audit/audit.service';
 import {
   ensureBrokerConnected,
   getAdapterForConnection,
@@ -276,14 +277,29 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'BROKER_UNAVAILABLE', allocations: [], outcomes: [] };
   }
 
-  // Duplicate protection: the claim is taken before the first broker call, so two
-  // replicas racing on the same signal cannot both submit orders.
-  const claimed = await redis.set(claimKey, '1', 'EX', SIGNAL_CLAIM_TTL_SECONDS, 'NX');
-  const duplicate = claimed === null;
+  // Duplicate protection: the claim is taken before the first broker call, so
+  // two replicas racing on the same signal cannot both submit orders. The claim
+  // is DURABLE (Postgres is the authority, Redis accelerates it): a Redis flush
+  // used to make the guard forget, and a re-delivered signal then released a
+  // SECOND live broker order — a real position, not a bookkeeping error.
+  const claim = await claimOnceDurable(claimKey, SIGNAL_CLAIM_TTL_SECONDS);
+  const duplicate = !claim.claimed;
+
+  if ((claim.redisUnavailable || claim.databaseUnavailable) && claim.claimed) {
+    await recordAuditSafe({
+      action: AUDIT_PAYOUT.SIGNAL_CLAIM_DEGRADED,
+      details: {
+        ...configClaim,
+        authority: claim.authority,
+        redisUnavailable: claim.redisUnavailable,
+        databaseUnavailable: claim.databaseUnavailable,
+      },
+    });
+  }
 
   const account = await readAccountOrReport(adapter, conn, configClaim);
   if (!account) {
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'ACCOUNT_STATE_UNAVAILABLE', allocations: [], outcomes: [] };
   }
 
@@ -309,7 +325,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
         investmentRooms(null),
       ),
     );
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     return { signalId: signal.signalId, status: 'REJECTED', reason, allocations: [], outcomes: [] };
   }
 
@@ -324,7 +340,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
       action: AUDIT.BROKER_ERROR,
       details: { ...configClaim, phase: 'execute_signal.open_positions', error: message },
     });
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     return { signalId: signal.signalId, status: 'NO_CONNECTION', reason: 'POSITIONS_UNAVAILABLE', allocations: [], outcomes: [] };
   }
 
@@ -422,7 +438,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
 
   if (!decision.passed) {
     // The signal never reached the broker, so the claim is released for a retry.
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     await publishActivity(
       makeActivity(
         'SIGNAL_REJECTED',
@@ -490,7 +506,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
     if (account.equity === null) {
       // Sizing scales client lots against master equity; without a figure that is
       // not a scale factor, it is a division by an unknown.
-      if (claimed !== null) await redis.del(claimKey);
+      if (claim.claimed) await releaseClaimDurable(claimKey);
       return {
         signalId: signal.signalId,
         status: 'NO_CONNECTION',
@@ -550,7 +566,7 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
 
   const executable = allocations.filter((allocation) => !allocation.skipped);
   if (executable.length === 0) {
-    if (claimed !== null) await redis.del(claimKey);
+    if (claim.claimed) await releaseClaimDurable(claimKey);
     await publishActivity(
       makeActivity(
         'SIGNAL_NO_ALLOCATION',
