@@ -41,6 +41,8 @@ export type PlatformSettingKey =
   | 'nowpayments.api_base'
   | 'nowpayments.allowed_currencies'
   | 'deriv.api_token'
+  // ── market data (Admin → Settings) ──
+  | 'twelve_data.api_key'
   // ── payout controls (Admin → Settings) ──
   | 'payout.daily_cap_usd'
   | 'payout.address_allowlist'
@@ -122,6 +124,16 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     kind: 'secret',
     defaultValue: '',
     inputHint: 'api.deriv.com → API token (read + trade scopes)',
+  },
+  {
+    key: 'twelve_data.api_key',
+    envName: 'TWELVE_DATA_API_KEY',
+    label: 'Twelve Data API key',
+    description:
+      'Market-data key used when MARKET_DATA_PROVIDER=twelve to fetch historical candles. Twelve Data has no Deriv synthetic indices (R_10/R_100), so only the mapped instruments can be served. Leaving this empty makes the Twelve Data path refuse and the default feed continue.',
+    kind: 'secret',
+    defaultValue: '',
+    inputHint: 'twelvedata.com → Dashboard → API keys',
   },
 
   // ── payout controls ────────────────────────────────────────────────────────

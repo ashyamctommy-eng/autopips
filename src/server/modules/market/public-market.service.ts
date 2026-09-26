@@ -8,6 +8,10 @@ import {
   mapDerivActiveSymbols,
   mapDerivCandles,
 } from '@/server/modules/broker/deriv.adapter';
+import {
+  getTwelveDataCandles,
+  marketDataProvider,
+} from '@/server/modules/market/twelve-data.service';
 import type { Candle, InstrumentInfo, Quote } from '@/server/modules/broker/broker.types';
 
 /**
@@ -104,6 +108,14 @@ export async function getPublicCandles(
   timeframe: string,
   count: number,
 ): Promise<Candle[]> {
+  // Provider switch (MARKET_DATA_PROVIDER). Defaults to the Deriv public feed, so
+  // this is a no-op until an operator sets it deliberately. Twelve Data is not a
+  // drop-in: it has no mapping for Deriv synthetics (R_10/R_100) and will refuse
+  // them, which is the correct loud failure rather than pricing the wrong thing.
+  if (marketDataProvider() === 'twelve') {
+    return getTwelveDataCandles(symbol, timeframe, count);
+  }
+
   const granularity = GRANULARITY_SECONDS[timeframe];
   if (!granularity) {
     throw new Error(`Deriv cannot serve the ${timeframe} timeframe.`);

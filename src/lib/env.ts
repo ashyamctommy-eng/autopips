@@ -92,6 +92,25 @@ const schema = z.object({
   /** Seconds to wait for a Deriv connection/authorisation. */
   BROKER_CONNECT_TIMEOUT: z.coerce.number().int().positive().default(120),
 
+  // Market data
+  /**
+   * Which feed answers historical candles. `deriv` (default) keeps the current
+   * public Deriv feed; `twelve` routes history through Twelve Data instead.
+   *
+   * A switch rather than a replacement on purpose: the two feeds do not carry the
+   * same universe (Twelve Data has no Deriv synthetic indices such as R_10/R_100),
+   * so flipping this is an operator decision tied to which instruments are listed.
+   * Live ticks are unaffected by this value.
+   */
+  MARKET_DATA_PROVIDER: z.enum(['deriv', 'twelve']).default('deriv'),
+  /**
+   * Twelve Data key. OPTIONAL: without it the Twelve Data path refuses (loudly)
+   * and the default Deriv feed is used, so a deployment is never broken by a
+   * missing market-data key. May also be set at runtime in Admin → Settings.
+   */
+  TWELVE_DATA_API_KEY: z.string().min(1).optional().or(z.literal('')),
+  TWELVE_DATA_API_BASE: z.string().url().default('https://api.twelvedata.com'),
+
   // Risk
   RISK_MASTER_EQUITY_FLOOR_USD: z.coerce.number().nonnegative().default(0),
   RISK_MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(50),
