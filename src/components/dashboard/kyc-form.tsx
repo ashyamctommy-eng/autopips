@@ -364,6 +364,7 @@ export function KycForm({ initial }: KycFormProps) {
               id="kyc-legal-name"
               name="legalName"
               autoComplete="name"
+              className="h-10 sm:h-9"
               value={legalName}
               onChange={(event) => setLegalName(event.target.value)}
               aria-invalid={Boolean(errors.legalName)}
@@ -379,6 +380,7 @@ export function KycForm({ initial }: KycFormProps) {
               id="kyc-dob"
               name="dob"
               type="date"
+              className="h-10 sm:h-9"
               value={dob}
               onChange={(event) => setDob(event.target.value)}
               aria-invalid={Boolean(errors.dob)}
@@ -410,7 +412,7 @@ export function KycForm({ initial }: KycFormProps) {
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="kyc-id-type">Document type</Label>
             <Select value={idType} onValueChange={setIdType}>
-              <SelectTrigger id="kyc-id-type">
+              <SelectTrigger id="kyc-id-type" className="h-10 sm:h-9">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -429,6 +431,7 @@ export function KycForm({ initial }: KycFormProps) {
             <Input
               id="kyc-id-number"
               name="idNumber"
+              className="h-10 sm:h-9"
               value={idNumber}
               onChange={(event) => setIdNumber(event.target.value)}
               aria-invalid={Boolean(errors.idNumber)}
@@ -475,16 +478,22 @@ export function KycForm({ initial }: KycFormProps) {
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {step > 0 ? (
-            <Button type="button" variant="ghost" onClick={goBack} disabled={submitting}>
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-10 sm:h-9"
+              onClick={goBack}
+              disabled={submitting}
+            >
               Back
             </Button>
           ) : null}
           {step < STEP_LABELS.length - 1 ? (
-            <Button type="button" variant="primary" onClick={goNext}>
+            <Button type="button" variant="primary" className="h-10 sm:h-9" onClick={goNext}>
               Continue
             </Button>
           ) : (
-            <Button type="submit" variant="primary" disabled={submitting}>
+            <Button type="submit" variant="primary" className="h-10 sm:h-9" disabled={submitting}>
               {submitting ? <Spinner size="sm" label="Submitting" /> : <ShieldCheck aria-hidden />}
               Submit for review
             </Button>
@@ -516,7 +525,10 @@ interface FileFieldProps {
 
 function FileField({ id, label, hint, file, error, onChange, required }: FileFieldProps) {
   return (
-    <div className="flex flex-col gap-1.5">
+    // `min-w-0`: this cell is a grid item, so its automatic minimum width would
+    // otherwise be the widest unbreakable child — a long file name would push
+    // the whole form wider than the phone.
+    <div className="flex min-w-0 flex-col gap-1.5">
       <Label htmlFor={id}>
         {label}
         {required ? <span className="text-loss-400"> *</span> : null}
@@ -526,7 +538,7 @@ function FileField({ id, label, hint, file, error, onChange, required }: FileFie
         name={id}
         type="file"
         accept={ACCEPT_ATTRIBUTE}
-        className="h-auto py-1.5 text-xs file:mr-3 file:rounded file:bg-base-700 file:px-2 file:py-1 file:text-xs"
+        className="h-auto min-h-10 py-1.5 text-xs file:mr-3 file:rounded file:bg-base-700 file:px-2 file:py-1 file:text-xs"
         onChange={(event) => onChange(event.target.files?.[0] ?? null)}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? `${id}-error` : `${id}-hint`}
@@ -535,8 +547,11 @@ function FileField({ id, label, hint, file, error, onChange, required }: FileFie
         {hint}
       </p>
       {file ? (
-        <p className="flex items-center gap-1.5 text-xs text-brand-300">
-          <FileUp aria-hidden className="size-3.5" />
+        // `break-all`, not `break-words`: the text is an anonymous flex item, so
+        // breaking has to affect its intrinsic size or the row would still be as
+        // wide as the whole file name.
+        <p className="flex min-w-0 items-center gap-1.5 break-all text-xs text-brand-300">
+          <FileUp aria-hidden className="size-3.5 shrink-0" />
           {describeFile(file)}
         </p>
       ) : null}

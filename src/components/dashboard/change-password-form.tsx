@@ -154,6 +154,7 @@ export function ChangePasswordForm({ policy, description }: ChangePasswordFormPr
               name="currentPassword"
               type="password"
               autoComplete="current-password"
+              className="h-10 sm:h-9"
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
               disabled={busy}
@@ -168,6 +169,7 @@ export function ChangePasswordForm({ policy, description }: ChangePasswordFormPr
               name="newPassword"
               type="password"
               autoComplete="new-password"
+              className="h-10 sm:h-9"
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
               disabled={busy}
@@ -183,6 +185,7 @@ export function ChangePasswordForm({ policy, description }: ChangePasswordFormPr
               name="confirmPassword"
               type="password"
               autoComplete="new-password"
+              className="h-10 sm:h-9"
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               disabled={busy}
@@ -198,7 +201,7 @@ export function ChangePasswordForm({ policy, description }: ChangePasswordFormPr
           ) : null}
 
           <div>
-            <Button type="submit" disabled={busy || !currentPassword || !newPassword}>
+            <Button type="submit" className="h-10 sm:h-9" disabled={busy || !currentPassword || !newPassword}>
               {busy ? <Spinner aria-hidden /> : null}
               Change password
             </Button>

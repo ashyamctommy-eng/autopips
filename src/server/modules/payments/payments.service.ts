@@ -2,11 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { prisma, type Prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
 import { serverEnv } from '@/lib/env';
-import { resolvedAllowedCurrencies } from '@/server/modules/settings/settings.service';
+import {
+  resolvedAllowedCurrencies,
+  resolvedPayoutAddressAllowlist,
+  resolvedPayoutDailyCapUsd,
+  resolvedPayoutTwoPersonApproval,
+} from '@/server/modules/settings/settings.service';
 import { D, toPrismaDecimal, usd, type Decimal, type Numeric } from '@/lib/money';
 import { claimOnce } from '@/lib/rate-limit';
 import { assetMeta } from '@/lib/contracts';
-import { AUDIT, recordAudit, recordAuditSafe } from '@/server/modules/audit/audit.service';
+import { AUDIT, AUDIT_PAYOUT, recordAudit, recordAuditSafe } from '@/server/modules/audit/audit.service';
 import {
   DEBITED_PAYMENT_STATUSES,
   getAccountSnapshot,
@@ -17,16 +22,22 @@ import {
   createPayment,
   createPayout,
   getAvailableCurrencies,
+  getEstimatedPrice,
   getMinimumPaymentAmount,
   getPaymentStatus,
   isPayoutConfigured,
 } from './nowpayments.client';
 import {
+  classifyIpnPayload,
+  extractPayoutTxHash,
   isCreditedStatus,
+  mapPayoutStatusToPaymentStatus,
   mapProviderStatusToPaymentStatus,
   parseIpnPayload,
+  parsePayoutIpnPayload,
   verifyIpnSignature,
   type JsonObject,
+  type PayoutIpnPayload,
 } from './ipn.service';
 
 /**
@@ -58,12 +69,22 @@ export const DEPOSIT_MAX_USD = 250_000;
  * member, so the withdrawal states are persisted like this:
  *
  *   PENDING  → requested, awaiting admin review
- *   SENDING  → APPROVED: payout broadcast, or awaiting operator settlement
- *              (the approval itself is durably recorded in `approvedBy` +
- *               the WITHDRAWAL_APPROVED audit row)
- *   FINISHED → paid out (txHash recorded; equity formula treats it as a debit)
- *   FAILED   → REJECTED by an admin (the reason lives in the audit log, as the
- *              model has no rejectionReason column)
+ *   SENDING  → APPROVED: the payout was approved and (when the payout API is
+ *              configured) broadcast. It is ALSO the state of an approved
+ *              withdrawal awaiting an operator settlement. NOTHING IS DEBITED
+ *              HERE: `SENDING` is an in-flight state that only RESERVES the
+ *              balance (see IN_FLIGHT_WITHDRAWAL_STATUSES in ledger.ts).
+ *   FINISHED → settled: the provider confirmed the payout (or an operator
+ *              recorded the txHash). THIS is the debit: the equity formula
+ *              treats a FINISHED withdrawal as money that left the platform.
+ *   FAILED   → REJECTED by an admin, or a payout the provider reported as
+ *              failed/returned. No money moved, so the reservation is released
+ *              and equity is untouched.
+ *
+ * The ledger DEBIT therefore happens at SETTLEMENT, not at broadcast. An
+ * earlier revision marked a withdrawal FINISHED the moment the provider
+ * accepted the request, which debited client equity before any money had moved
+ * and left no way to walk it back when the payout later failed.
  */
 const WITHDRAWAL_STATUS_PENDING: PaymentStatusValue = 'PENDING';
 const WITHDRAWAL_STATUS_APPROVED: PaymentStatusValue = 'SENDING';
@@ -268,6 +289,166 @@ export function deriveCreditedAmountUsd(input: CreditedAmountInput): CreditedAmo
     // requested amount.
     mismatch: received.minus(requested).abs().greaterThan(tolerance),
   };
+}
+
+// ─── payout controls (pure) ─────────────────────────────────────────────────
+
+/**
+ * Convert a withdrawal's USD figure into the COIN amount the provider must send.
+ *
+ * THE BUG THIS EXISTS FOR: a payout has no `price_amount`/`pay_currency` split
+ * the way a deposit does — `createPayout` sends a single `amount` in the payout
+ * currency. Passing `amountUsd` there told the treasury to send 100 BTC for a
+ * $100 withdrawal. The provider's `/estimate` endpoint is the only authority
+ * for the conversion, so its `estimated_amount` is what gets sent, and its
+ * value is persisted as `Withdrawal.payAmount`.
+ *
+ * `/estimate` is INDICATIVE (it is a spot rate at request time, not a contract).
+ * That is exactly why the returned COIN figure is stored on the row: the stored
+ * `payAmount` is the recorded fact of what was actually broadcast, and a later
+ * reviewer can compare it against the rate the provider quoted. It is NOT
+ * recomputed on read.
+ *
+ * FAIL-CLOSED, AND NEVER A FALLBACK: a missing, non-finite, zero or negative
+ * estimate REFUSES the broadcast. There is deliberately no "use the USD number"
+ * branch — that branch IS the catastrophe. The caller audits the refusal and
+ * leaves the withdrawal approved (SENDING) for manual settlement.
+ */
+export function resolvePayoutCoinAmount(input: {
+  withdrawalId: string;
+  amountUsd: Numeric;
+  currency: string;
+  estimatedAmount: Numeric | null | undefined;
+}): Decimal {
+  const usdAmount = D(input.amountUsd);
+  const raw = input.estimatedAmount;
+
+  const refuse = (why: string): never => {
+    throw ApiError.paymentError(
+      `Payout broadcast refused for withdrawal ${input.withdrawalId}: ${why} ` +
+        `(requested $${usdAmount.toFixed(2)} in ${input.currency.toUpperCase()}). ` +
+        'Refusing to send the USD figure as a coin amount. Settle this payout manually and record ' +
+        'the txHash, or retry once the provider /estimate endpoint returns a usable amount.',
+    );
+  };
+
+  if (raw === null || raw === undefined || raw === '') {
+    return refuse('the provider returned no estimated_amount');
+  }
+
+  const coin = D(raw);
+  if (!coin.isFinite() || coin.lessThanOrEqualTo(0)) {
+    return refuse('the provider estimated a non-positive or non-finite amount');
+  }
+
+  return toPrismaDecimal(coin, 8);
+}
+
+/**
+ * Payout-address allow-list. An EMPTY list means no restriction (the default,
+ * so no operator has to configure anything to keep the previous behaviour).
+ *
+ * Comparison is case-insensitive: crypto addresses are case-sensitive in
+ * general (base58), but the same EVM address has many valid checksummed
+ * casings, and this is a typo/compromise gate rather than a uniqueness test.
+ */
+export function isPayoutAddressAllowed(payoutAddress: string, allowlist: readonly string[]): boolean {
+  if (allowlist.length === 0) return true;
+  const needle = payoutAddress.trim().toLowerCase();
+  return allowlist.some((entry) => entry.trim().toLowerCase() === needle);
+}
+
+/**
+ * Per-client, per-UTC-day USD cap. A cap <= 0 DISABLES the limit (the default).
+ * Boundary is inclusive: a day that lands exactly ON the cap is allowed; only a
+ * request that would exceed it is refused.
+ *
+ * Pure so the boundary is unit-testable without a database; the caller sums the
+ * day's withdrawals inside the same row-locked transaction that reserves the
+ * balance, so concurrent requests cannot each see a pre-cap total.
+ */
+export function exceedsPayoutDailyCap(input: {
+  alreadyRequestedUsd: Numeric;
+  requestedUsd: Numeric;
+  capUsd: Numeric;
+}): boolean {
+  const cap = D(input.capUsd);
+  if (cap.lessThanOrEqualTo(0)) return false;
+  return D(input.alreadyRequestedUsd).plus(D(input.requestedUsd)).greaterThan(cap);
+}
+
+/** Start of the current UTC day — the window the daily cap sums over. */
+export function utcDayStart(now: Date = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/**
+ * The outcome of the two-person rule for one payout action.
+ *
+ *   PROCEED                   broadcast/settle now
+ *   AWAIT_SECOND_APPROVER     the first admin approved; a DIFFERENT admin must
+ *                             approve before money moves
+ *   REFUSED_SAME_ACTOR        the approver tried to release their own approval
+ *   MANUAL_SETTLEMENT_EXEMPT  recording a txHash by hand is never gated
+ */
+export type TwoPersonVerdict =
+  | 'PROCEED'
+  | 'AWAIT_SECOND_APPROVER'
+  | 'REFUSED_SAME_ACTOR'
+  | 'MANUAL_SETTLEMENT_EXEMPT';
+
+export interface TwoPersonDecision {
+  verdict: TwoPersonVerdict;
+  /** The second, distinct admin to record in `secondApprovedBy`. */
+  secondApprovedBy: string | null;
+  reason: string | null;
+}
+
+/**
+ * Two-person approval for an AUTOMATED payout broadcast.
+ *
+ * Rationale: a broadcast is the platform itself moving client money, with no
+ * treasury action behind it, so one compromised admin session must not be able
+ * to release it. The rule therefore defaults ON and gates exactly that action.
+ *
+ * SINGLE-OPERATOR DEPLOYMENTS ARE NEVER LOCKED OUT, by construction:
+ *   • `manualSettlement: true` always returns MANUAL_SETTLEMENT_EXEMPT. An
+ *     operator recording a txHash for money they already sent from the treasury
+ *     wallet is attested evidence, not an autonomous transfer — the system
+ *     cannot and must not refuse to record what happened. It also means the
+ *     rule can never leave a payout unsettleable.
+ *   • `payout.two_person_approval = false` turns the requirement off entirely
+ *     for a deployment that genuinely has one admin; documented on the setting
+ *     and in `decideWithdrawal`.
+ */
+export function decideTwoPersonApproval(input: {
+  twoPersonRequired: boolean;
+  actorUserId: string;
+  /** The admin who already approved (null when this is the first approval). */
+  approvedBy: string | null;
+  /** True when the actor is recording an operator-attested settlement. */
+  manualSettlement: boolean;
+}): TwoPersonDecision {
+  if (input.manualSettlement) {
+    return { verdict: 'MANUAL_SETTLEMENT_EXEMPT', secondApprovedBy: null, reason: null };
+  }
+  if (!input.twoPersonRequired) {
+    return { verdict: 'PROCEED', secondApprovedBy: null, reason: null };
+  }
+  if (input.approvedBy === null) {
+    // First approval. Recorded as approvedBy by the caller; no broadcast yet.
+    return { verdict: 'AWAIT_SECOND_APPROVER', secondApprovedBy: null, reason: null };
+  }
+  if (input.approvedBy === input.actorUserId) {
+    return {
+      verdict: 'REFUSED_SAME_ACTOR',
+      secondApprovedBy: null,
+      reason:
+        'Two-person approval is on for automated payouts: the admin who approved this withdrawal ' +
+        'cannot also release it. A different admin must approve, or settle it manually with a txHash.',
+    };
+  }
+  return { verdict: 'PROCEED', secondApprovedBy: input.actorUserId, reason: null };
 }
 
 // ─── deposits ───────────────────────────────────────────────────────────────
@@ -498,19 +679,32 @@ export interface HandleIpnInput {
 
 export interface HandleIpnResult {
   duplicate: boolean;
-  /** False when the payment_id/order_id matches no deposit we own. */
+  /** False when the payload matches no deposit/withdrawal we own. */
   matched: boolean;
   depositId?: string;
+  withdrawalId?: string;
   status?: PaymentStatusValue;
   credited: boolean;
+  /**
+   * True when the body was signature-valid but its SHAPE matched neither a
+   * deposit nor a payout. It was recorded as evidence and acknowledged with a
+   * 2xx so the provider stops retrying an undeliverable body.
+   */
+  unrecognised?: boolean;
 }
 
 /**
- * Process a NOWPayments IPN.
+ * Process a NOWPayments IPN — a DEPOSIT callback (credits equity) or a PAYOUT
+ * callback (settles a withdrawal and only THERE debits equity).
  *
  * Idempotency argument (see also the REPLAY GUARD below):
  *
- *   1. Redis `claimOnce("ipn:<payment_id>:<payment_status>", 86400)` gives each
+ *   0. The shape decides the route, but the HMAC is checked FIRST for both
+ *      shapes. A payout IPN is reconciled by `reconcilePayoutIpn` under the
+ *      same `claimOnce` discipline, keyed `payout-ipn:<withdrawalId>:<status>`,
+ *      and its settlement is a compare-and-swap on the in-flight state, so a
+ *      replayed payout callback cannot debit twice.
+ * *   1. Redis `claimOnce("ipn:<payment_id>:<payment_status>", 86400)` gives each
  *      (payment, status) pair exactly one processing slot per 24h. NOWPayments
  *      retries deliveries; a retry — and any replay by an attacker who captured
  *      a legitimate body — hits the guard and returns `{duplicate:true}` before
@@ -542,7 +736,66 @@ export async function handleIpn(input: HandleIpnInput): Promise<HandleIpnResult>
     throw ApiError.unauthorized('Invalid IPN signature.');
   }
 
-  // (b) parse + locate
+  // (b) DISCRIMINATE ON SHAPE.
+  //
+  // One URL receives two unrelated webhook bodies: deposits (required
+  // `payment_id`) and payouts (`{ id, withdrawals: [{ id, status,
+  // unique_external_id }] }`). The payout body has no payment_id, so handing it
+  // to the deposit parser fails validation with a 400 — and a 400 makes the
+  // provider retry the same body forever. Discriminate first, then parse each
+  // shape with its own schema.
+  //
+  // The HMAC check above has ALREADY run and passed; nothing here weakens or
+  // duplicates it. An unrecognised shape is still signature-validated before it
+  // can reach this point, so it is either a provider schema addition or a body
+  // for a resource this build does not reconcile. Either way it is EVIDENCE:
+  // record it verbatim in the audit log and ACK with 2xx. A 4xx would only
+  // produce an infinite retry storm against a body we will never accept, while
+  // discarding nothing — the audit row keeps what arrived.
+  let ipnJson: unknown;
+  try {
+    ipnJson = JSON.parse(rawBody);
+  } catch {
+    // verifyIpnSignature already rejects an unparsable body; this is belt and
+    // braces so the discriminator can never be handed undefined.
+    throw ApiError.badRequest('IPN body is not valid JSON.');
+  }
+
+  const kind = classifyIpnPayload(ipnJson);
+  if (kind === 'PAYOUT') {
+    const payoutPayload = parsePayoutIpnPayload(rawBody);
+    if (!payoutPayload) {
+      // classifyIpnPayload said PAYOUT but the parser refused it (it only does
+      // so on unparsable JSON, which was handled above). Treat as unrecognised.
+      await recordAuditSafe({
+        action: AUDIT_PAYOUT.IPN_UNRECOGNISED,
+        details: { kind, reason: 'PAYOUT_PARSE_FAILED', ip: ip ?? null },
+        ipAddress: ip ?? null,
+      });
+      return { duplicate: false, matched: false, credited: false, unrecognised: true };
+    }
+    return reconcilePayoutIpn({ payload: payoutPayload, ip });
+  }
+
+  if (kind === 'UNRECOGNISED') {
+    await recordAuditSafe({
+      action: AUDIT_PAYOUT.IPN_UNRECOGNISED,
+      details: {
+        kind,
+        // The KEYS, never the values: enough for an operator to identify the
+        // body, without copying whatever it contains into the audit table.
+        payloadKeys:
+          ipnJson !== null && typeof ipnJson === 'object' && !Array.isArray(ipnJson)
+            ? Object.keys(ipnJson as Record<string, unknown>).sort()
+            : [],
+        ip: ip ?? null,
+      },
+      ipAddress: ip ?? null,
+    });
+    return { duplicate: false, matched: false, credited: false, unrecognised: true };
+  }
+
+  // (b') DEPOSIT — parse + locate
   const payload = parseIpnPayload(rawBody);
   const deposit =
     (await prisma.deposit.findUnique({ where: { paymentId: payload.paymentId } })) ??
@@ -683,6 +936,197 @@ export async function handleIpn(input: HandleIpnInput): Promise<HandleIpnResult>
   };
 }
 
+// ─── payout IPN reconciliation ──────────────────────────────────────────────
+
+interface ReconcilePayoutIpnInput {
+  payload: PayoutIpnPayload;
+  ip?: string | null;
+}
+
+/**
+ * Apply a payout IPN to the withdrawal it belongs to.
+ *
+ * Called ONLY from `handleIpn` after `verifyIpnSignature` has already passed,
+ * so the body's provenance is established before a single row is read.
+ *
+ * MATCHING: the provider echoes our idempotency key as `unique_external_id`,
+ * which is the withdrawal's own id — that is the primary match. The provider's
+ * payout id (persisted at broadcast as `providerPayoutId`) is the fallback, so
+ * a body whose external id was omitted can still be reconciled.
+ *
+ * APPLYING: only an in-flight (SENDING) withdrawal is advanced. A late IPN can
+ * therefore never un-debit a settled payout or resurrect a failed one — money
+ * that left stays left. FINISHED sets `settledAt` and (when the provider gives
+ * one) `txHash`; FAILED releases the balance reservation. Any other status just
+ * refreshes `providerStatus`/`ipnPayload`.
+ */
+async function reconcilePayoutIpn(input: ReconcilePayoutIpnInput): Promise<HandleIpnResult> {
+  const { payload, ip } = input;
+
+  let row = payload.uniqueExternalId
+    ? await prisma.withdrawal.findUnique({ where: { id: payload.uniqueExternalId } })
+    : null;
+  if (!row && payload.payoutId) {
+    row = await prisma.withdrawal.findFirst({ where: { providerPayoutId: payload.payoutId } });
+  }
+
+  if (!row) {
+    // Signature-valid but unknown to us. Record it (the raw body is the
+    // evidence) and ACK, so the provider does not retry an orphan forever.
+    await recordAudit({
+      action: AUDIT_PAYOUT.WITHDRAWAL_PAYOUT_IPN,
+      ipAddress: ip ?? null,
+      details: {
+        matched: false,
+        unrecognised: true,
+        reason: 'NO_MATCHING_WITHDRAWAL',
+        providerPayoutId: payload.payoutId,
+        uniqueExternalId: payload.uniqueExternalId,
+        providerStatus: payload.status,
+        payload: payload.raw as unknown as Prisma.InputJsonValue,
+        ip: ip ?? null,
+      },
+    });
+    return { duplicate: false, matched: false, credited: false, unrecognised: true };
+  }
+
+  const providerStatus = payload.status;
+  if (!providerStatus) {
+    // A payout-shaped body whose withdrawals[] carried no status. Retain the
+    // payload; there is no state to apply.
+    await prisma.withdrawal.update({
+      where: { id: row.id },
+      data: {
+        ipnPayload: payload.raw as unknown as Prisma.InputJsonValue,
+        ...(payload.payoutId ? { providerPayoutId: payload.payoutId } : {}),
+      },
+    });
+    await recordAudit({
+      action: AUDIT_PAYOUT.WITHDRAWAL_PAYOUT_IPN,
+      userId: row.userId,
+      ipAddress: ip ?? null,
+      details: {
+        withdrawalId: row.id,
+        applied: false,
+        reason: 'NO_PROVIDER_STATUS',
+        providerPayoutId: payload.payoutId,
+        ip: ip ?? null,
+      },
+    });
+    return { duplicate: false, matched: true, withdrawalId: row.id, status: row.status, credited: false };
+  }
+
+  // REPLAY GUARD — the same single-use-slot discipline as the deposit path. A
+  // retried (or captured-and-replayed) payout IPN hits this and returns
+  // `duplicate:true` before any row is touched. It is keyed on OUR withdrawal id
+  // and the provider status, so it cannot collide with the deposit keyspace.
+  const claimed = await claimOnce(`payout-ipn:${row.id}:${providerStatus}`, 86_400);
+  if (!claimed) {
+    return { duplicate: true, matched: true, withdrawalId: row.id, status: row.status, credited: false };
+  }
+
+  const mapped = mapPayoutStatusToPaymentStatus(providerStatus);
+  const settled = mapped === 'FINISHED';
+  const failed = mapped === 'FAILED';
+  const txHash = extractPayoutTxHash(payload.raw);
+
+  const evidence: Prisma.WithdrawalUpdateManyMutationInput = {
+    providerStatus,
+    ipnPayload: payload.raw as unknown as Prisma.InputJsonValue,
+    ...(payload.payoutId ? { providerPayoutId: payload.payoutId } : {}),
+  };
+
+  let applied = false;
+  if (settled || failed) {
+    // Compare-and-swap on the in-flight state: only SENDING may become terminal.
+    const { count } = await prisma.withdrawal.updateMany({
+      where: { id: row.id, status: WITHDRAWAL_STATUS_APPROVED },
+      data: {
+        ...evidence,
+        status: settled ? 'FINISHED' : 'FAILED',
+        // `settledAt` is set ONLY for a real settlement. A failed/returned payout
+        // never moved money, so there is no settlement to date.
+        settledAt: settled ? new Date() : null,
+        ...(settled && txHash ? { txHash } : {}),
+      },
+    });
+    applied = count === 1;
+    if (!applied) {
+      // Already terminal (or otherwise not in flight). Retain the evidence
+      // without re-opening the state.
+      await prisma.withdrawal.update({ where: { id: row.id }, data: evidence });
+    }
+  } else {
+    // Still in flight (waiting/processing/sending, or an unknown status):
+    // record what the counterparty said, change no state, debit nothing.
+    await prisma.withdrawal.update({ where: { id: row.id }, data: evidence });
+  }
+
+  const updated = await prisma.withdrawal.findUniqueOrThrow({ where: { id: row.id } });
+
+  await recordAudit({
+    action: AUDIT_PAYOUT.WITHDRAWAL_PAYOUT_IPN,
+    userId: row.userId,
+    ipAddress: ip ?? null,
+    details: {
+      withdrawalId: row.id,
+      matched: true,
+      applied,
+      providerStatus,
+      mappedStatus: mapped,
+      providerPayoutId: updated.providerPayoutId,
+      payAmount: updated.payAmount === null ? null : updated.payAmount.toString(),
+      txHash: updated.txHash,
+      settledAt: updated.settledAt?.toISOString() ?? null,
+      appliedStatus: updated.status,
+      ledger: settled && applied ? 'EQUITY_DEBITED_AT_SETTLEMENT' : 'NO_LEDGER_CHANGE',
+      ip: ip ?? null,
+    },
+  });
+
+  if (settled && applied) {
+    await recordAudit({
+      action: AUDIT.WITHDRAWAL_BROADCAST,
+      userId: row.userId,
+      ipAddress: ip ?? null,
+      details: {
+        withdrawalId: row.id,
+        providerStatus,
+        providerPayoutId: updated.providerPayoutId,
+        txHash: updated.txHash,
+        settlement: 'PROVIDER_IPN',
+        settledAt: updated.settledAt?.toISOString() ?? null,
+        ledger: 'EQUITY_DEBITED_AT_SETTLEMENT',
+        amountUsd: usd(updated.amountUsd).toNumber(),
+      },
+    });
+  }
+
+  if (failed && applied) {
+    await recordAudit({
+      action: AUDIT.WITHDRAWAL_FAILED,
+      userId: row.userId,
+      ipAddress: ip ?? null,
+      details: {
+        withdrawalId: row.id,
+        stage: 'PROVIDER_IPN',
+        providerStatus,
+        providerPayoutId: updated.providerPayoutId,
+        ledger: 'RESERVATION_RELEASED_NOT_DEBITED',
+        amountUsd: usd(updated.amountUsd).toNumber(),
+      },
+    });
+  }
+
+  return {
+    duplicate: false,
+    matched: true,
+    withdrawalId: updated.id,
+    status: updated.status,
+    credited: false,
+  };
+}
+
 /**
  * For a non-credited status we only lower `amountUsd` when the provider
  * confirms a partial payment (honest record of what actually arrived). The row
@@ -730,6 +1174,18 @@ export async function requestWithdrawal(input: RequestWithdrawalInput): Promise<
   const currency = assertAllowedCurrency(cryptoCurrency);
   validatePayoutAddress(currency, payoutAddress);
 
+  // Operator allow-list. Empty = no restriction (the default). Enforced here so
+  // a non-allow-listed address never becomes an approved payout, and again at
+  // broadcast time so a list tightened mid-flight still bites.
+  const addressAllowlist = resolvedPayoutAddressAllowlist();
+  if (!isPayoutAddressAllowed(payoutAddress, addressAllowlist)) {
+    throw ApiError.badRequest(
+      'That payout address is not on the operator allow-list. Contact support to have it added before requesting this withdrawal.',
+    );
+  }
+
+  const dailyCapUsd = D(resolvedPayoutDailyCapUsd());
+
   // ── Atomic eligibility check + reservation ────────────────────────────────
   // This MUST be one transaction with the user row locked. A plain
   // read-then-write is a time-of-check/time-of-use race: three concurrent
@@ -750,6 +1206,36 @@ export async function requestWithdrawal(input: RequestWithdrawalInput): Promise<
         `Withdrawable balance is $${locked.withdrawableBalance.toFixed(2)}; requested $${amount.toFixed(2)}. ` +
           'Capital deployed in active strategies is not withdrawable until it is released.',
       );
+    }
+
+    // Per-client daily payout cap. Summed over the client's NON-FAILED
+    // withdrawals since UTC midnight, INSIDE the same `FOR UPDATE` transaction
+    // that reserves the balance: a concurrent pair of requests would otherwise
+    // both read a pre-cap total and both pass. A cap of 0 disables the check,
+    // so an unconfigured deployment behaves exactly as before.
+    if (dailyCapUsd.greaterThan(0)) {
+      const dayAggregate = await tx.withdrawal.aggregate({
+        where: {
+          userId: user.id,
+          createdAt: { gte: utcDayStart() },
+          status: { notIn: [WITHDRAWAL_STATUS_REJECTED, 'REFUNDED'] },
+        },
+        _sum: { amountUsd: true },
+      });
+      const alreadyRequested = D(dayAggregate._sum.amountUsd ?? 0);
+      if (
+        exceedsPayoutDailyCap({
+          alreadyRequestedUsd: alreadyRequested,
+          requestedUsd: amount,
+          capUsd: dailyCapUsd,
+        })
+      ) {
+        throw ApiError.badRequest(
+          `Daily payout limit reached: $${alreadyRequested.toFixed(2)} already requested since 00:00 UTC ` +
+            `and this request of $${amount.toFixed(2)} would exceed the $${dailyCapUsd.toFixed(2)} daily cap. ` +
+            'Try again after 00:00 UTC.',
+        );
+      }
     }
 
     const row = await tx.withdrawal.create({
@@ -971,14 +1457,31 @@ export interface DecideWithdrawalInput {
  * Admin decision on a withdrawal.
  *
  * APPROVE:
- *   1. PENDING → SENDING ("approved"; approvedBy set, WITHDRAWAL_APPROVED).
- *   2. If the payout API is configured, broadcast immediately via POST /payout
- *      and mark FINISHED + WITHDRAWAL_BROADCAST.
- *   3. If it is NOT configured, the row deliberately STAYS in the approved
- *      state: funds are settled by an operator from the treasury wallet, who
- *      then records the txHash (either through a second APPROVE call carrying
- *      `txHash`, or by the payout IPN). We never invent a txHash and never
- *      report a payout that did not happen.
+ *   1. PENDING → SENDING ("approved"; approvedBy + approvedAt set,
+ *      WITHDRAWAL_APPROVED). The ledger debit does NOT happen here — SENDING is
+ *      an in-flight state that only reserves the balance.
+ *   2. If the payout API is configured, the row is BROADCAST via POST /payout
+ *      and STAYS SENDING. The provider's payout id, status and the converted
+ *      coin amount (`payAmount`) are persisted; `settledAt` stays null. The
+ *      transition to FINISHED — and therefore the equity debit — happens when
+ *      the payout IPN confirms settlement, or when an operator records a
+ *      txHash by hand.
+ *   3. If it is NOT configured, the row stays in the approved state: funds are
+ *      settled by an operator from the treasury wallet, who records the txHash
+ *      (on this call, via the payout IPN, or by a later APPROVE). We never
+ *      invent a txHash and never report a payout that did not happen.
+ *
+ * TWO-PERSON APPROVAL (default ON, `payout.two_person_approval`): an automated
+ *   broadcast needs a second, DISTINCT admin. The first APPROVE records the
+ *   approval and stops; a different admin's APPROVE releases it and is stored
+ *   in `secondApprovedBy`. The SAME admin trying to release their own approval
+ *   is refused. This gate covers AUTONOMOUS broadcasts only. Two consequences
+ *   are deliberate and important:
+ *   • Manual settlement (recording a txHash) is NEVER gated, so the rule can
+ *     never leave a payout unsettleable and a single-operator deployment can
+ *     always settle. See `decideTwoPersonApproval`.
+ *   • A deployment with genuinely one admin sets
+ *     `payout.two_person_approval = false` to re-enable automated broadcasts.
  *
  * REJECT: the row goes to FAILED (the PaymentStatus enum has no REJECTED) with
  *   the admin's reason in the WITHDRAWAL_REJECTED audit row.
@@ -1038,6 +1541,8 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
   }
 
   const normalisedTxHash = (txHash ?? '').trim() || null;
+  const twoPersonRequired = resolvedPayoutTwoPersonApproval();
+  const payoutConfigured = isPayoutConfigured();
 
   // Same compare-and-swap discipline on the approve path: only a still-PENDING
   // row may be moved to APPROVED. A concurrent REJECT therefore cannot be
@@ -1046,7 +1551,12 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
   if (!alreadyApproved) {
     const { count } = await prisma.withdrawal.updateMany({
       where: { id: row.id, status: WITHDRAWAL_STATUS_PENDING },
-      data: { status: WITHDRAWAL_STATUS_APPROVED, approvedBy: adminUserId },
+      data: {
+        status: WITHDRAWAL_STATUS_APPROVED,
+        approvedBy: adminUserId,
+        // The approval time is a recorded fact, not derived from updatedAt.
+        approvedAt: new Date(),
+      },
     });
     if (count !== 1) {
       throw ApiError.conflict(
@@ -1054,6 +1564,18 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
       );
     }
     approved = await prisma.withdrawal.findUniqueOrThrow({ where: { id: row.id } });
+  }
+
+  // Defensive: a SENDING row always carries an approver under this state
+  // machine, but a row written by an older/other process might not. Adopt this
+  // actor as the first approver rather than leaving the payout permanently
+  // un-broadcastable (the two-person rule would otherwise wait for a first
+  // approval that can never come).
+  if (alreadyApproved && approved.approvedBy === null) {
+    approved = await prisma.withdrawal.update({
+      where: { id: row.id },
+      data: { approvedBy: adminUserId, approvedAt: approved.approvedAt ?? new Date() },
+    });
   }
 
   if (!alreadyApproved) {
@@ -1066,19 +1588,38 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
         adminUserId,
         amountUsd: usd(row.amountUsd).toNumber(),
         cryptoCurrency: row.cryptoCurrency,
-        payoutApiConfigured: isPayoutConfigured(),
-        settlement: isPayoutConfigured() ? 'AUTOMATED_PAYOUT' : 'MANUAL_SETTLEMENT_REQUIRED',
+        payoutApiConfigured: payoutConfigured,
+        twoPersonApprovalRequired: twoPersonRequired,
+        settlement: payoutConfigured ? 'AUTOMATED_PAYOUT' : 'MANUAL_SETTLEMENT_REQUIRED',
+        ledger: 'NO_DEBIT_UNTIL_SETTLEMENT',
       },
     });
   }
 
-  // Operator already settled this payout and is recording the proof.
+  // ── Operator-attested manual settlement ───────────────────────────────────
+  // Only an APPROVED (or already FINISHED) row may be marked settled, and this
+  // branch is NEVER gated by the two-person rule: it records money that already
+  // left the treasury wallet by hand, and refusing to record it would leave the
+  // ledger permanently out of step with reality. It is also what keeps a
+  // single-operator deployment able to settle anything at all.
   if (normalisedTxHash) {
-    // Only an APPROVED (or already FINISHED) row may be marked settled; a row
-    // that a concurrent decision moved back out of APPROVED must not be paid.
+    const twoPerson = decideTwoPersonApproval({
+      twoPersonRequired,
+      actorUserId: adminUserId,
+      approvedBy: approved.approvedBy,
+      manualSettlement: true,
+    });
+
     const { count: settleCount } = await prisma.withdrawal.updateMany({
       where: { id: row.id, status: { in: [WITHDRAWAL_STATUS_APPROVED, 'FINISHED'] } },
-      data: { status: 'FINISHED', txHash: normalisedTxHash, approvedBy: adminUserId },
+      data: {
+        status: 'FINISHED',
+        txHash: normalisedTxHash,
+        approvedBy: adminUserId,
+        // SETTLEMENT is what debits equity — see the ledger's
+        // DEBITED_PAYMENT_STATUSES (FINISHED only).
+        settledAt: new Date(),
+      },
     });
     if (settleCount !== 1) {
       throw ApiError.conflict(
@@ -1096,6 +1637,9 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
         adminUserId,
         txHash: normalisedTxHash,
         settlement: 'OPERATOR_RECORDED',
+        twoPersonVerdict: twoPerson.verdict,
+        settledAt: settled.settledAt?.toISOString() ?? null,
+        ledger: 'EQUITY_DEBITED_AT_SETTLEMENT',
         amountUsd: usd(row.amountUsd).toNumber(),
       },
     });
@@ -1103,27 +1647,151 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
     return toWithdrawalDTO(settled);
   }
 
-  if (!isPayoutConfigured()) {
+  if (!payoutConfigured) {
     // Stay in the approved state — manual settlement. Documented behaviour, not
     // a silent success: the DTO still reports SENDING (approved/pending payout)
-    // with txHash null.
+    // with txHash null, and equity is NOT debited.
     return toWithdrawalDTO(approved);
   }
 
-  // Automated broadcast. uniqueExternalId = our withdrawal id, so a retry can
-  // never double-pay.
+  // ── Automated broadcast ───────────────────────────────────────────────────
+  // TWO-PERSON GATE. The first approval only records the approval; a different
+  // admin must release it. Same-actor release is refused outright.
+  const twoPerson = decideTwoPersonApproval({
+    twoPersonRequired,
+    actorUserId: adminUserId,
+    approvedBy: alreadyApproved ? approved.approvedBy : null,
+    manualSettlement: false,
+  });
+
+  if (twoPerson.verdict === 'AWAIT_SECOND_APPROVER') {
+    await recordAudit({
+      action: AUDIT_PAYOUT.WITHDRAWAL_SECOND_APPROVAL_REQUIRED,
+      userId: row.userId,
+      ipAddress: ip ?? null,
+      details: {
+        withdrawalId: row.id,
+        approverUserId: adminUserId,
+        amountUsd: usd(row.amountUsd).toNumber(),
+        cryptoCurrency: row.cryptoCurrency,
+        note: 'Approved and held: a second, different admin must approve before the payout is broadcast.',
+      },
+    });
+    return toWithdrawalDTO(approved);
+  }
+
+  if (twoPerson.verdict !== 'PROCEED') {
+    throw ApiError.conflict(
+      twoPerson.reason ?? 'A second, different admin must approve this payout before it can be released.',
+    );
+  }
+
+  // Address allow-list, re-checked at the moment of broadcast: the list may have
+  // been tightened between the client's request and this approval.
+  const addressAllowlist = resolvedPayoutAddressAllowlist();
+  if (!isPayoutAddressAllowed(approved.payoutAddress, addressAllowlist)) {
+    await recordAudit({
+      action: AUDIT_PAYOUT.WITHDRAWAL_PAYOUT_REFUSED,
+      userId: row.userId,
+      ipAddress: ip ?? null,
+      details: {
+        withdrawalId: row.id,
+        adminUserId,
+        stage: 'ADDRESS_ALLOWLIST',
+        outcome: 'REFUSED',
+        payoutAddress: approved.payoutAddress,
+        allowlistSize: addressAllowlist.length,
+      },
+    });
+    throw ApiError.badRequest(
+      'That payout address is not on the operator allow-list (setting: payout.address_allowlist). ' +
+        'Add it to the allow-list before broadcasting, or settle this payout manually.',
+    );
+  }
+
+  // STEP 1 — CONVERT USD → COIN before anything is broadcast. `amountUsd` is a
+  // USD figure; POST /payout has no price/currency split, so sending it as the
+  // `amount` would order that many COINS. The provider's /estimate is the only
+  // authority for the conversion, and its result is persisted as payAmount.
+  let estimate;
+  try {
+    estimate = await getEstimatedPrice(approved.amountUsd, approved.cryptoCurrency);
+  } catch (err) {
+    await recordAudit({
+      action: AUDIT_PAYOUT.WITHDRAWAL_PAYOUT_REFUSED,
+      userId: row.userId,
+      ipAddress: ip ?? null,
+      details: {
+        withdrawalId: row.id,
+        adminUserId,
+        stage: 'PROVIDER_ESTIMATE',
+        outcome: 'PROVIDER_FAILURE',
+        amountUsd: usd(row.amountUsd).toNumber(),
+        cryptoCurrency: row.cryptoCurrency,
+        error: err instanceof Error ? err.message : 'unknown estimate failure',
+      },
+    });
+    throw err instanceof ApiError
+      ? err
+      : ApiError.paymentError(
+          'Could not obtain a conversion estimate from NOWPayments, so the payout was not broadcast. Settle it manually.',
+        );
+  }
+
+  let payAmount: Decimal;
+  try {
+    payAmount = resolvePayoutCoinAmount({
+      withdrawalId: approved.id,
+      amountUsd: approved.amountUsd,
+      currency: approved.cryptoCurrency,
+      estimatedAmount: estimate.estimatedAmount,
+    });
+  } catch (err) {
+    // FAIL-CLOSED: no usable estimate means no broadcast. Nothing is persisted
+    // and the row stays approved (SENDING) for manual settlement. The USD figure
+    // is recorded in the audit row for the reviewer; it is never sent.
+    await recordAudit({
+      action: AUDIT_PAYOUT.WITHDRAWAL_PAYOUT_REFUSED,
+      userId: row.userId,
+      ipAddress: ip ?? null,
+      details: {
+        withdrawalId: row.id,
+        adminUserId,
+        stage: 'CONVERSION_GUARD',
+        outcome: 'REFUSED',
+        amountUsd: usd(row.amountUsd).toNumber(),
+        cryptoCurrency: row.cryptoCurrency,
+        estimatedAmount:
+          estimate.estimatedAmount === null || estimate.estimatedAmount === undefined
+            ? null
+            : estimate.estimatedAmount.toString(),
+      },
+    });
+    throw err instanceof ApiError
+      ? err
+      : ApiError.paymentError(
+          'Payout conversion failed, so the payout was not broadcast. Settle it manually.',
+        );
+  }
+
+  // STEP 2 — BROADCAST the COIN amount. uniqueExternalId = our withdrawal id, so
+  // a retry can never double-pay.
   let payoutId: string | null;
+  let payoutStatus: string | null;
   try {
     const payout = await createPayout({
       address: approved.payoutAddress,
-      amount: approved.amountUsd,
+      // The COIN amount from the provider's estimate — never `amountUsd`.
+      amount: payAmount,
       currency: approved.cryptoCurrency,
       ipnCallbackUrl: `${serverEnv().NEXT_PUBLIC_APP_URL.replace(/\/+$/, '')}/api/v1/payments/nowpayments/ipn`,
       uniqueExternalId: approved.id,
     });
     payoutId = payout.payoutId;
+    payoutStatus = payout.status;
   } catch (err) {
     // The approval stands (row already SENDING); the broadcast is what failed.
+    // Nothing was debited, so there is nothing to walk back.
     await recordAudit({
       action: AUDIT.WITHDRAWAL_FAILED,
       userId: row.userId,
@@ -1131,7 +1799,10 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
       details: {
         withdrawalId: row.id,
         adminUserId,
+        stage: 'PROVIDER_PAYOUT',
         amountUsd: usd(row.amountUsd).toNumber(),
+        payAmount: payAmount.toString(),
+        cryptoCurrency: row.cryptoCurrency,
         error: err instanceof Error ? err.message : 'unknown payout failure',
       },
     });
@@ -1140,10 +1811,27 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
       : ApiError.paymentError('Payout broadcast failed. Settle this withdrawal manually.');
   }
 
-  const broadcast = await prisma.withdrawal.update({
-    where: { id: row.id },
-    data: { status: 'FINISHED', approvedBy: adminUserId },
+  // STEP 3 — RECORD the broadcast, but STAY IN SENDING. The payout id and status
+  // are persisted so the payout can be looked up again; `settledAt` stays null
+  // and equity is NOT debited until the payout IPN (or an operator) confirms.
+  const { count: broadcastCount } = await prisma.withdrawal.updateMany({
+    where: { id: row.id, status: WITHDRAWAL_STATUS_APPROVED },
+    data: {
+      status: WITHDRAWAL_STATUS_APPROVED,
+      approvedBy: approved.approvedBy ?? adminUserId,
+      secondApprovedBy: twoPerson.secondApprovedBy ?? approved.secondApprovedBy,
+      payAmount: toPrismaDecimal(payAmount, 8),
+      providerPayoutId: payoutId,
+      providerStatus: payoutStatus,
+      settledAt: null,
+    },
   });
+  if (broadcastCount !== 1) {
+    throw ApiError.conflict(
+      'That withdrawal changed state while the payout was being broadcast. Reload and reconcile it before retrying.',
+    );
+  }
+  const broadcast = await prisma.withdrawal.findUniqueOrThrow({ where: { id: row.id } });
 
   await recordAudit({
     action: AUDIT.WITHDRAWAL_BROADCAST,
@@ -1153,11 +1841,19 @@ export async function decideWithdrawal(input: DecideWithdrawalInput): Promise<Wi
       withdrawalId: row.id,
       adminUserId,
       payoutId,
+      providerStatus: payoutStatus,
+      // The COIN amount actually sent, and the USD figure it was converted
+      // from — both recorded so the rate can be reviewed later.
+      payAmount: payAmount.toFixed(8),
+      cryptoCurrency: row.cryptoCurrency,
+      amountUsd: usd(row.amountUsd).toNumber(),
+      secondApprovedBy: twoPerson.secondApprovedBy,
       // The payout response returns a payout id, not a chain hash; txHash stays
       // null until the payout IPN or an operator supplies it.
       txHash: null,
       settlement: 'AUTOMATED_PAYOUT',
-      amountUsd: usd(row.amountUsd).toNumber(),
+      appliedStatus: WITHDRAWAL_STATUS_APPROVED,
+      ledger: 'NO_DEBIT_UNTIL_SETTLEMENT',
     },
   });
 

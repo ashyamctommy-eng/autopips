@@ -240,6 +240,101 @@ export function parseIpnPayload(rawBody: string): IpnPayload {
   };
 }
 
+// ─── IPN shape discrimination (deposit vs payout) ───────────────────────────
+
+/**
+ * The provider delivers TWO unrelated webhook bodies to the SAME URL:
+ *
+ *   deposit  { payment_id, payment_status, pay_amount, price_amount, ... }
+ *   payout   { id, withdrawals: [{ id, status, unique_external_id, ... }] }
+ *
+ * `payment_id` is REQUIRED for a deposit and never present on a payout, and
+ * `withdrawals[]` is what makes a body a payout. Discriminating on SHAPE (not
+ * on a header, not on a path) is the only reliable test: the payout body does
+ * not carry a `payment_id`, so the deposit parser would reject it with a 400,
+ * and a 400 makes the provider retry the same undeliverable body forever.
+ */
+export type IpnKind = 'DEPOSIT' | 'PAYOUT' | 'UNRECOGNISED';
+
+export function classifyIpnPayload(json: unknown): IpnKind {
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) return 'UNRECOGNISED';
+  const body = json as Record<string, unknown>;
+
+  // Payout first: it is the shape with the extra, unambiguous marker.
+  const hasPayoutId = typeof body.id === 'string' || typeof body.id === 'number';
+  if (hasPayoutId && Array.isArray(body.withdrawals)) return 'PAYOUT';
+
+  const hasPaymentId = typeof body.payment_id === 'string' || typeof body.payment_id === 'number';
+  if (hasPaymentId) return 'DEPOSIT';
+
+  return 'UNRECOGNISED';
+}
+
+/**
+ * Wire shape of a payout IPN. Mirrors the payout payload modelled in
+ * nowpayments.client.ts (the same shape POST /payout answers with); it is
+ * declared here so the IPN module stays free of the HTTP client's Redis/env
+ * dependency. Every field is optional except the `withdrawals` array that made
+ * this body a payout in the first place.
+ */
+const payoutIpnSchema = z.object({
+  id: z.union([z.string(), z.number()]).nullish(),
+  withdrawals: z.array(
+    z.object({
+      id: z.union([z.string(), z.number()]).nullish(),
+      status: z.string().nullish(),
+      unique_external_id: z.union([z.string(), z.number()]).nullish(),
+    }),
+  ),
+});
+
+export interface PayoutIpnPayload {
+  /** The provider's payout id, when the body carries one. */
+  payoutId: string | null;
+  /** The provider's status for this withdrawal (e.g. finished, failed). */
+  status: string | null;
+  /** Our idempotency key — the withdrawal id we sent to the provider. */
+  uniqueExternalId: string | null;
+  /** The provider payload exactly as delivered (for Withdrawal.ipnPayload). */
+  raw: JsonObject;
+}
+
+/**
+ * Parse a body already classified as PAYOUT. Returns null when the body is not
+ * a payout shape at all. When the shape LOOKS like a payout but does not
+ * validate, the raw body is still returned with null fields, so the caller can
+ * record the evidence and acknowledge it rather than let the provider retry a
+ * body we will never be able to parse.
+ */
+export function parsePayoutIpnPayload(rawBody: string): PayoutIpnPayload | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(rawBody);
+  } catch {
+    return null;
+  }
+  if (classifyIpnPayload(json) !== 'PAYOUT') return null;
+
+  const parsed = payoutIpnSchema.safeParse(json);
+  if (!parsed.success) {
+    return { payoutId: null, status: null, uniqueExternalId: null, raw: json as JsonObject };
+  }
+
+  const withdrawal = parsed.data.withdrawals[0];
+  const id = parsed.data.id ?? withdrawal?.id ?? null;
+  const external =
+    withdrawal?.unique_external_id === null || withdrawal?.unique_external_id === undefined
+      ? null
+      : String(withdrawal.unique_external_id).trim();
+
+  return {
+    payoutId: id === null || id === undefined ? null : String(id),
+    status: withdrawal?.status?.trim() || null,
+    uniqueExternalId: external && external.length > 0 ? external : null,
+    raw: json as JsonObject,
+  };
+}
+
 // ─── status mapping ─────────────────────────────────────────────────────────
 
 /**
@@ -280,4 +375,64 @@ export function isCreditedStatus(status: PaymentStatusValue): boolean {
  *  confirmed deposit (money that arrived stays arrived). */
 export function isTerminalFailureStatus(status: PaymentStatusValue): boolean {
   return status === 'FAILED' || status === 'REFUNDED';
+}
+
+// ─── payout status mapping ───────────────────────────────────────────────────
+
+/**
+ * NOWPayments payout statuses, mapped onto the SAME frozen PaymentStatus enum.
+ *
+ *   finished                          → FINISHED  (money left the treasury)
+ *   failed / rejected / returned /
+ *   refunded / cancelled              → FAILED    (money did NOT leave; the
+ *                                                 reservation is released)
+ *   waiting / processing / sending    → SENDING   (still in flight)
+ *   anything unknown                  → SENDING, deliberately
+ *
+ * The default is SENDING, never FINISHED and never FAILED: an unrecognised
+ * status must not silently settle a payout (that would debit the client for
+ * money that may not have moved) and must not silently free the reservation
+ * (that would let the client request the same money twice while a payout may
+ * still be in flight). An operator reconciles the unknown case from
+ * Withdrawal.providerStatus/ipnPayload.
+ */
+export const PAYOUT_STATUS_MAP: Record<string, PaymentStatusValue> = {
+  finished: 'FINISHED',
+  failed: 'FAILED',
+  rejected: 'FAILED',
+  returned: 'FAILED',
+  refunded: 'FAILED',
+  cancelled: 'FAILED',
+  canceled: 'FAILED',
+  waiting: 'SENDING',
+  processing: 'SENDING',
+  sending: 'SENDING',
+  pending: 'SENDING',
+};
+
+export function mapPayoutStatusToPaymentStatus(providerStatus: string): PaymentStatusValue {
+  const key = providerStatus.trim().toLowerCase();
+  return PAYOUT_STATUS_MAP[key] ?? 'SENDING';
+}
+
+/**
+ * Pull a chain transaction hash out of a payout IPN, if the provider supplied
+ * one. NOWPayments' documented payout body carries only id/status/
+ * unique_external_id, so the hash is optional by nature: it is recorded when
+ * present and left alone when absent — never invented.
+ */
+export function extractPayoutTxHash(raw: JsonObject): string | null {
+  const withdrawal = Array.isArray(raw.withdrawals)
+    ? (raw.withdrawals[0] as Record<string, unknown> | undefined)
+    : undefined;
+  const candidates = ['tx_hash', 'txHash', 'hash', 'transaction_hash', 'transactionHash'];
+
+  for (const source of [withdrawal, raw]) {
+    if (!source || typeof source !== 'object') continue;
+    for (const key of candidates) {
+      const value = (source as Record<string, unknown>)[key];
+      if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+    }
+  }
+  return null;
 }

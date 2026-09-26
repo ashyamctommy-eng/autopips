@@ -56,8 +56,8 @@ export default async function DashboardKycPage() {
       />
 
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-3 p-5 pb-3">
-          <div>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 p-5 pb-3">
+          <div className="min-w-0">
             <CardTitle>Current status</CardTitle>
             <p className="mt-1 text-sm text-muted">{meta.blurb}</p>
           </div>
@@ -188,9 +188,13 @@ function Detail({
   className?: string;
 }) {
   return (
-    <div className={cn('flex flex-col gap-0.5', className)}>
+    <div className={cn('flex min-w-0 flex-col gap-0.5', className)}>
       <span className="text-xs uppercase tracking-wide text-muted">{label}</span>
-      <span className={cn('text-sm text-base-100', mono && 'font-mono')}>{value}</span>
+      {/* `min-w-0` keeps a long unbroken value (a legal name, an id) inside its
+          grid cell instead of widening the track and the page on a phone. */}
+      <span className={cn('break-words text-sm text-base-100', mono && 'break-all font-mono')}>
+        {value}
+      </span>
     </div>
   );
 }

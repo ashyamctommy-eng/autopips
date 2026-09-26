@@ -29,6 +29,7 @@ import { z } from 'zod';
 import { serverEnv, type ServerEnv } from '@/lib/env';
 import { prisma } from '@/lib/prisma';
 import { redis, redisSub } from '@/lib/redis';
+import { alertOps } from '@/lib/ops-alert';
 import { envelope, isWsServerEvent, publishEnvelope } from '@/server/ws/event-bus';
 import {
   createTradingSocketServer,
@@ -316,6 +317,14 @@ interface RuntimeHandle extends StoppableRuntime {
   start: () => Promise<RuntimeStartOutcome>;
   /** The lazily loaded module, kept for read-only introspection (health). */
   module: Record<string, unknown>;
+  /**
+   * Which exported function answers "is this runtime alive?".
+   *
+   * Per-spec, not hardcoded: the supervisor restarts a runtime whose status
+   * function reports it stopped, and looking for one runtime's export name in
+   * another runtime's module would silently disable that restart.
+   */
+  statusExport: string;
 }
 
 interface RuntimeSpec {
@@ -331,6 +340,8 @@ interface RuntimeSpec {
    * retried. main.ts runs exactly one supervisor loop per supervised spec.
    */
   supervised?: boolean;
+  /** Exported status function for a supervised runtime. Default `botRuntimeStatus`. */
+  statusExport?: string;
 }
 
 /**
@@ -352,6 +363,30 @@ const RUNTIME_SPECS: RuntimeSpec[] = [
     // refuse to start (lock held by the outgoing replica) or stop itself (lock
     // lost). One supervisor loop keeps retrying it for the life of the process.
     supervised: true,
+  },
+  {
+    // The maturity sweep releases a client's principal once the plan term ends.
+    //
+    // WHY IT IS ITS OWN SUPERVISED RUNTIME and not another line in the bot cycle:
+    // it must keep running when the bot is stopped. Pausing trading is a normal
+    // operational act, and a paused platform must still return capital on time —
+    // tying maturity to bot liveness would quietly deny clients their money for
+    // exactly as long as trading was halted. It takes its own Redis single-writer
+    // lock (`autopips:lock:maturity-runtime`), so a second replica cannot
+    // double-process a maturity.
+    name: 'maturity-runtime',
+    modules: [
+      'src/server/modules/account/maturity.runtime.ts',
+      'dist/server/modules/account/maturity.runtime.js',
+    ],
+    starters: ['startMaturityRuntime'],
+    stoppers: ['stopMaturityRuntime'],
+    supervised: true,
+    // Without this the supervisor would look for `botRuntimeStatus` and conclude
+    // it cannot tell whether the runtime is alive, so a self-stop would never be
+    // restarted. Naming the export is the honest way to say which status
+    // function belongs to which runtime.
+    statusExport: 'maturityRuntimeStatus',
   },
   // There is deliberately NO standalone 'broker-sync' runtime registered here.
   //
@@ -428,6 +463,7 @@ async function loadRuntime(spec: RuntimeSpec): Promise<RuntimeHandle | null> {
   return {
     name: spec.name,
     module: loaded.module,
+    statusExport: spec.statusExport ?? 'botRuntimeStatus',
     start: async (): Promise<RuntimeStartOutcome> => {
       try {
         // Tolerates `start*(opts)` and `start()` signatures — the current bot
@@ -474,11 +510,11 @@ function runtimeRetryDelayMs(attempt: number): number {
   return Math.min(RUNTIME_RETRY_BASE_MS * 2 ** Math.max(0, attempt), RUNTIME_RETRY_MAX_MS);
 }
 
-/** Reads the runtime's own `botRuntimeStatus()`, or null when it exports none. */
+/** Reads the runtime's own status function, or null when it exports none. */
 async function readRuntimeStatus(
   handle: RuntimeHandle,
 ): Promise<{ started: boolean; reason?: string } | null> {
-  const statusFn = asCallable(handle.module.botRuntimeStatus);
+  const statusFn = asCallable(handle.module[handle.statusExport]);
   if (!statusFn) return null;
   try {
     const status = (await statusFn()) as { started?: unknown; reason?: unknown };
@@ -554,6 +590,14 @@ function superviseRuntime(
               `[ws] ${handle.name} stopped after a successful start ` +
                 `(${status.reason ?? 'no reason reported'}); restarting.`,
             );
+            // The single most important operational signal this process emits: a
+            // runtime that was trading and is not any more. It restarts below,
+            // but a restart loop still deserves a page.
+            void alertOps({
+              title: `${handle.name} stopped`,
+              severity: 'critical',
+              detail: { runtime: handle.name, reason: status.reason ?? 'no reason reported' },
+            });
             break;
           }
         }
@@ -568,6 +612,14 @@ function superviseRuntime(
         `[ws] ${handle.name} did NOT start (${outcome.reason}); attempt ${attempt} failed, ` +
           `retrying in ${Math.round(delayMs / 1000)}s. Trading is stopped until it succeeds.`,
       );
+      // Warning, not critical: the supervisor is actively retrying, and the
+      // alert carries its own dedupe window so a retry loop does not page the
+      // operator once per attempt.
+      void alertOps({
+        title: `${handle.name} did not start`,
+        severity: 'warning',
+        detail: { runtime: handle.name, reason: outcome.reason, attempt },
+      });
       await pause(delayMs);
     }
   }
@@ -821,15 +873,35 @@ async function main(): Promise<void> {
   // P/L to trading clients; shut down cleanly and let the supervisor restart.
   process.on('uncaughtException', (err) => {
     console.error('[ws] uncaughtException:', err);
+    void alertOps({
+      title: 'worker uncaughtException',
+      severity: 'critical',
+      detail: { name: err.name, message: err.message },
+    });
     void shutdown('uncaughtException', 1);
   });
   process.on('unhandledRejection', (reason) => {
+    // Logged only: an unhandled rejection in a long-lived loop leaves the
+    // process in an undefined state, but killing it outright would be worse than
+    // reporting it and letting the next cycle prove the process still works.
     console.error('[ws] unhandledRejection:', reason);
+    void alertOps({
+      title: 'worker unhandledRejection',
+      severity: 'critical',
+      detail: { message: reason instanceof Error ? reason.message : String(reason) },
+    });
   });
 }
 
 void main().catch((err: unknown) => {
   console.error('[ws] FATAL: startup failed.');
   console.error(err);
+  // A worker that never came up is invisible everywhere else: no healthcheck is
+  // listening on it yet.
+  void alertOps({
+    title: 'worker startup failed',
+    severity: 'critical',
+    detail: { message: errorMessage(err) },
+  });
   process.exit(1);
 });

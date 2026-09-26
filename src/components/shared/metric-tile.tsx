@@ -48,10 +48,7 @@ export function MetricTile({
 
   return (
     <div
-      className={cn(
-        'flex flex-col gap-1.5 rounded-xl border border-line bg-base-850/70 p-4 shadow-card',
-        className,
-      )}
+      className={cn('surface flex flex-col gap-1.5 p-4', className)}
       {...props}
     >
       <div className="flex items-center justify-between gap-2">

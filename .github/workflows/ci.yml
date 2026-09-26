@@ -1,7 +1,7 @@
 # Autopipsz — autopips.pro
 # Continuous integration: type-check, lint, build, and the test suite.
 #
-# ── TWO JOBS, AND WHY ───────────────────────────────────────────────────────
+# ── THREE JOBS, AND WHY ─────────────────────────────────────────────────────
 # `verify`      — no service containers. Proves the suite is green on a bare
 #                 runner: the DB-backed specs skip themselves (a top-level
 #                 `await isDatabaseReachable()` in each DB test file decides
@@ -18,6 +18,13 @@
 #                 forever in CI would leave the highest-risk code untested.
 #                 Verified on 2026-09-23 against a live, migrated Postgres+Redis:
 #                 `Test Files 11 passed`, `Tests 199 passed`, exit code 0.
+# `images`     — builds BOTH production images (`Dockerfile`,
+#                 `Dockerfile.worker`) with `docker build`. Neither of the other
+#                 jobs builds a container, so drift between an image's entrypoint
+#                 and the migration/schema it ships — the failure class behind
+#                 the 2026-09-24 incident — was only discoverable in production.
+#                 No registry login, no push: a build that does not produce a
+#                 runnable entrypoint is the signal.
 #
 # `prisma validate`, `prisma generate` and `next build` have no database
 # dependency. `prisma validate` needs DATABASE_URL to be *present* (the
@@ -183,3 +190,46 @@ jobs:
 
       - name: Test (live database — the 51 DB-backed specs run here)
         run: npm test
+
+  # ──────────────────────── docker images (both Dockerfiles) ────────────────
+  images:
+    name: images (docker build, web and worker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Everything here is a DUMMY, public value. Only `NEXT_PUBLIC_*` may ever
+      # be a build arg: `--build-arg` values are recorded verbatim in the image
+      # history (`docker history`) and the build cache, so they are PUBLISHED,
+      # not secret. Every secret (JWT_SECRET, DATABASE_URL, DERIV_*, …) is
+      # injected at RUNTIME by the platform and validated by `src/lib/env.ts`;
+      # `next build` here performs no database or broker access (every page is
+      # dynamic). Missing-versus-unset is deliberate: `NEXT_PUBLIC_WS_URL=`
+      # empty means "connect same-origin" and is the production default.
+      - name: Build web image (Dockerfile)
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_APP_URL=https://ci.autopips.invalid \
+            --build-arg NEXT_PUBLIC_WS_URL= \
+            --tag autopipsz/web:ci \
+            .
+
+      - name: Build worker image (Dockerfile.worker)
+        run: docker build --file Dockerfile.worker --tag autopipsz/worker:ci .
+
+      # The 2026-09-24 incident: the image shipped without a runnable migration
+      # gate, so boot and schema could disagree. Assert the pieces the start
+      # command depends on actually exist in the built image. `test -f` follows
+      # the `node_modules/.bin` symlinks, so it does not depend on exec bits.
+      - name: Verify the web image's migration entrypoint and Prisma CLI
+        run: |
+          docker run --rm --entrypoint sh autopipsz/web:ci -c \
+            'test -f /app/docker-entrypoint.sh && test -f /app/node_modules/.bin/prisma && echo "entrypoint + prisma present"'
+
+      - name: Verify the worker image's runtime entrypoint
+        run: |
+          docker run --rm --entrypoint sh autopipsz/worker:ci -c \
+            'test -f /app/node_modules/.bin/tsx && test -f /app/src/server/main.ts && echo "worker runtime present"'

@@ -132,7 +132,7 @@ export function DepositManager({ initialItems, canCredit }: DepositManagerProps)
 
   return (
     <Card>
-      <CardHeader className="flex-row items-start justify-between gap-4 p-5 pb-3">
+      <CardHeader className="flex-col gap-3 p-5 pb-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle className="flex items-center gap-2">
             <ArrowDownToLine aria-hidden className="size-4 text-brand-400" />

@@ -125,10 +125,7 @@ export function ActivityFeed({
 
   return (
     <div
-      className={cn(
-        'flex flex-col overflow-hidden rounded-xl border border-line bg-base-850/70 shadow-card',
-        className,
-      )}
+      className={cn('surface flex flex-col overflow-hidden', className)}
       {...props}
     >
       <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">

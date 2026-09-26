@@ -136,7 +136,7 @@ export default async function AdminLogsPage({
         <AuditLogTable rows={page.map(toAuditRowView)} />
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardHeader className="flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-1">
               <CardTitle className="text-sm">Paging</CardTitle>
               <CardDescription className="text-xs">

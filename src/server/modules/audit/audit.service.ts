@@ -111,6 +111,54 @@ export const AUDIT = {
 
 export type AuditAction = (typeof AUDIT)[keyof typeof AUDIT];
 
+/**
+ * Payout-reconciliation audit actions.
+ *
+ * DELIBERATELY OUTSIDE `AUDIT`. The client activity feed maps every `AuditAction`
+ * exhaustively to a human message (see ACTIVITY_TEMPLATES in
+ * src/server/modules/account/account.service.ts), and these are OPERATOR/
+ * EVIDENCE events — a second-approval hold, a broadcast refused before any
+ * provider call, a payout IPN reconciled (or not) — not client money events.
+ * `AuditEntry.action` accepts a plain string, so they persist normally and the
+ * feed falls back to the raw action string (its documented behaviour for an
+ * action the map does not know), without a change to the account module or a
+ * misleading "deposit" label on a payout row.
+ *
+ * Settlement itself still writes the client-visible AUDIT.WITHDRAWAL_BROADCAST
+ * (and a failed payout writes AUDIT.WITHDRAWAL_FAILED), so the client feed is
+ * unaffected.
+ */
+export const AUDIT_PAYOUT = {
+  /** A payout IPN was received, matched (or not) and applied. */
+  WITHDRAWAL_PAYOUT_IPN: 'WITHDRAWAL_PAYOUT_IPN',
+  /** Approved by one admin and now awaiting a SECOND, different admin. */
+  WITHDRAWAL_SECOND_APPROVAL_REQUIRED: 'WITHDRAWAL_SECOND_APPROVAL_REQUIRED',
+  /** Broadcast refused before any provider call (conversion guard, allow-list). */
+  WITHDRAWAL_PAYOUT_REFUSED: 'WITHDRAWAL_PAYOUT_REFUSED',
+  /** A signature-valid IPN whose shape matched neither a deposit nor a payout. */
+  IPN_UNRECOGNISED: 'IPN_UNRECOGNISED',
+} as const;
+
+/**
+ * Broker-reconciliation audit actions.
+ *
+ * DELIBERATELY OUTSIDE `AUDIT` for the same reason as `AUDIT_PAYOUT` above: the
+ * client activity feed maps every `AuditAction` exhaustively to a human message
+ * (ACTIVITY_TEMPLATES in src/server/modules/account/account.service.ts), and a
+ * broker-versus-ledger DRIFT is an OPERATOR/EVIDENCE event — it is not a client
+ * money event and it must not surface in a client's feed. `AuditEntry.action`
+ * accepts a plain string, so it persists normally and the feed falls back to the
+ * raw action string (its documented behaviour for an unmapped action) without a
+ * change to the account module.
+ *
+ * The operator-facing signal for a breach is the admin activity published
+ * alongside it (`publishActivity`/`makeActivity` in broker.reconcile.ts).
+ */
+export const AUDIT_BROKER = {
+  /** The broker's own equity and the ledger's deployed equity disagree beyond the configured threshold. */
+  BROKER_RECONCILIATION_DRIFT: 'BROKER_RECONCILIATION_DRIFT',
+} as const;
+
 export interface AuditEntry {
   action: AuditAction | string;
   userId?: string | null;

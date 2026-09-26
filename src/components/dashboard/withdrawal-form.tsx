@@ -277,6 +277,7 @@ export function WithdrawalForm({
                 inputMode="decimal"
                 min={MIN_WITHDRAWAL_USD}
                 step="0.01"
+                className="h-10 min-w-0 sm:h-9"
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}
                 placeholder="0.00"
@@ -286,6 +287,7 @@ export function WithdrawalForm({
                 type="button"
                 variant="secondary"
                 size="sm"
+                className="h-10 shrink-0 sm:h-8"
                 onClick={() => setAmount(withdrawableBalance.toFixed(2))}
                 disabled={withdrawableBalance <= 0}
               >
@@ -306,7 +308,7 @@ export function WithdrawalForm({
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="withdrawal-currency">Payout currency</Label>
             <Select value={currency} onValueChange={setCurrency} disabled={currencies.length === 0}>
-              <SelectTrigger id="withdrawal-currency">
+              <SelectTrigger id="withdrawal-currency" className="h-10 sm:h-9">
                 <SelectValue placeholder="No currency available" />
               </SelectTrigger>
               <SelectContent>
@@ -327,6 +329,7 @@ export function WithdrawalForm({
             <Input
               id="withdrawal-address"
               name="payoutAddress"
+              className="h-10 sm:h-9"
               value={address}
               onChange={(event) => setAddress(event.target.value)}
               placeholder={currency === 'usdttrc20' || currency === 'trx' ? 'T…' : '0x…'}
@@ -375,6 +378,7 @@ export function WithdrawalForm({
             <Button
               type="submit"
               variant="primary"
+              className="h-10 sm:h-9"
               disabled={submitting || !kycApproved || currencies.length === 0}
             >
               {submitting ? <Spinner size="sm" label="Submitting" /> : <ArrowUpFromLine aria-hidden />}

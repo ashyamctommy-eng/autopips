@@ -180,6 +180,13 @@ export interface CreatePaymentInput {
 
 export interface CreatePayoutInput {
   address: string;
+  /**
+   * The amount to send, IN COIN UNITS of `currency` — never a USD figure.
+   * A payout has no price/currency split (unlike POST /payment), so this value
+   * is sent verbatim as `amount`. The caller must convert USD via
+   * `getEstimatedPrice()` first; see `resolvePayoutCoinAmount()` in
+   * payments.service.ts, which refuses a broadcast without a usable estimate.
+   */
   amount: Decimal | string | number;
   currency: string;
   ipnCallbackUrl: string;
@@ -538,6 +545,11 @@ async function payoutJwt(): Promise<string | null> {
 
 /**
  * POST /payout — broadcast a crypto payout to a client address.
+ *
+ * `input.amount` is the COIN amount (see CreatePayoutInput): a payout body has
+ * no `price_amount`/`pay_currency` pair, so there is nothing for the provider to
+ * convert against. Passing a USD figure here orders that many coins — the bug
+ * this contract exists to prevent.
  *
  * THROWS ApiError.paymentError when `isPayoutConfigured()` is false. This is
  * deliberate: the platform must record a withdrawal as APPROVED (awaiting

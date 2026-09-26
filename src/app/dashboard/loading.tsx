@@ -20,7 +20,7 @@ export default function DashboardLoading() {
         {Array.from({ length: 4 }, (_, index) => (
           <div
             key={`metric-skeleton-${index}`}
-            className="flex flex-col gap-3 rounded-xl border border-line bg-base-850/70 p-4"
+            className="surface flex flex-col gap-3 p-4"
           >
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-6 w-28" />
@@ -29,7 +29,7 @@ export default function DashboardLoading() {
         ))}
       </div>
 
-      <div className="rounded-xl border border-line bg-base-850/60 p-5">
+      <div className="surface p-5">
         <Skeleton className="h-4 w-40" />
         <div className="mt-5 flex flex-col gap-3">
           {Array.from({ length: 6 }, (_, index) => (
@@ -43,7 +43,7 @@ export default function DashboardLoading() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {Array.from({ length: 2 }, (_, index) => (
-          <div key={`panel-skeleton-${index}`} className="rounded-xl border border-line bg-base-850/60 p-5">
+          <div key={`panel-skeleton-${index}`} className="surface p-5">
             <Skeleton className="h-4 w-36" />
             <div className="mt-5 flex flex-col gap-3">
               {Array.from({ length: 3 }, (_, row) => (

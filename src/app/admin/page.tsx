@@ -500,7 +500,7 @@ export default async function AdminDashboardPage() {
       {/* Broker connections */}
       <Section width="wide" className="pb-10 pt-0">
         <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <CardHeader className="flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex flex-col gap-1.5">
               <CardTitle className="flex items-center gap-2">
                 <Plug aria-hidden className="size-4 text-brand-400" />

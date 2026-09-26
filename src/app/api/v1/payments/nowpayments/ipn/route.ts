@@ -39,7 +39,12 @@ export const POST = handler(async (request: Request) => {
   const signature = request.headers.get(IPN_SIGNATURE_HEADER);
 
   // Verifies first, then reconciles. An invalid signature throws
-  // ApiError.unauthorized (401) after an audit row — no deposit is touched.
+  // ApiError.unauthorized (401) after an audit row — no deposit or withdrawal is
+  // touched. Once the HMAC passes, the body's SHAPE decides where it is routed:
+  // a deposit (payment_id) credits equity, a payout (id + withdrawals[]) is
+  // matched to a withdrawal by its unique_external_id, and a signature-valid
+  // body of neither shape is recorded and ACKed (2xx) rather than answered with
+  // a 400 that would make the provider retry it forever.
   await handleIpn({ rawBody, signature, ip });
 
   // ACK shape NOWPayments expects. Returning 200 for a duplicate delivery is

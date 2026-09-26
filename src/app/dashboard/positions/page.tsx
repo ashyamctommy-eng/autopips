@@ -37,7 +37,7 @@ export default async function DashboardPositionsPage() {
         description="Every position the broker currently holds for your investments, with live deltas folded in as they arrive."
         breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Positions' }]}
         actions={
-          <Button asChild variant="secondary" size="sm">
+          <Button asChild variant="secondary" size="sm" className="h-10 sm:h-8">
             <Link href="/dashboard/history">Closed trades</Link>
           </Button>
         }

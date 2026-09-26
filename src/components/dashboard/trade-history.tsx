@@ -261,12 +261,12 @@ export function TradeHistory({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex w-44 flex-col gap-1.5">
+        <div className="flex w-full flex-col gap-1.5 sm:w-44">
           <Label htmlFor="history-status" muted>
             Status
           </Label>
           <Select value={status ?? 'ALL'} onValueChange={(value) => applyFilters(value, instrument ?? 'ALL')}>
-            <SelectTrigger id="history-status">
+            <SelectTrigger id="history-status" className="h-10 sm:h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -279,7 +279,7 @@ export function TradeHistory({
           </Select>
         </div>
 
-        <div className="flex w-52 flex-col gap-1.5">
+        <div className="flex w-full flex-col gap-1.5 sm:w-52">
           <Label htmlFor="history-instrument" muted>
             Instrument
           </Label>
@@ -288,7 +288,7 @@ export function TradeHistory({
             onValueChange={(value) => applyFilters(status ?? 'ALL', value)}
             disabled={instruments.length === 0}
           >
-            <SelectTrigger id="history-instrument">
+            <SelectTrigger id="history-instrument" className="h-10 sm:h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -343,6 +343,7 @@ export function TradeHistory({
             type="button"
             variant="secondary"
             size="sm"
+            className="h-10 sm:h-8"
             onClick={() => void loadMore()}
             disabled={isLoadingMore}
           >

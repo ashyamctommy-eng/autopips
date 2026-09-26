@@ -138,7 +138,7 @@ export function BotRiskPanel({ initial, instruments, instrumentsError }: BotRisk
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-3 p-5 pb-3">
+      <CardHeader className="flex-col gap-3 p-5 pb-3 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle>Risk configuration</CardTitle>
         <div className="flex items-center gap-2">
           {state.allowedSymbols.length === 0 ? (

@@ -111,7 +111,7 @@ export default async function DashboardTradingPage({
       />
 
       {activeInvestment === null ? (
-        <div className="rounded-xl border border-line bg-base-850/60">
+        <div className="surface">
           <EmptyState
             title="No investment room to watch"
             description="Realtime candles and position deltas are scoped to an investment. Once capital is deployed into a plan, this screen subscribes to that room automatically."

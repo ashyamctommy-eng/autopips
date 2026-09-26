@@ -10,6 +10,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/toaster';
 import { AdminSidebar } from '@/components/layout/admin-sidebar';
 import { ClientSidebar } from '@/components/layout/sidebar';
+import { AdminMobileNav } from '@/components/layout/admin-mobile-nav';
 import { MobileNav } from '@/components/layout/mobile-nav';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Topbar, type TopbarNotification, type TopbarUser } from '@/components/layout/topbar';
@@ -175,9 +176,10 @@ export function AppShell({
               className={cn(
                 'flex-1',
                 // Clear the fixed mobile bottom navigation (4.25rem plus the iOS
-                // safe-area inset). Client only — the admin shell has no bottom
-                // bar — and reset at `lg`, where the bar is hidden.
-                variant === 'client' && 'pb-[calc(4.25rem+env(safe-area-inset-bottom))] lg:pb-0',
+                // safe-area inset). BOTH shells have a bar now, so the padding is
+                // applied once, unconditionally, rather than per-variant — there
+                // is nothing to double up. Reset at `lg`, where the bars are hidden.
+                'pb-[calc(4.25rem+env(safe-area-inset-bottom))] lg:pb-0',
                 contentClassName,
               )}
             >
@@ -187,8 +189,10 @@ export function AppShell({
         </div>
 
         {/* Mobile primary navigation. The drawer opened by the topbar hamburger
-            still carries the full menu; this is the thumb-reach layer. */}
-        {variant === 'client' ? <MobileNav /> : null}
+            still carries the full menu; this is the thumb-reach layer. Both
+            shells have one — the admin bar is a flat five-item variant so the
+            two are not confusable. */}
+        {variant === 'admin' ? <AdminMobileNav /> : <MobileNav />}
 
         {showToaster ? <Toaster /> : null}
       </div>

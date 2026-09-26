@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
 import type { ApiErrorCode, ApiResponse } from '@/lib/contracts';
+import { alertOps } from '@/lib/ops-alert';
 
 /**
  * Uniform JSON responder. Every API route returns the same envelope so the
@@ -71,6 +72,46 @@ export function fail(error: ApiError) {
 }
 
 /**
+ * Route + method for a 5xx alert, when the handler received a `Request` as its
+ * first argument (every HTTP route does; a couple of internal handlers do not).
+ */
+function requestContext(args: unknown[]): { route: string | null; method: string | null } {
+  const request = args[0] as { url?: unknown; method?: unknown } | null | undefined;
+  if (!request || typeof request !== 'object') return { route: null, method: null };
+  const method = typeof request.method === 'string' ? request.method : null;
+  let route: string | null = null;
+  if (typeof request.url === 'string') {
+    try {
+      route = new URL(request.url).pathname;
+    } catch {
+      route = null;
+    }
+  }
+  return { route, method };
+}
+
+/**
+ * Fire-and-forget operational alert for a 5xx.
+ *
+ * Carries the route, the method, the error code and the error MESSAGE only — no
+ * request body, no headers, no headers-derived IP, no account identifiers. The
+ * message goes through `alertOps`' redaction and the alert is a no-op until
+ * `OPS_ALERT_WEBHOOK_URL` is set, so this never changes the response.
+ *
+ * The TITLE is intentionally stable per route+method: identical titles dedupe
+ * for `ALERT_DEDUPE_WINDOW_SECONDS`, which is what stops an error loop from
+ * paging once per request.
+ */
+function alertApi5xx(status: number, code: string, message: string, args: unknown[]): void {
+  const { route, method } = requestContext(args);
+  void alertOps({
+    title: `API 5xx ${method ?? 'UNKNOWN'} ${route ?? 'unknown route'}`,
+    severity: 'error',
+    detail: { status, code, route, method, message },
+  });
+}
+
+/**
  * Wrap a route handler: converts thrown ApiError/ZodError/unknown into the
  * standard envelope, and never leaks a stack trace to the caller.
  */
@@ -81,7 +122,11 @@ export function handler<Args extends unknown[]>(
     try {
       return await fn(...args);
     } catch (err) {
-      if (err instanceof ApiError) return fail(err);
+      if (err instanceof ApiError) {
+        // 502 PAYMENT_ERROR / 503 BROKER_UNAVAILABLE are money-path failures too.
+        if (err.status >= 500) alertApi5xx(err.status, err.code, err.message, args);
+        return fail(err);
+      }
       if (err instanceof ZodError) {
         return fail(
           new ApiError(
@@ -94,6 +139,7 @@ export function handler<Args extends unknown[]>(
       }
       const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('[api] unhandled error:', message, err);
+      alertApi5xx(500, 'INTERNAL', message, args);
       return fail(ApiError.internal());
     }
   };

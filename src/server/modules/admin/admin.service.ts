@@ -1028,9 +1028,10 @@ export async function setUserBotEnabled(input: {
  * Sends a real close request and then settles the row through the SAME path the
  * periodic sync uses (`applyPositionClosure`), so an admin action cannot invent
  * a fill price or a P/L the broker did not report. When the sync declines to
- * settle (for example a contract-broker position with no lot size, whose
- * exposure model is still undecided), the broker close is still reported
- * honestly and the row is left for the sync rather than force-written.
+ * settle (for example a partial close the broker has not fully covered, or a
+ * settlement the sync already booked concurrently — which is a no-op, not an
+ * overwrite), the broker close is still reported honestly and the row is left to
+ * the sync rather than force-written.
  */
 export async function forceCloseTrade(input: {
   tradeId: string;

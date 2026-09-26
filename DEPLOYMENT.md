@@ -56,7 +56,7 @@ Files added by this deployment work, all at the repository root:
 | `Dockerfile.worker` | socket/bot runtime image |
 | `docker-compose.yml` | the production-shaped stack above |
 | `deploy/nginx/autopips.pro.conf` | TLS termination, HTTP→HTTPS, `/ws/` upgrade proxy |
-| `.github/workflows/ci.yml` | CI: typecheck, lint, build, tests (with and without a DB) |
+| `.github/workflows/ci.yml` | CI: typecheck, lint, build, tests (with and without a DB), and `docker build` for both images |
 | `.dockerignore` | build-context hygiene (no `.env`, no `node_modules`, no tests) |
 | `scripts/preflight.sh` | pre-deploy environment/connectivity gate |
 | `SECURITY.md` | security posture + honest limitations |
@@ -213,6 +213,17 @@ POSTGRES_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=')"  # URL-safe, matche
 Store them in your secret manager (AWS Secrets Manager / 1Password / Vault) and
 write them into `.env` on the host with `chmod 600 .env`. Never reuse the
 `NEXT_PUBLIC_*` names for any of them.
+
+### 3.11 Operations (alerting and backups)
+
+These are read by `src/lib/ops-alert.ts` and `scripts/backup-db.sh` — **not** by
+`src/lib/env.ts`, so boot does not fail when they are absent.
+
+| Variable | Required | Secret | Purpose | Example |
+| --- | --- | --- | --- | --- |
+| `OPS_ALERT_WEBHOOK_URL` | no (default unset) | **secret** | Slack-compatible incoming-webhook URL for operational alerts. Unset/empty = alerting is a silent no-op. See §11.4. | Slack app → *Incoming Webhooks* URL |
+| `BACKUP_DIR` | no (script default `./backups`) | no | Directory `scripts/backup-db.sh` writes timestamped `autopips-*.dump` files to. Use an absolute path on a mounted volume in production. | `/srv/backups` |
+| `BACKUP_RETENTION` | no (script default `14`) | no | How many dump files the script keeps; older ones are pruned after a successful dump. Must be ≥ 1. | `30` |
 
 ---
 
@@ -559,6 +570,14 @@ docker compose up -d --no-deps worker       # restart the socket/bot tier LAST
 docker compose ps                           # all healthy?
 ```
 
+Every push and pull request now also builds BOTH Docker images in CI
+(`.github/workflows/ci.yml`, job `images`) with no registry login and no push,
+and asserts the pieces the start commands depend on (the web entrypoint plus the
+Prisma CLI; the worker's `tsx` and `src/server/main.ts`). A green CI run
+therefore means `docker build` succeeds for both `Dockerfile` and
+`Dockerfile.worker` — it does not mean a container was started against a live
+database.
+
 Order matters:
 
 1. **Migrations first, and expand/contract only.** A rolling deploy runs old and
@@ -670,6 +689,55 @@ lock (needs re-acquisition). That is why compose runs Redis with
 
 ### 11.2 Postgres backup / restore
 
+**Backups are not automated.** `scripts/backup-db.sh` is a real one-shot backup,
+but nothing in this repository runs it: there is no cron entry, no systemd timer
+and no Railway cron service checked in. Until you create that schedule, backups
+are exactly as manual as `SECURITY.md` says.
+
+```bash
+# one dump + prune; DATABASE_URL must be in the environment
+DATABASE_URL=... BACKUP_DIR=/srv/backups BACKUP_RETENTION=30 ./scripts/backup-db.sh
+```
+
+`pg_dump` writes custom format (`-Fc`) to `$BACKUP_DIR/autopips-<UTC>.dump`, then
+old files beyond `BACKUP_RETENTION` are pruned. The script refuses to run without
+`DATABASE_URL`, writes to a `.partial` file and only renames it into place after
+checking the archive is non-empty and starts with the `PGDMP` magic, creates them
+mode `0600`, and never echoes `DATABASE_URL` or a credential (pg_dump's stderr is
+redacted). It does **not** upload off-host, encrypt, schedule itself, or restore.
+
+To schedule it, run it from a scheduler you create — a Railway cron service with
+`DATABASE_URL` and a volume at `BACKUP_DIR`, a host crontab, or a systemd timer:
+
+Note where it can run: neither production image installs the PostgreSQL client
+(`Dockerfile` and `Dockerfile.worker` `apk add` only `openssl`, `libc6-compat` and
+`dumb-init`), and `Dockerfile.worker` does not copy `scripts/` at all. The web
+image does copy them to `/app/scripts`, so a cron service based on it needs
+`postgresql-client` added to its build (or a client installed on the host). The
+script checks for `pg_dump` and fails with a clear message rather than producing
+an empty file.
+
+```cron
+# example only — you create this entry; nothing in the repo installs it
+17 3 * * * root set -a; . /opt/autopips/.env; set +a; BACKUP_DIR=/srv/backups /opt/autopips/scripts/backup-db.sh >> /var/log/autopips-backup.log 2>&1
+```
+
+Restore is `pg_restore` (a custom-format file is not `psql` input). Verify the
+dump first and restore into a scratch database:
+
+```bash
+# verify the archive is readable before trusting it
+pg_restore --list /srv/backups/autopips-<stamp>.dump > /dev/null
+
+createdb autopips_restore
+pg_restore --clean --if-exists --no-owner \
+  --dbname="postgresql://autopips:<pw>@127.0.0.1:5432/autopips_restore" \
+  /srv/backups/autopips-<stamp>.dump
+```
+
+The equivalent for a compose-managed database, including the encryption step the
+script leaves out:
+
 ```bash
 # nightly, off-box, encrypted (adjust the destination to your storage)
 docker compose exec -T postgres pg_dump -U autopips -d autopips -Fc \
@@ -702,6 +770,30 @@ Redis here is *reconstructible*: losing it signs every user out, resets rate-lim
 buckets and the IPN replay guard and forces the bot to re-acquire its lock. It is
 not a source of truth for money (that is Postgres). Treat a Redis restore as a
 convenience, not a requirement — and prefer recovering forward.
+
+### 11.4 Alerting (`OPS_ALERT_WEBHOOK_URL`)
+
+Alerting is **off until `OPS_ALERT_WEBHOOK_URL` is set**. When it is unset or
+empty, `alertOps()` in `src/lib/ops-alert.ts` is a silent no-op — no network
+call, no throw — so the platform behaves exactly as it did before the module
+existed. Set it to a Slack-compatible incoming-webhook URL to receive a
+`{ text, ... }` JSON message.
+
+What pages today: a **5xx** returned by the API `handler()` wrapper
+(`src/lib/http.ts`) — the route, method, error code and error message only. No
+request body, no headers, no PII; detail values pass through a redaction guard
+that drops secret-ish keys and scrubs connection strings, tokens, long digit runs
+and email addresses.
+
+The worker's `uncaughtException` / `unhandledRejection` handlers, `BROKER_ERROR`,
+`DEPOSIT_IPN_REJECTED` and bot `stopped` / `degraded` transitions are **not yet
+wired** to `alertOps`; they are still `console.*` plus an `AuditLog` row. Treat
+this as one wired path, not a complete alerting story.
+
+Delivery is fire-and-forget with a 3 s timeout; an identical title is delivered
+at most once per 5 minutes (Redis-backed, with an in-process fallback) so an
+error loop cannot page once per request. The URL is a secret: it is read
+server-side only and must never be given a `NEXT_PUBLIC_` prefix.
 
 ---
 

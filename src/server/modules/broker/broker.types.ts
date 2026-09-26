@@ -235,6 +235,24 @@ export interface PositionClosure {
   exitPrice: number | null;
   /** Lots reported by the closing deals, or null when unreported. */
   closingVolume: number | null;
+  /**
+   * True when the BROKER has proven the position is fully settled.
+   *
+   * REQUIRED, and deliberately separate from `closingVolume`. A contract broker
+   * settles all-or-nothing and reports no closing lot size at all, so
+   * `closingVolume` is null for every Deriv closure (fabricating one would be a
+   * number the broker never sent). A caller that gates on volume coverage alone
+   * therefore refuses EVERY contract closure and a settled contract can never be
+   * booked — which is exactly the defect this flag closes.
+   *
+   * `true` means the adapter read the broker's own settlement proof: for Deriv,
+   * `is_sold` / `status === 'sold'` on the contract. It is never inferred from a
+   * P/L figure or a missing position.
+   *
+   * For a lot broker this stays `false`, and the volume-coverage rule decides
+   * (a partial close must not be booked as the position's final result).
+   */
+  fullyClosed: boolean;
   grossPnL: number | null;
   commission: number | null;
   swap: number | null;

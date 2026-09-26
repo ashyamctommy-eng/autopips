@@ -41,6 +41,10 @@ export type PlatformSettingKey =
   | 'nowpayments.api_base'
   | 'nowpayments.allowed_currencies'
   | 'deriv.api_token'
+  // ── payout controls (Admin → Settings) ──
+  | 'payout.daily_cap_usd'
+  | 'payout.address_allowlist'
+  | 'payout.two_person_approval'
   // ── bot risk controls (Admin → Bot control) ──
   | 'bot.enabled'
   | 'bot.disabled_reason'
@@ -50,7 +54,7 @@ export type PlatformSettingKey =
   | 'risk.allowed_symbols'
   | 'risk.min_payout_percentage';
 
-type SettingKind = 'secret' | 'url' | 'list' | 'symbols' | 'number' | 'boolean' | 'text';
+type SettingKind = 'secret' | 'url' | 'list' | 'symbols' | 'addresses' | 'number' | 'boolean' | 'text';
 
 interface SettingDefinition {
   key: PlatformSettingKey;
@@ -118,6 +122,43 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     kind: 'secret',
     defaultValue: '',
     inputHint: 'api.deriv.com → API token (read + trade scopes)',
+  },
+
+  // ── payout controls ────────────────────────────────────────────────────────
+  // Every one of these DEFAULTS TO THE PREVIOUS BEHAVIOUR (no new blockage),
+  // except the two-person rule, which is deliberately ON: an autonomous payout
+  // broadcast moves client money with no human in the loop, so the default has
+  // to be the safe one. The manual-settlement path is never gated by it — see
+  // `payout.two_person_approval` below.
+  {
+    key: 'payout.daily_cap_usd',
+    envName: 'PAYOUT_DAILY_CAP_USD',
+    label: 'Per-client daily payout cap (USD)',
+    description:
+      'Largest total USD value of withdrawals a single client may reserve per UTC day, summed over every non-failed withdrawal (PENDING, SENDING and FINISHED all count). 0 disables the cap. Enforced inside the same transaction that locks the client row, so concurrent requests cannot slip past it.',
+    kind: 'number',
+    defaultValue: '0',
+    inputHint: 'e.g. 5000 (0 = no cap)',
+  },
+  {
+    key: 'payout.address_allowlist',
+    envName: 'PAYOUT_ADDRESS_ALLOWLIST',
+    label: 'Payout address allow-list',
+    description:
+      'Comma-separated payout addresses a withdrawal may target. Empty means no restriction. Checked when a client requests a withdrawal and again immediately before an automated broadcast, so an address can be added to the list without waiting for redeploys.',
+    kind: 'addresses',
+    defaultValue: '',
+    inputHint: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t,0x…',
+  },
+  {
+    key: 'payout.two_person_approval',
+    envName: 'PAYOUT_TWO_PERSON_APPROVAL',
+    label: 'Two-person approval for automated payouts',
+    description:
+      'When true (the default), an automated payout broadcast requires a SECOND, different admin approval: the first admin records the approval, a different admin releases the money. Recording a txHash by hand (manual settlement) is NEVER blocked by this, so a single-operator deployment can always settle a payout; a single-operator deployment that wants automated broadcasts should set this to false, understanding that one admin session can then move money.',
+    kind: 'boolean',
+    defaultValue: 'true',
+    inputHint: 'true or false',
   },
 
   // ── bot risk controls ─────────────────────────────────────────────────────
@@ -254,6 +295,24 @@ function validateValue(def: SettingDefinition, value: string): string {
       throw ApiError.badRequest(`${def.label} cannot be negative.`);
     }
     return String(parsed);
+  }
+
+  if (def.kind === 'addresses') {
+    // Crypto addresses are CASE-SENSITIVE (base58/base32), so this list is NOT
+    // lower-cased here; the comparison helper lower-cases both sides because an
+    // EVM address differs from its checksummed form only in case.
+    const addresses = trimmed
+      .split(',')
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const bad = addresses.find((token) => token.length < 20 || token.length > 128 || !/^[A-Za-z0-9:_-]+$/.test(token));
+    if (bad) {
+      throw ApiError.badRequest(
+        `${def.label}: "${bad.slice(0, 40)}" is not a valid payout address (20–128 alphanumeric characters).`,
+      );
+    }
+    // An empty list is meaningful: "no restriction" — the console clears the row.
+    return Array.from(new Set(addresses)).join(',');
   }
 
   if (def.kind === 'symbols') {
@@ -406,6 +465,33 @@ export function resolvedAllowedCurrencies(): string[] {
     .split(',')
     .map((c) => c.trim())
     .filter(Boolean);
+}
+
+/**
+ * The per-client, per-UTC-day USD payout cap. 0 (the default) means no cap —
+ * this must never turn into an accidental limit from an unset or unparsable row.
+ */
+export function resolvedPayoutDailyCapUsd(): number {
+  return getSettingNumber('payout.daily_cap_usd');
+}
+
+/**
+ * Addresses a payout may target. Empty array = no restriction (the default).
+ * Case is preserved for the operator; comparison is case-insensitive.
+ */
+export function resolvedPayoutAddressAllowlist(): string[] {
+  return getSetting('payout.address_allowlist')
+    .split(',')
+    .map((address) => address.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Whether an automated payout broadcast needs two distinct admins.
+ * Unset/unparsable resolves to the definition default, which is `true`.
+ */
+export function resolvedPayoutTwoPersonApproval(): boolean {
+  return getSetting('payout.two_person_approval').trim().toLowerCase() === 'true';
 }
 
 // ─── admin console ───────────────────────────────────────────────────────────

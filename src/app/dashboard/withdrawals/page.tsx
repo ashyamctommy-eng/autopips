@@ -50,7 +50,7 @@ export default async function DashboardWithdrawalsPage() {
         description="Payouts are reviewed by an operator and signed against your verified balance. Only a finished payout reduces your account value."
         breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Withdrawals' }]}
         actions={
-          <Button asChild variant="secondary" size="sm">
+          <Button asChild variant="secondary" size="sm" className="h-10 sm:h-8">
             <Link href="/dashboard/deposits">Deposits</Link>
           </Button>
         }
@@ -63,7 +63,7 @@ export default async function DashboardWithdrawalsPage() {
             Withdrawals are limited to accounts a compliance officer has verified. Your current
             status is {user.kycStatus.replace(/_/g, ' ').toLowerCase()}.
             <span className="mt-2 block">
-              <Button asChild variant="outline" size="sm">
+              <Button asChild variant="outline" size="sm" className="h-10 sm:h-8">
                 <Link href="/dashboard/kyc">Open identity verification</Link>
               </Button>
             </span>

@@ -196,6 +196,7 @@ function DepositPanel({
                 type="button"
                 variant="secondary"
                 size="sm"
+                className="h-10 shrink-0 sm:h-8"
                 onClick={() => void copyAddress()}
                 aria-label="Copy deposit address"
               >
@@ -237,10 +238,10 @@ function DepositPanel({
               alt={`Deposit address QR code (${meta.network})`}
               width={220}
               height={220}
-              className="rounded-lg border border-line bg-white p-2"
+              className="h-auto w-full max-w-[220px] rounded-lg border border-line bg-white p-2"
             />
           ) : (
-            <div className="flex h-[220px] w-[220px] items-center justify-center rounded-lg border border-line bg-base-950/60">
+            <div className="flex h-[220px] w-full max-w-[220px] items-center justify-center rounded-lg border border-line bg-base-950/60">
               {qrError ? (
                 <span className="px-3 text-center text-xs text-muted">{qrError}</span>
               ) : (
@@ -268,6 +269,7 @@ function DepositPanel({
             type="button"
             variant="ghost"
             size="sm"
+            className="h-10 sm:h-8"
             onClick={onRefresh}
             disabled={refreshing}
             aria-label="Check deposit status now"
@@ -443,6 +445,7 @@ export function DepositForm({ currencies, providerReachable, initialDeposit }: D
               min={DEPOSIT_MIN_USD}
               max={DEPOSIT_MAX_USD}
               step="0.01"
+              className="h-10 sm:h-9"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
               placeholder={String(DEPOSIT_MIN_USD)}
@@ -457,7 +460,7 @@ export function DepositForm({ currencies, providerReachable, initialDeposit }: D
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="deposit-currency">Currency</Label>
             <Select value={currency} onValueChange={setCurrency} disabled={currencies.length === 0}>
-              <SelectTrigger id="deposit-currency">
+              <SelectTrigger id="deposit-currency" className="h-10 sm:h-9">
                 <SelectValue placeholder="No currency available" />
               </SelectTrigger>
               <SelectContent>
@@ -512,7 +515,12 @@ export function DepositForm({ currencies, providerReachable, initialDeposit }: D
           ) : null}
 
           <div className="sm:col-span-2">
-            <Button type="submit" variant="primary" disabled={submitting || currencies.length === 0}>
+            <Button
+              type="submit"
+              variant="primary"
+              className="h-10 sm:h-9"
+              disabled={submitting || currencies.length === 0}
+            >
               {submitting ? <Spinner size="sm" label="Creating" /> : null}
               Create deposit address
             </Button>

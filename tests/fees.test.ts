@@ -198,8 +198,10 @@ describe('computePerformanceFee (high-water mark)', () => {
 // ---------------------------------------------------------------------------
 // applyFees: the SOLVENCY CLAMP — "a fee can never push currentValUsd below 0".
 // This is the only fee path that touches the database, so it is proven against
-// the live Postgres + Redis (the high-water mark lives in Redis) and skipped
-// with a loud message when either is unreachable.
+// the live Postgres + Redis and skipped with a loud message when either is
+// unreachable. The high-water mark is DURABLE in `Investment.peakEquityUsd`;
+// Redis is a write-through cache, and the cache-flush test below proves the mark
+// survives losing it.
 // ---------------------------------------------------------------------------
 
 import { afterAll, beforeAll } from 'vitest';
@@ -356,9 +358,21 @@ describeFees('applyFees: solvency clamp against the live ledger', () => {
     expect(first.isNewHigh).toBe(true);
     expect(first.feesDeductedAfter).toBe(200);
     expect(first.currentValUsdAfter).toBe(10800);
-    // The watermark is now the post-fee equity, in Redis.
-    const watermark = await import('@/lib/redis').then(({ redis }) => redis.get(rkey('investment-hwm', investmentId)));
+    // The watermark is now the post-fee equity. The DB column is the authority;
+    // Redis carries the same value as a write-through cache.
+    const { redis } = await import('@/lib/redis');
+    const watermark = await redis.get(rkey('investment-hwm', investmentId));
     expect(Number(watermark)).toBe(10800);
+    const durableAfterFirst = await prisma.investment.findUnique({ where: { id: investmentId } });
+    expect(D(durableAfterFirst?.peakEquityUsd ?? 0).toFixed(2)).toBe('10800.00');
+
+    // DURABILITY, against a simulated cache flush: with the Redis entry gone the
+    // next pass must still see the 10800 mark and charge nothing. Before the
+    // durable column existed, the flush reset the watermark to the funded
+    // capital and the pass re-charged 20% of the already-paid 1000.00.
+    await redis.del(rkey('investment-hwm', investmentId));
+    const afterFlush = await prisma.investment.findUnique({ where: { id: investmentId } });
+    expect(D(afterFlush?.peakEquityUsd ?? 0).toFixed(2)).toBe('10800.00');
 
     // No new high → no fee, and no fabricated profit.
     const second = await applyFees({ investmentId, performance: { performanceFeePct: 20 }, userId });

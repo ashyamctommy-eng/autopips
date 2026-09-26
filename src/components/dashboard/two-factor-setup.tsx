@@ -212,7 +212,7 @@ export function TwoFactorSetup({ enabled }: TwoFactorSetupProps) {
             trail.
           </p>
           <div className="flex flex-wrap items-end gap-3">
-            <div className="flex w-40 flex-col gap-1.5">
+            <div className="flex w-full flex-col gap-1.5 sm:w-40">
               <Label htmlFor="two-factor-disable-code">Authenticator code</Label>
               <Input
                 id="two-factor-disable-code"
@@ -220,12 +220,13 @@ export function TwoFactorSetup({ enabled }: TwoFactorSetupProps) {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 maxLength={10}
+                className="h-10 sm:h-9"
                 value={code}
                 onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ''))}
                 placeholder="123456"
               />
             </div>
-            <Button type="submit" variant="destructive" disabled={busy}>
+            <Button type="submit" variant="destructive" className="h-10 sm:h-9" disabled={busy}>
               {busy ? <Spinner size="sm" label="Working" /> : null}
               Disable two-factor
             </Button>
@@ -283,7 +284,7 @@ export function TwoFactorSetup({ enabled }: TwoFactorSetupProps) {
           <Separator />
 
           <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => void submitCode(event, 'enable')}>
-            <div className="flex w-40 flex-col gap-1.5">
+            <div className="flex w-full flex-col gap-1.5 sm:w-40">
               <Label htmlFor="two-factor-enable-code">Code from the app</Label>
               <Input
                 id="two-factor-enable-code"
@@ -291,18 +292,20 @@ export function TwoFactorSetup({ enabled }: TwoFactorSetupProps) {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 maxLength={10}
+                className="h-10 sm:h-9"
                 value={code}
                 onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ''))}
                 placeholder="123456"
               />
             </div>
-            <Button type="submit" variant="primary" disabled={busy}>
+            <Button type="submit" variant="primary" className="h-10 sm:h-9" disabled={busy}>
               {busy ? <Spinner size="sm" label="Verifying" /> : <KeyRound aria-hidden />}
               Verify and enable
             </Button>
             <Button
               type="button"
               variant="ghost"
+              className="h-10 sm:h-9"
               onClick={() => {
                 setProvisioning(null);
                 setCode('');
@@ -321,7 +324,13 @@ export function TwoFactorSetup({ enabled }: TwoFactorSetupProps) {
             and asks you to confirm one code before the factor is activated.
           </p>
           <div>
-            <Button type="button" variant="primary" onClick={() => void startSetup()} disabled={busy}>
+            <Button
+              type="button"
+              variant="primary"
+              className="h-10 sm:h-9"
+              onClick={() => void startSetup()}
+              disabled={busy}
+            >
               {busy ? <Spinner size="sm" label="Preparing" /> : <KeyRound aria-hidden />}
               Start setup
             </Button>

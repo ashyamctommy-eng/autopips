@@ -426,7 +426,7 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
           setStatus(next);
           void loadQueue(next);
         }}>
-          <TabsList>
+          <TabsList className="max-w-full overflow-x-auto">
             {KYC_STATUS_TABS.map((tab) => (
               <TabsTrigger key={tab.value} value={tab.value}>
                 {tab.label}
@@ -519,7 +519,7 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
                   {declaredRows(detail).map((row) => (
                     <div key={row.label} className="flex items-start justify-between gap-4 px-3 py-2">
                       <dt className="text-xs uppercase tracking-wide text-muted">{row.label}</dt>
-                      <dd className="max-w-[60%] text-right text-sm text-base-100">
+                      <dd className="max-w-[60%] break-words text-right text-sm text-base-100">
                         {row.value ?? (
                           <span className="text-xs italic text-muted">
                             not returned by the admin detail endpoint

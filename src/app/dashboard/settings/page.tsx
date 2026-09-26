@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 import { PASSWORD_POLICY } from '@/server/modules/auth/password.service';
 import { requireSessionUser } from '@/server/modules/auth/session';
 
@@ -47,7 +48,7 @@ export default async function DashboardSettingsPage() {
       />
 
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-3 p-5 pb-3">
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 p-5 pb-3">
           <CardTitle className="flex items-center gap-2">
             <UserCog aria-hidden className="size-4 text-brand-400" />
             Profile
@@ -66,7 +67,7 @@ export default async function DashboardSettingsPage() {
             <span className="text-xs uppercase tracking-wide text-muted">Identity verification</span>
             <span className="flex items-center gap-2">
               <StatusBadge status={user.kycStatus} kind="kyc" showIcon />
-              <Button asChild variant="link" size="sm">
+              <Button asChild variant="link" size="sm" className="h-10 sm:h-8">
                 <Link href="/dashboard/kyc">Open</Link>
               </Button>
             </span>
@@ -96,7 +97,7 @@ export default async function DashboardSettingsPage() {
               </p>
             </div>
             <div>
-              <SignOutButton />
+              <SignOutButton className="h-10 sm:h-8" />
             </div>
           </div>
         </CardContent>
@@ -123,9 +124,17 @@ function Detail({
   mono?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex min-w-0 flex-col gap-0.5">
       <span className="text-xs uppercase tracking-wide text-muted">{label}</span>
-      <span className={mono ? 'break-all font-mono text-xs text-base-100' : 'text-sm text-base-100'}>
+      {/* `min-w-0` + `break-words`: a long unbroken value (an email, a name, an
+          id) must wrap inside its cell. Without the zero minimum the grid track
+          grows to the token's width and the page scrolls sideways on a phone. */}
+      <span
+        className={cn(
+          'break-words text-sm text-base-100',
+          mono && 'break-all font-mono text-xs',
+        )}
+      >
         {value}
       </span>
     </div>

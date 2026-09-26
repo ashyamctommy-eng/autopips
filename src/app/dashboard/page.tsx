@@ -146,13 +146,13 @@ export default async function DashboardOverviewPage() {
         breadcrumb={[{ label: 'Dashboard' }]}
         actions={
           <>
-            <Button asChild variant="secondary" size="sm">
+            <Button asChild variant="secondary" size="sm" className="h-10 sm:h-8">
               <Link href="/dashboard/deposits">
                 <ArrowDownToLine aria-hidden />
                 Deposit
               </Link>
             </Button>
-            <Button asChild variant="secondary" size="sm">
+            <Button asChild variant="secondary" size="sm" className="h-10 sm:h-8">
               <Link href="/dashboard/withdrawals">
                 <ArrowUpFromLine aria-hidden />
                 Withdraw
@@ -300,10 +300,10 @@ export default async function DashboardOverviewPage() {
                 <Usd value={breakdown.totalPaidWithdrawals} tone="neutral" />
               </div>
               <div className="mt-1 flex flex-wrap gap-2">
-                <Button asChild variant="primary" size="sm">
+                <Button asChild variant="primary" size="sm" className="h-10 sm:h-8">
                   <Link href="/dashboard/withdrawals">Request withdrawal</Link>
                 </Button>
-                <Button asChild variant="secondary" size="sm">
+                <Button asChild variant="secondary" size="sm" className="h-10 sm:h-8">
                   <Link href="/dashboard/deposits">Add funds</Link>
                 </Button>
               </div>
@@ -344,13 +344,13 @@ export default async function DashboardOverviewPage() {
         </div>
 
         {openInvestments.length === 0 ? (
-          <div className="rounded-xl border border-line bg-base-850/60">
+          <div className="surface">
             <EmptyState
               icon={Layers}
               title="No active investments yet"
               description="Once capital is deployed into a plan it appears here with its live broker P/L and indicative target range. Deposits land as idle cash first and are not traded until they are allocated."
               action={
-                <Button asChild variant="primary" size="sm">
+                <Button asChild variant="primary" size="sm" className="h-10 sm:h-8">
                   <Link href="/dashboard/deposits">Deposit funds</Link>
                 </Button>
               }

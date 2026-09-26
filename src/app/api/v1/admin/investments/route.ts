@@ -4,10 +4,46 @@ import { ApiError, clientIp, handler, ok, readJson } from '@/lib/http';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/server/modules/auth/session';
 import { createInvestment } from '@/server/modules/account/account.service';
+import {
+  INVESTMENT_STATUS_VALUES,
+  listInvestmentsForAdmin,
+} from '@/server/modules/account/maturity.service';
 import type { SessionUser } from '@/types/api';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/**
+ * GET /api/v1/admin/investments?status=&take=&cursor=
+ *
+ * Platform-wide investment list for the console. Each row carries the owning
+ * client's email, the plan name, capital and current value, status, the maturity
+ * date, and — because maturity/closure is refused while a position is open — the
+ * number of OPEN positions and whether they block closure. The `maturityDecision`
+ * field is the verdict the automatic sweep would reach for the row right now, so
+ * an operator sees the same rule the worker enforces before clicking anything.
+ *
+ * ADMIN only, newest first, cursor-paginated on the investment id.
+ */
+const listQuerySchema = z.object({
+  status: z.enum(INVESTMENT_STATUS_VALUES).optional(),
+  take: z.coerce.number().int().min(1).max(100).optional(),
+  cursor: z.string().trim().min(1).max(64).optional(),
+});
+
+export const GET = handler(async (request: Request) => {
+  await requireAdmin();
+
+  const { searchParams } = new URL(request.url);
+  const query = listQuerySchema.parse({
+    status: searchParams.get('status') ?? undefined,
+    take: searchParams.get('take') ?? undefined,
+    cursor: searchParams.get('cursor') ?? undefined,
+  });
+
+  const { items, nextCursor } = await listInvestmentsForAdmin(query);
+  return ok({ items, nextCursor });
+});
 
 /**
  * POST /api/v1/admin/investments

@@ -32,7 +32,7 @@ export default function GlobalError({
           modified by a failed page load.
         </p>
         {error.digest ? (
-          <p className="font-mono text-xs text-slate-500">reference: {error.digest}</p>
+          <p className="font-mono text-xs text-muted">reference: {error.digest}</p>
         ) : null}
         {process.env.NODE_ENV !== 'production' ? (
           <pre className="mx-auto mt-4 max-w-2xl overflow-auto rounded-lg border border-line bg-base-950 p-4 text-left text-xs text-loss/90">

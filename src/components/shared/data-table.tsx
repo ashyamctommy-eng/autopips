@@ -78,7 +78,11 @@ export function DataTable<T>({
   const interactive = typeof onRowClick === 'function';
 
   return (
-    <div className={cn('w-full overflow-hidden rounded-xl border border-line bg-base-850/60', className)}>
+    // `.surface` is the shared glass panel (see globals.css) — the same one
+    // `Card` renders — with `overflow-hidden` kept for the rounded corners.
+    // Scrolling stays on the inner `Table` container, so a wide table scrolls
+    // inside this panel instead of pushing the page wider than the viewport.
+    <div className={cn('surface w-full overflow-hidden', className)}>
       {showEmpty ? (
         <div className="p-2">
           {emptyState ?? <EmptyState title="Nothing to show yet" />}

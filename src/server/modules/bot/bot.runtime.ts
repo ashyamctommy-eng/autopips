@@ -55,6 +55,7 @@ import { runSyncCycle } from '../broker/broker.sync';
 import { publishActivity } from '@/server/ws/event-bus';
 import { executeSignal } from './order.manager';
 import { evaluateStrategy, STRATEGY_RULE } from './strategy.engine';
+import { accrueFees, AUDIT_FEE_ACCRUAL_FAILED } from './fee.accrual';
 import type { TradeSignal } from './bot.types';
 
 /**
@@ -328,6 +329,29 @@ async function runCycle(): Promise<void> {
     }
 
     await runSyncCycle();
+
+    // ---- fees -------------------------------------------------------------
+    // Charged from the accrual pass's OWN ACTIVE/PAUSED query, not the sync
+    // cycle's `touched` set: that set only holds investments with broker activity
+    // this cycle, so a fee pass hanging off it would skip exactly the funded but
+    // quiet investments that still owe a management fee.
+    //
+    // A fee failure must not fail the tick (the sync and the strategies that just
+    // ran are still valid) and must not be swallowed either, so it is caught,
+    // logged and audited here rather than escaping to the generic cycle handler.
+    try {
+      const feeSummary = await accrueFees();
+      if (feeSummary.errors > 0) {
+        console.error(`[bot.runtime] fee accrual finished with ${feeSummary.errors} failed investment(s).`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[bot.runtime] fee accrual failed:', message);
+      await recordAuditSafe({
+        action: AUDIT_FEE_ACCRUAL_FAILED,
+        details: { phase: 'fee_accrual', error: message },
+      });
+    }
 
     const connections = await prisma.brokerConnection.findMany({ where: { status: 'CONNECTED' } });
     const enabled = Object.entries(strategies).filter(([, config]) => config.enabled);

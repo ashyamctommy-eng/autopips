@@ -178,12 +178,29 @@ model Investment {
   status        InvestmentStatus @default(PENDING)
   startDate     DateTime?
   maturityDate  DateTime?
+  ///
+  /// Performance-fee high-water mark, persisted.
+  /// It used to live only in Redis, so a flush or an eviction silently reset the
+  /// watermark to the starting capital and the platform re-charged performance on
+  /// profit it had already taken a fee on. The DB copy is the one that counts.
+  peakEquityUsd Decimal?         @db.Decimal(18, 2)
+  ///
+  /// When management fees were last accrued for this investment. The fee engine
+  /// needs elapsed days, and deriving them from `startDate` every run would
+  /// re-charge the whole period on a retry.
+  lastFeeAt     DateTime?
+  /// Set when the investment reaches a terminal state (MATURED, CLOSED or
+  /// CANCELLED). Before this existed an investment could never leave
+  /// ACTIVE/PAUSED, so the client's principal was locked forever.
+  closedAt      DateTime?
   trades        TradeRecord[]
   createdAt     DateTime         @default(now())
 
   @@index([userId])
   @@index([status])
   @@index([planId])
+  /// The maturity sweep queries `status IN (ACTIVE, PAUSED) AND maturityDate <= now`.
+  @@index([maturityDate])
 }
 
 model Deposit {
@@ -208,17 +225,49 @@ model Withdrawal {
   id             String        @id @default(uuid())
   userId         String
   user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// What the client asked for, in USD. The platform's ledger unit.
   amountUsd      Decimal       @db.Decimal(18, 2)
   cryptoCurrency String        @db.VarChar(32)
   payoutAddress  String
   feeUsd         Decimal       @default(0.00) @db.Decimal(18, 2)
   status         PaymentStatus @default(PENDING)
+  /// The admin who approved. With `secondApprovedBy` this is the two-person trail.
   approvedBy     String?
+  ///
+  /// The SECOND, distinct admin required for a payout to leave the treasury.
+  /// One compromised admin session must not be able to move client money.
+  secondApprovedBy String?
   txHash         String?
+
+  // ── payout reconciliation ───────────────────────────────────────────────
+  /// The amount actually sent, in COIN UNITS. `amountUsd` is USD and the provider
+  /// pays in `cryptoCurrency`; sending amountUsd as the coin amount would order
+  /// 100 BTC for a $100 withdrawal. Derived from the provider's estimate and
+  /// stored so the broadcast figure is a recorded fact, not a recomputation.
+  payAmount      Decimal?      @db.Decimal(18, 8)
+  /// The provider's payout id. Without it a payout cannot be looked up again, so
+  /// a later IPN or a failed broadcast could never be reconciled.
+  providerPayoutId String?
+  /// The provider's own status string, verbatim. Never overwritten by the
+  /// platform's own state machine — it is what the counterparty reported.
+  providerStatus String?
+  /// The payout IPN, retained exactly as received (the deposit side already does
+  /// this). An unrecognised payload is evidence, not something to discard.
+  ipnPayload     Json?
+  approvedAt     DateTime?
+  /// Set when the provider confirms settlement, NOT when it accepts the request.
+  settledAt      DateTime?
   createdAt      DateTime      @default(now())
+  /// Nullable on purpose: this column is added to a table that already has rows,
+  /// and a NOT NULL column with no default cannot be added to a non-empty table.
+  updatedAt      DateTime?     @updatedAt
 
   @@index([userId])
   @@index([status])
+  @@index([providerPayoutId])
+  /// Per-day withdrawal caps sum over a window; `createdAt` is the only anchor
+  /// that exists until this column and the settlement trail land.
+  @@index([createdAt])
 }
 
 model BrokerConnection {

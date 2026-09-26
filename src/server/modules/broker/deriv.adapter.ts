@@ -656,7 +656,12 @@ export class DerivBrokerAdapter implements BrokerAdapter {
       environment,
       maskedAccount: maskAccount(loginId),
       currency: authorized?.currency ?? this.config.currency ?? 'USD',
-      balance: balance ?? 0,
+      // NULL, never 0. `balance` is a documented nullable on purpose: a broker
+      // blackout (or a token that authorises but reports nothing) must read as
+      // "Deriv did not report the balance", not as a real, empty account. A
+      // zero-filled balance is a fabricated figure that then makes any
+      // broker-versus-ledger drift check compare against a lie.
+      balance,
       equity,
       // Deriv reports none of these; null means "not reported", not "zero".
       freeMargin: null,
@@ -916,7 +921,16 @@ export class DerivBrokerAdapter implements BrokerAdapter {
           : null;
       const symbol = typeof raw.symbol === 'string' ? raw.symbol : null;
       const profit = isFiniteNumber(raw.profit) ? raw.profit : null;
-      const executedAt = epochSeconds(raw.purchase_time) ?? epochSeconds(raw.sell_time);
+      // A SOLD contract must be timestamped by its SETTLEMENT time, not by when it
+      // was opened. `sell_time` is when Deriv booked the settlement and it is
+      // what the sync advances its watermark to: stamping `purchase_time` here
+      // lets a contract that settles after its purchase time fall outside the
+      // next window and never be booked. `purchase_time` remains the fallback
+      // (and the only timestamp) for a deal the broker has not settled yet.
+      const isSold = raw.is_sold === 1 || raw.is_sold === true || raw.status === 'sold';
+      const executedAt = isSold
+        ? (epochSeconds(raw.sell_time) ?? epochSeconds(raw.purchase_time))
+        : (epochSeconds(raw.purchase_time) ?? epochSeconds(raw.sell_time));
       if (!id || !symbol || profit === null || executedAt === null) continue;
 
       const contractType = typeof raw.contract_type === 'string' ? raw.contract_type : '';
@@ -971,7 +985,13 @@ export class DerivBrokerAdapter implements BrokerAdapter {
     return {
       positionId,
       exitPrice: exitSpot,
+      // Deriv contracts are all-or-nothing: they report no closing lot size, and
+      // substituting one (the stake, or 0) would be a fabrication. The proof of
+      // full settlement is `is_sold` / `status === 'sold'` above, and that is
+      // what `fullyClosed` carries so the closure gate does not have to read a
+      // volume that does not exist.
       closingVolume: null,
+      fullyClosed: true,
       // Deriv's settled profit is net; it does not itemise the costs.
       grossPnL: null,
       commission: null,
