@@ -8,6 +8,10 @@ import {
   mapDerivActiveSymbols,
   mapDerivCandles,
 } from '@/server/modules/broker/deriv.adapter';
+import {
+  getTwelveDataCandles,
+  marketDataProvider,
+} from '@/server/modules/market/twelve-data.service';
 import type { Candle, InstrumentInfo, Quote } from '@/server/modules/broker/broker.types';
 
 /**
@@ -94,6 +98,21 @@ export function closePublicMarketConnection(): void {
 }
 
 /**
+ * Latest traded price for a symbol — the last close of the smallest timeframe.
+ *
+ * Used to price an internal position server-side. That is a SECURITY boundary,
+ * not a convenience: a client must never supply its own fill price, or it could
+ * open at a favourable print and close at another for a fabricated profit.
+ * Returns null when the feed has no usable bar (caller turns that into a 503).
+ */
+export async function getLatestPrice(symbol: string): Promise<number | null> {
+  const candles = await getPublicCandles(symbol, '1m', 2);
+  const last = candles[candles.length - 1];
+  if (!last) return null;
+  return Number.isFinite(last.close) && last.close > 0 ? last.close : null;
+}
+
+/**
  * Historical candles for one instrument.
  *
  * Throws only when the feed itself cannot be reached; an instrument the broker
@@ -104,6 +123,14 @@ export async function getPublicCandles(
   timeframe: string,
   count: number,
 ): Promise<Candle[]> {
+  // Provider switch (MARKET_DATA_PROVIDER). Defaults to the Deriv public feed, so
+  // this is a no-op until an operator sets it deliberately. Twelve Data is not a
+  // drop-in: it has no mapping for Deriv synthetics (R_10/R_100) and will refuse
+  // them, which is the correct loud failure rather than pricing the wrong thing.
+  if (marketDataProvider() === 'twelve') {
+    return getTwelveDataCandles(symbol, timeframe, count);
+  }
+
   const granularity = GRANULARITY_SECONDS[timeframe];
   if (!granularity) {
     throw new Error(`Deriv cannot serve the ${timeframe} timeframe.`);

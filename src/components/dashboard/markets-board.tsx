@@ -162,7 +162,7 @@ const STATUS_LABEL: Record<TradingSocketStatus, string> = {
   connecting: 'Connecting',
   connected: 'Live',
   reconnecting: 'Reconnecting',
-  error: 'Feed error',
+  error: 'Market Feed error',
 };
 
 interface MarketRowProps {
@@ -313,8 +313,8 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
       <div className="rounded-xl border border-line bg-base-850/60">
         <EmptyState
           icon={SearchX}
-          title="The feed listed no instruments"
-          description="The broker's public feed answered but reported no instruments, so there is nothing to list. The page stays empty until the feed reports them."
+          title="The Market Feed listed no instruments"
+          description="The Market Feed answered but reported no instruments, so there is nothing to list. The page stays empty until the feed reports them."
         />
       </div>
     );
@@ -370,7 +370,7 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
           ) : null}
 
           {error ? (
-            <p className="text-xs leading-relaxed text-loss-400">Live feed error: {error}</p>
+            <p className="text-xs leading-relaxed text-loss-400">Market Feed error: {error}</p>
           ) : null}
         </CardContent>
       </Card>
@@ -419,7 +419,7 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
         ) : (
           <>
             <p className="border-b border-line px-4 py-3 text-xs leading-relaxed text-muted">
-              Live prices are the quote reported by the broker, shown at the precision of each
+              Live prices are the quote reported by the Market Feed, shown at the precision of each
               instrument in its own units — never converted to USD. An em dash means no quote has
               arrived for that symbol yet.
             </p>

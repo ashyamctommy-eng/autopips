@@ -7,6 +7,10 @@ import { TARGET_RETURN_DISCLAIMER, TARGET_RETURN_LABEL } from '@/lib/contracts';
 import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  internalExecutionNotice,
+  isInternalExecutionMode,
+} from '@/server/modules/legal/disclosure';
 import { Card, CardContent } from '@/components/ui/card';
 
 /**
@@ -276,7 +280,19 @@ const RISKS: readonly RiskSection[] = [
   },
 ];
 
+// The disclosure is mode-dependent and operator-editable (Admin → Settings),
+// so this page is rendered per request rather than baked at build time.
+export const dynamic = 'force-dynamic';
+
 export default function RiskPage() {
+  // Internal execution means the platform is the counterparty and no broker
+  // order exists, so the broker wording would be untrue. Swap in the
+  // operator-editable notice instead of publishing a claim that is wrong.
+  const internal = isInternalExecutionMode();
+  const notice = internal ? internalExecutionNotice() : [];
+  const titleFor = (risk: RiskSection) =>
+    internal && risk.id === 'counterparty' ? 'How your positions are executed' : risk.title;
+
   return (
     <>
       <div className="mx-auto w-full max-w-[1400px] px-4 pt-10 sm:px-6 lg:px-8">
@@ -309,7 +325,7 @@ export default function RiskPage() {
                   href={`#${risk.id}`}
                   className="rounded-sm text-sm text-muted transition-colors hover:text-base-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
                 >
-                  {risk.title}
+                  {titleFor(risk)}
                 </a>
               </li>
             ))}
@@ -322,9 +338,13 @@ export default function RiskPage() {
               <CardContent className="flex flex-col gap-3 p-5">
                 <h2 className="flex items-start gap-3 text-[1rem] font-semibold leading-snug tracking-tight text-base-100">
                   <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warn-400" />
-                  {risk.title}
+                  {titleFor(risk)}
                 </h2>
-                <div className="flex flex-col gap-3 text-sm leading-relaxed text-muted">{risk.body}</div>
+                <div className="flex flex-col gap-3 text-sm leading-relaxed text-muted">
+                  {internal && risk.id === 'counterparty' && notice.length > 0
+                    ? notice.map((paragraph) => <p key={paragraph.slice(0, 24)}>{paragraph}</p>)
+                    : risk.body}
+                </div>
               </CardContent>
             </Card>
           ))}

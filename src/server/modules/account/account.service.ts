@@ -546,6 +546,8 @@ const ACTIVITY_TEMPLATES: Record<AuditAction, ActivityTemplate> = {
   INVESTMENT_PAUSED: always('Investment paused', 'warning'),
   INVESTMENT_CLOSED: always('Investment closed', 'info'),
   INVESTMENT_MATURED: always('Investment reached maturity', 'info'),
+  POSITION_OPENED: always('Position opened', 'info'),
+  POSITION_CLOSED: always('Position closed', 'info'),
 
   // broker
   BROKER_CONNECTED: always('Broker account connected', 'success'),

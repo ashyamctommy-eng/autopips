@@ -51,10 +51,10 @@ import {
   investmentRoom,
   publishActivity,
   publishBrokerStatus,
-  publishTick,
   publishTradeEvent,
 } from '@/server/ws/event-bus';
 import { AUDIT, recordAudit } from '../audit/audit.service';
+import { publishMarketQuote } from '@/server/modules/market/quote-fanout';
 import { DerivBrokerAdapter } from './deriv.adapter';
 import type {
   BrokerAccountState,
@@ -263,7 +263,7 @@ export function brokerEventHandlers(accountId: string): BrokerEventHandlers {
     onQuote: async (quote) => {
       // Ticks are symbol-scoped, not user-scoped: the socket layer fans them out
       // to every authenticated client, which filters by symbol.
-      await publishTick({ ...quote });
+      await publishMarketQuote(quote);
     },
 
     onConnectionState: async (state) => {

@@ -7,7 +7,7 @@ import {
   getAdapterForConnection,
 } from '@/server/modules/broker/broker.registry';
 import type { BrokerAdapter } from '@/server/modules/broker/broker.types';
-import { publishTick } from '@/server/ws/event-bus';
+import { publishMarketQuote } from '@/server/modules/market/quote-fanout';
 
 /**
  * MARKET DATA DEMAND MANAGER — the bridge between "a client is watching a
@@ -93,7 +93,7 @@ async function startStream(symbol: string, listeners: number): Promise<boolean> 
 
     // The subscription call answers with the current price: publish it so a chart
     // has a first tick immediately instead of waiting for the next terminal push.
-    if (quote) await publishTick({ ...quote });
+    if (quote) await publishMarketQuote(quote);
 
     console.info(
       `[market-stream] streaming ${symbol} via account=${adapter.accountId} connection=${connection.id}`,
@@ -194,7 +194,7 @@ export async function reattachMarketSubscriptions(): Promise<void> {
        */
       try {
         const quote = await entry.adapter.subscribeToMarketData(symbol);
-        if (quote) await publishTick({ ...quote });
+        if (quote) await publishMarketQuote(quote);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (!/AlreadySubscribed/i.test(message)) {

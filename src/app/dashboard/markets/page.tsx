@@ -47,7 +47,7 @@ export default async function DashboardMarketsPage() {
       <PageHeader
         eyebrow="Public market feed"
         title="Markets"
-        description="The broker's own instrument list, with realtime quotes streamed over a single connection. A price is the broker's reported bid/ask shown at that instrument's precision — it is not converted to USD, and it is left blank rather than invented while the feed is quiet."
+        description="The Market Feed instrument list, with realtime quotes streamed over a single connection. A price is the Market Feed's reported bid/ask shown at that instrument's precision — it is not converted to USD, and it is left blank rather than invented while the feed is quiet."
         breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Markets' }]}
         actions={
           <Button asChild variant="secondary" size="sm">
@@ -63,7 +63,7 @@ export default async function DashboardMarketsPage() {
           <EmptyState
             icon={LineChart}
             title="Market data is unavailable"
-            description="The broker's public feed could not be reached, so there are no instruments and no prices to show. Nothing on this page is substituted with a stand-in figure — retry once the feed is reachable."
+            description="The Market Feed could not be reached, so there are no instruments and no prices to show. Nothing on this page is substituted with a stand-in figure — retry once the feed is reachable."
             action={
               <Button asChild variant="secondary" size="sm">
                 <Link href="/dashboard/markets" prefetch={false}>

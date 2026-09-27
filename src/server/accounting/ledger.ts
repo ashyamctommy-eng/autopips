@@ -46,6 +46,18 @@ export const IN_FLIGHT_WITHDRAWAL_STATUSES = [
 export const DEPLOYED_INVESTMENT_STATUSES = ['ACTIVE', 'PAUSED'] as const;
 
 /**
+ * Internally-executed position states whose STAKE is deployed (money at risk).
+ *
+ * An OPEN position is the second form of deployed capital: its stake has left
+ * idle cash and cannot be withdrawn until the position closes, exactly like an
+ * ACTIVE investment. This is what keeps the ledger's two capital terms a
+ * partition of credited deposits once positions exist.
+ */
+export const OPEN_POSITION_STATUSES = ['OPEN'] as const;
+/** Position states whose pnl has actually happened (realized). */
+export const CLOSED_POSITION_STATUSES = ['CLOSED'] as const;
+
+/**
  * Raw, verified ledger aggregates for one account or the whole platform.
  * Construction is the caller's job; interpretation is not.
  */
@@ -107,13 +119,15 @@ export function buildEquityFromAggregates(agg: LedgerAggregates): EquityBreakdow
 export interface AccountSnapshot {
   userId: string;
   breakdown: EquityBreakdown;
-  /** Capital currently deployed in ACTIVE/PAUSED investments. */
+  /** Capital currently deployed in ACTIVE/PAUSED investments AND open positions. */
   activeCapital: Decimal;
   /** Withdrawals requested but not yet paid. */
   pendingWithdrawals: Decimal;
   /** Equity minus deployed capital minus pending withdrawals. */
   withdrawableBalance: Decimal;
   openInvestments: number;
+  /** Internally-executed positions still OPEN (money at risk). */
+  openPositions: number;
   /** Gross confirmed deposits ever credited (display / audit only). */
   totalCreditedDeposits: Decimal;
   /** Gross finished withdrawals ever paid (display / audit only). */
@@ -142,9 +156,12 @@ function agg(value: Decimal | null | undefined): Decimal {
  *
  * Sources:
  *   startingCapital   ← Investment.capitalUsd (ACTIVE/PAUSED)   [deployed]
+ *                     + Position.stake (OPEN)                   [deployed]
  *   confirmedDeposits ← credited deposits − deployed            [idle]
  *   realizedPnL       ← sum(TradeRecord.netPnL WHERE status='CLOSED')
+ *                     + sum(Position.pnl WHERE status='CLOSED')
  *   unrealizedPnL     ← sum(Investment.unrealizedPnL)   [broker-sourced]
+ *                     + sum(Position.pnl WHERE status='OPEN')
  *   deductedFees      ← sum(Investment.feesDeducted)
  *   withdrawals       ← sum(Withdrawal.amountUsd WHERE status='FINISHED')
  */
@@ -159,6 +176,8 @@ export async function getAccountSnapshot(
     pendingWithdrawals,
     creditedDeposits,
     openInvestments,
+    openPositions,
+    closedPositions,
   ] = await Promise.all([
     // CANCELLED investments carry no realisable P/L or charged fees; the admin
     // projection excludes them too, so excluding them here keeps the two
@@ -188,18 +207,35 @@ export async function getAccountSnapshot(
       _sum: { capitalUsd: true },
       _count: { _all: true },
     }),
+    // Internal positions: OPEN stakes are deployed capital, OPEN pnl is
+    // unrealized; CLOSED pnl is realized. `@/lib/money` sums come back as
+    // Decimal, so the components stay exact.
+    db.position.aggregate({
+      where: { userId, status: { in: [...OPEN_POSITION_STATUSES] } },
+      _sum: { stake: true, pnl: true },
+      _count: { _all: true },
+    }),
+    db.position.aggregate({
+      where: { userId, status: { in: [...CLOSED_POSITION_STATUSES] } },
+      _sum: { pnl: true },
+    }),
   ]);
 
   const credited = agg(creditedDeposits._sum.amountUsd);
   const paidWithdrawals = agg(finishedWithdrawals._sum.amountUsd);
-  const deployedCapital = agg(openInvestments._sum.capitalUsd);
+  // Deployed capital = investments + OPEN position stakes. Both are money the
+  // client cannot withdraw until released, so both must be subtracted from idle
+  // cash — see the partition note in equity.ts.
+  const deployedCapital = D(agg(openInvestments._sum.capitalUsd)).plus(
+    D(agg(openPositions._sum.stake)),
+  );
 
   const breakdown = buildEquityFromAggregates({
     creditedDeposits: credited,
     paidWithdrawals,
     deployedCapital,
-    realizedPnL: agg(closedTrades._sum.netPnL),
-    unrealizedPnL: agg(portfolio._sum.unrealizedPnL),
+    realizedPnL: D(agg(closedTrades._sum.netPnL)).plus(D(agg(closedPositions._sum.pnl))),
+    unrealizedPnL: D(agg(portfolio._sum.unrealizedPnL)).plus(D(agg(openPositions._sum.pnl))),
     deductedFees: agg(portfolio._sum.feesDeducted),
   });
 
@@ -216,6 +252,7 @@ export async function getAccountSnapshot(
       pendingWithdrawals: pending,
     }),
     openInvestments: openInvestments._count._all,
+    openPositions: openPositions._count._all,
     totalCreditedDeposits: credited,
     totalPaidWithdrawals: paidWithdrawals,
     netContributedCapital: usd(credited.minus(paidWithdrawals)),
@@ -234,6 +271,8 @@ export interface PlatformLedger {
   confirmedDeposits: Decimal;
   activeClients: number;
   openInvestments: number;
+  /** Internally-executed positions still OPEN platform-wide. */
+  openPositions: number;
 }
 
 /**
@@ -250,6 +289,8 @@ export async function getPlatformLedger(): Promise<PlatformLedger> {
     creditedDeposits,
     activeClients,
     openInvestments,
+    openPositions,
+    closedPositions,
   ] = await Promise.all([
     // Consistent with the per-user path and the admin projection (see D5).
     prisma.investment.aggregate({
@@ -274,18 +315,31 @@ export async function getPlatformLedger(): Promise<PlatformLedger> {
       _sum: { capitalUsd: true },
       _count: { _all: true },
     }),
+    // Same position terms as the per-user path, so the platform total cannot
+    // drift from the sum of the client views (the D3/D4 failure class).
+    prisma.position.aggregate({
+      where: { status: { in: [...OPEN_POSITION_STATUSES] } },
+      _sum: { stake: true, pnl: true },
+      _count: { _all: true },
+    }),
+    prisma.position.aggregate({
+      where: { status: { in: [...CLOSED_POSITION_STATUSES] } },
+      _sum: { pnl: true },
+    }),
   ]);
 
   const credited = agg(creditedDeposits._sum.amountUsd);
   const paidWithdrawals = agg(finishedWithdrawals._sum.amountUsd);
-  const deployedCapital = agg(openInvestments._sum.capitalUsd);
+  const deployedCapital = D(agg(openInvestments._sum.capitalUsd)).plus(
+    D(agg(openPositions._sum.stake)),
+  );
 
   const breakdown = buildEquityFromAggregates({
     creditedDeposits: credited,
     paidWithdrawals,
     deployedCapital,
-    realizedPnL: agg(closedTrades._sum.netPnL),
-    unrealizedPnL: agg(portfolio._sum.unrealizedPnL),
+    realizedPnL: D(agg(closedTrades._sum.netPnL)).plus(D(agg(closedPositions._sum.pnl))),
+    unrealizedPnL: D(agg(portfolio._sum.unrealizedPnL)).plus(D(agg(openPositions._sum.pnl))),
     deductedFees: agg(portfolio._sum.feesDeducted),
   });
 
@@ -299,6 +353,7 @@ export async function getPlatformLedger(): Promise<PlatformLedger> {
     confirmedDeposits: usd(credited),
     activeClients,
     openInvestments: openInvestments._count._all,
+    openPositions: openPositions._count._all,
   };
 }
 

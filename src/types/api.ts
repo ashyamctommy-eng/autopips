@@ -265,3 +265,51 @@ export interface ApiErrorEnvelope {
   ok: false;
   error: { code: string; message: string; details?: unknown };
 }
+
+/* ───────────────────────── internal positions (EXECUTION_MODE) ──────────── */
+
+/**
+ * An INTERNALLY-EXECUTED position (`EXECUTION_MODE=internal`).
+ *
+ * Distinct from the broker `PositionDTO` above: this is a platform liability
+ * priced off the market-data feed, so it carries a `stake` (money at risk), a
+ * `multiplier`, and a single `pnl`. Renamed to keep the two unambiguous.
+ */
+export interface InternalPositionDTO {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  /** Money at risk — the maximum loss on this position, USD. */
+  stake: number;
+  multiplier: number;
+  entryPrice: number;
+  currentPrice: number;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  /** Unrealized while OPEN (live mark); frozen once CLOSED. */
+  pnl: number;
+  status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+  executionMode: string;
+  closePrice: number | null;
+  openedAt: string;
+  closedAt: string | null;
+}
+
+/**
+ * A client's wallet, DERIVED from the ledger — there is no `User.balance`
+ * column. Every figure here comes from `getAccountSnapshot`, so the wallet can
+ * never disagree with the dashboard, the admin projection or the equity formula.
+ */
+export interface WalletDTO {
+  /** Equity minus deployed capital minus pending withdrawals (spendable now). */
+  availableUsd: number;
+  /** Capital locked in ACTIVE/PAUSED investments plus OPEN position stakes. */
+  deployedUsd: number;
+  equityUsd: number;
+  pendingWithdrawalsUsd: number;
+  netContributedCapitalUsd: number;
+  openInvestments: number;
+  openPositions: number;
+  /** The single equity formula, surfaced so the UI can show its own arithmetic. */
+  formula: string;
+}

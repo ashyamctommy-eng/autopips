@@ -234,6 +234,49 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
   const claimKey = signalClaimKey(signal.signalId);
   const configClaim = { signalId: signal.signalId, strategy: signal.strategy, symbol: signal.symbol };
 
+  // EXECUTION VENUE GATE (stage c).
+  //
+  // `EXECUTION_MODE=internal` means every client trade is booked on the platform's
+  // OWN book (`Position`), and the operator's decision is explicit: no broker
+  // order placement, no external balance syncing. So the managed signal path must
+  // NOT also send a real order — that would double the exposure (one internal
+  // position and one live broker contract) and defeat the whole pivot.
+  //
+  // Placed BEFORE the idempotency claim on purpose: a signal refused for this
+  // reason has not been handled, so the claim must not be consumed.
+  //
+  // Only OPENING is gated. Closing an existing broker position is left alone: if a
+  // live position predates the switch, refusing to close it would strand real
+  // risk at the broker.
+  if (env.EXECUTION_MODE === 'internal') {
+    await recordAuditSafe({
+      action: AUDIT.RISK_CHECK_FAILED,
+      details: {
+        ...configClaim,
+        phase: 'execute_signal',
+        reason: 'EXTERNAL_EXECUTION_DISABLED',
+        executionMode: env.EXECUTION_MODE,
+        note: 'Orders are booked internally in this mode; no broker order was sent.',
+      },
+    });
+    await publishActivity(
+      makeActivity(
+        'EXTERNAL_EXECUTION_DISABLED',
+        `Signal ${signal.signalId} was not sent to the broker: this deployment executes internally (EXECUTION_MODE=internal).`,
+        'warning',
+        { ...configClaim, reason: 'EXTERNAL_EXECUTION_DISABLED' },
+        investmentRooms(null),
+      ),
+    );
+    return {
+      signalId: signal.signalId,
+      status: 'REJECTED',
+      reason: 'EXTERNAL_EXECUTION_DISABLED',
+      allocations: [],
+      outcomes: [],
+    };
+  }
+
   // Platform gate: the global kill switch, the symbol allow-list and the daily
   // loss limit. Checked BEFORE the idempotency claim so a halted platform does
   // not consume the signal — the operator can re-run it after releasing the stop.
