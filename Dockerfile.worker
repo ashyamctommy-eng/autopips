@@ -52,6 +52,18 @@
 # tree (tsx is a devDependency). `dist/` is still used by `src/server/main.ts` as
 # a fallback import path for the bot/broker modules, which is harmless.
 #
+# ── THE PREFLIGHT GUARD ────────────────────────────────────────────────────
+# `npm run start:ws` also runs `prestart:ws`
+# (`node scripts/worker-preflight.mjs`), which fails with the reason and the fix
+# if this image is ever the WEB image rather than this one. On 2026-09-27 a
+# Railway worker service was pointed at the wrong Dockerfile and died with
+# `ERR_MODULE_NOT_FOUND: Cannot find module '/app/src/server/main.ts'` — a
+# missing file, which said nothing about the real cause (the wrong image). The
+# web image has no `src/` and no `tsx` (a pruned devDependency), so the guard
+# names `railway.worker.toml` instead. `scripts/` is copied into this image for
+# that reason, and the guard is dependency-free so that it runs in EITHER image
+# — including the pruned web one, which is when it matters.
+#
 # SECRETS: none are passed as build args (they are recorded in image history —
 # see the Dockerfile header). Everything arrives at runtime via `--env-file` /
 # compose `env_file:` and is validated by `src/lib/env.ts`, which exits 1 on any
@@ -80,6 +92,9 @@ RUN npx prisma generate
 # `.next/` and coverage are excluded via .dockerignore.
 COPY tsconfig.json tsconfig.server.json ./
 COPY src ./src
+# The worker preflight guard (`prestart:ws`) — see its header section above.
+# Plain node, no dependencies, so it is safe in this full-dependency image.
+COPY scripts ./scripts
 
 # Non-root.
 RUN chown -R node:node /app

@@ -22,6 +22,15 @@ dockerfilePath = "Dockerfile.worker"
 [deploy]
 # `npm run start:ws` → tsx src/server/main.ts. The process reads the platform's
 # `PORT` first and falls back to WS_PORT, so it binds to whatever Railway routes.
+#
+# `npm run start:ws` also triggers `prestart:ws`
+# (`node scripts/worker-preflight.mjs`), which aborts with an actionable message
+# if this service was built from the wrong Dockerfile — the shape of the
+# 2026-09-27 failure, where the deploy died on
+# `ERR_MODULE_NOT_FOUND: /app/src/server/main.ts` because the image was the WEB
+# image (no src/, and tsx pruned) rather than this one. Keep this file the ONLY
+# place the worker's start command is defined, and do not override it in the
+# Railway UI: a UI start command wins over this file and bypasses the guard.
 startCommand = "npm run start:ws"
 
 # `/healthz` probes Postgres AND Redis for real and answers 503 when either is

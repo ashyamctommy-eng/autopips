@@ -2,7 +2,7 @@
   "name": "autopips-pro",
   "version": "1.0.0",
   "private": true,
-  "description": "Autopipsz (autopips.pro) \u2014 managed trading platform. Next.js 14 App Router + modular server services + MetaApi broker adapter + NOWPayments settlements.",
+  "description": "Autopipsz (autopips.pro) \u2014 managed trading platform. Next.js 14 App Router + modular server services + Deriv broker adapter + NOWPayments settlements.",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -12,6 +12,7 @@
     "build": "prisma generate && next build",
     "build:server": "tsc -p tsconfig.server.json",
     "start": "next start -H 0.0.0.0",
+    "prestart:ws": "node scripts/worker-preflight.mjs",
     "start:ws": "tsx src/server/main.ts",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",

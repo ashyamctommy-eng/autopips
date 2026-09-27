@@ -232,4 +232,24 @@ jobs:
       - name: Verify the worker image's runtime entrypoint
         run: |
           docker run --rm --entrypoint sh autopipsz/worker:ci -c \
-            'test -f /app/node_modules/.bin/tsx && test -f /app/src/server/main.ts && echo "worker runtime present"'
+            'test -f /app/node_modules/.bin/tsx && test -f /app/src/server/main.ts && test -f /app/scripts/worker-preflight.mjs && echo "worker runtime present"'
+
+      # The 2026-09-27 worker incident: a Railway service was built from the WEB
+      # Dockerfile and started with `npm run start:ws`, which died with
+      # `ERR_MODULE_NOT_FOUND: Cannot find module '/app/src/server/main.ts'` — an
+      # error that names a missing file and not the wrong image. The worker's
+      # `prestart:ws` guard must therefore turn that into a message naming
+      # `railway.worker.toml`. Asserted against the WEB image on purpose: that is
+      # the image in which the guard is the difference between a one-line
+      # diagnosis and a debugging round trip.
+      - name: The web image refuses the worker entrypoint with an actionable message
+        run: |
+          set +e
+          output=$(docker run --rm --entrypoint sh autopipsz/web:ci -c 'npm run start:ws' 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          printf '%s' "$output" | grep -q 'worker-preflight'
+          printf '%s' "$output" | grep -q 'railway.worker.toml'
+          printf '%s' "$output" | grep -q 'Dockerfile.worker'
