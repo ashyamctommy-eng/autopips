@@ -148,6 +148,33 @@ const TWELVE_DATA_INTERVALS: Readonly<Record<string, string>> = {
   '1d': '1day',
 };
 
+/**
+ * Which feed serves a given instrument.
+ *
+ * `MARKET_DATA_PROVIDER` is an OPERATOR switch, not a per-instrument decision, and
+ * treating it as global was wrong: Twelve Data carries FX, metals, crypto and
+ * some commodities, and carries no Deriv synthetics at all — it REFUSES them
+ * (`getTwelveDataCandles` throws on an unmapped symbol). A global switch therefore
+ * broke every synthetic index the moment it was turned on.
+ *
+ * So the flag means "prefer Twelve Data", and this function decides per symbol:
+ *   * flag off                     → Deriv (unchanged default behaviour);
+ *   * mapped and priceable        → Twelve Data;
+ *   * unmapped (R_10, R_100, …)   → Deriv, because the vendor has no such symbol;
+ *   * mapped but plan-gated       → Deriv, because this plan cannot price it and a
+ *                                   guaranteed failure is worse than the other feed.
+ *
+ * A symbol that IS mapped and priceable never falls back silently: if the vendor
+ * cannot serve it, that failure must be visible (it means a key, a plan or a feed
+ * problem), and the caller refuses rather than pricing the instrument elsewhere.
+ */
+export function providerForSymbol(brokerSymbol: string): MarketDataProvider {
+  if (marketDataProvider() !== 'twelve') return 'deriv';
+  if (twelveDataSymbol(brokerSymbol) === null) return 'deriv';
+  if (PLAN_GATED_INSTRUMENTS[brokerSymbol] !== undefined) return 'deriv';
+  return 'twelve';
+}
+
 export function twelveDataInterval(timeframe: string): string | null {
   return TWELVE_DATA_INTERVALS[timeframe] ?? null;
 }

@@ -10,8 +10,9 @@ import {
 } from '@/server/modules/broker/deriv.adapter';
 import {
   getTwelveDataCandles,
-  marketDataProvider,
+  providerForSymbol,
 } from '@/server/modules/market/twelve-data.service';
+import { markPriceFromQuote } from '@/server/modules/market/quote-fanout';
 import type { Candle, InstrumentInfo, Quote } from '@/server/modules/broker/broker.types';
 
 /**
@@ -48,6 +49,21 @@ let connecting: Promise<DerivClient> | null = null;
 const tickListeners = new Map<string, number>();
 /** Subscription id per symbol, so `forget` addresses the right one. */
 const subscriptions = new Map<string, string>();
+
+/**
+ * The last quote this process actually saw per symbol.
+ *
+ * Kept so a fill can be priced from a price the platform itself published, rather
+ * than a second opinion fetched from another vendor. Only populated while
+ * something is streaming the symbol; `getLatestPrice` asks for one quote when it
+ * is empty rather than guessing.
+ */
+const lastQuotes = new Map<string, Quote>();
+
+/** The last quote seen for a symbol in this process, or null. */
+export function lastPublicQuote(symbol: string): Quote | null {
+  return lastQuotes.get(symbol) ?? null;
+}
 
 /** Deriv's own ceiling for counting candles in one history call. */
 const MAX_CANDLES = 1_000;
@@ -95,21 +111,86 @@ export function closePublicMarketConnection(): void {
   client?.close();
   client = null;
   tickListeners.clear();
+  lastQuotes.clear();
 }
 
 /**
- * Latest traded price for a symbol — the last close of the smallest timeframe.
+ * Latest traded price for a symbol — read LIVE from the tick feed.
  *
  * Used to price an internal position server-side. That is a SECURITY boundary,
  * not a convenience: a client must never supply its own fill price, or it could
  * open at a favourable print and close at another for a fabricated profit.
- * Returns null when the feed has no usable bar (caller turns that into a 503).
+ * Returns null when no usable price could be read (caller turns that into a 503).
+ *
+ * WHY NOT THE CANDLE PROVIDER (2026-09-27)
+ *   `MARKET_DATA_PROVIDER=twelve` moved the CHART's history to Twelve Data, but
+ *   the live ticks a client sees — and therefore the price on the ticket they
+ *   press — still come from Deriv. Pricing the fill from the candle provider
+ *   would fill them from a DIFFERENT VENDOR's 1-minute close: a price they never
+ *   saw, up to a minute old. So the fill follows the tick feed, and reads it live
+ *   rather than from a candle.
+ *
+ * Order of preference:
+ *   1. the last quote this process observed (a price the platform published);
+ *   2. a quote asked of the feed, which answers a subscription immediately;
+ *   3. the smallest candle's close, when the feed answered neither.
  */
 export async function getLatestPrice(symbol: string): Promise<number | null> {
-  const candles = await getPublicCandles(symbol, '1m', 2);
+  const observed = lastQuotes.get(symbol);
+  if (observed) {
+    const mark = markPriceFromQuote(observed);
+    if (mark !== null && mark > 0) return mark;
+  }
+
+  const live = await readOneQuote(symbol);
+  if (live !== null && live > 0) return live;
+
+  const candles = await derivCandles(symbol, '1m', 2);
   const last = candles[candles.length - 1];
   if (!last) return null;
   return Number.isFinite(last.close) && last.close > 0 ? last.close : null;
+}
+
+/** How long a live price request waits for the feed before falling back. */
+const QUOTE_TIMEOUT_MS = 3_000;
+
+/**
+ * Ask the feed for one live price.
+ *
+ * A Deriv subscription answers with the current price immediately, so this is one
+ * round trip and the subscription is released the moment the price is in hand.
+ * Any failure returns null and the caller falls back — a price read must never be
+ * the reason an order cannot be placed.
+ */
+async function readOneQuote(symbol: string): Promise<number | null> {
+  let settle: (quote: Quote | null) => void = () => undefined;
+  const first = new Promise<Quote | null>((resolve) => {
+    settle = resolve;
+  });
+
+  let subscription: { unsubscribe: () => Promise<void> };
+  try {
+    subscription = await subscribePublicTicks(symbol, (quote) => settle(quote));
+  } catch (err) {
+    console.warn(
+      `[public-market] could not read a live price for ${symbol}: ${err instanceof Error ? err.message : err}`,
+    );
+    return null;
+  }
+
+  try {
+    const quote = await Promise.race([
+      first,
+      new Promise<null>((resolve) => {
+        const timer = setTimeout(() => resolve(null), QUOTE_TIMEOUT_MS);
+        // A pending price read must not hold the process open.
+        timer.unref?.();
+      }),
+    ]);
+    return quote ? markPriceFromQuote(quote) : null;
+  } finally {
+    await subscription.unsubscribe().catch(() => undefined);
+  }
 }
 
 /**
@@ -123,14 +204,32 @@ export async function getPublicCandles(
   timeframe: string,
   count: number,
 ): Promise<Candle[]> {
-  // Provider switch (MARKET_DATA_PROVIDER). Defaults to the Deriv public feed, so
-  // this is a no-op until an operator sets it deliberately. Twelve Data is not a
-  // drop-in: it has no mapping for Deriv synthetics (R_10/R_100) and will refuse
-  // them, which is the correct loud failure rather than pricing the wrong thing.
-  if (marketDataProvider() === 'twelve') {
+  // PER-SYMBOL routing (2026-09-27). The switch used to be global, which broke
+  // every instrument the chosen feed does not carry: with
+  // `MARKET_DATA_PROVIDER=twelve` a synthetic index (`R_10`, `R_100`) reached a
+  // vendor that has no such symbol and the request failed outright.
+  // `providerForSymbol` decides per instrument — Twelve Data where it maps and can
+  // price it, Deriv everywhere else — so turning the flag on is safe for every
+  // listed instrument. A mapped symbol that the vendor then fails to serve is
+  // still a loud failure, never a silent substitution.
+  if (providerForSymbol(symbol) === 'twelve') {
     return getTwelveDataCandles(symbol, timeframe, count);
   }
+  return derivCandles(symbol, timeframe, count);
+}
 
+/**
+ * Historical candles from Deriv's public feed.
+ *
+ * Also the fallback price source for `getLatestPrice`: the live ticks the client
+ * is shown come from this feed, so pricing an order from it cannot disagree with
+ * the screen the client pressed BUY on.
+ */
+async function derivCandles(
+  symbol: string,
+  timeframe: string,
+  count: number,
+): Promise<Candle[]> {
   const granularity = GRANULARITY_SECONDS[timeframe];
   if (!granularity) {
     throw new Error(`Deriv cannot serve the ${timeframe} timeframe.`);
@@ -193,13 +292,21 @@ export async function subscribePublicTicks(
   const socket = await connection();
   const existing = tickListeners.get(symbol) ?? 0;
 
+  // Remember every quote as well as forwarding it: `getLatestPrice` prices a fill
+  // from the last price this process actually SAW for the symbol, so what the
+  // client is charged is a price the platform published.
+  const record = (quote: Quote): void => {
+    lastQuotes.set(symbol, quote);
+    onQuote(quote);
+  };
+
   if (existing === 0) {
     const result: DerivSubscribeResult = await socket.subscribe(
       { ticks: symbol, subscribe: 1 },
       `public ticks(${symbol})`,
       (message) => {
         const quote = toQuote(symbol, message);
-        if (quote) onQuote(quote);
+        if (quote) record(quote);
       },
     );
     tickListeners.set(symbol, 1);
@@ -208,7 +315,7 @@ export async function subscribePublicTicks(
     // Deriv answers a subscription with the current price: publish it so a chart
     // has a value immediately instead of waiting for the next terminal push.
     const first = toQuote(symbol, result.first);
-    if (first) onQuote(first);
+    if (first) record(first);
   } else {
     tickListeners.set(symbol, existing + 1);
   }
@@ -224,6 +331,7 @@ export async function subscribePublicTicks(
         return;
       }
       tickListeners.delete(symbol);
+      lastQuotes.delete(symbol);
       const subscriptionId = subscriptions.get(symbol);
       subscriptions.delete(symbol);
       if (subscriptionId) await socket.forget(subscriptionId);
