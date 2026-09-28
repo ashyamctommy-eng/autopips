@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CandlestickChart, House, LineChart, MessageSquare, UserRound, Wallet } from 'lucide-react';
+import { CandlestickChart, House, LineChart, UserRound, Wallet } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { isNavItemActive, type NavItem } from '@/components/layout/sidebar';
@@ -17,22 +17,17 @@ import { isNavItemActive, type NavItem } from '@/components/layout/sidebar';
  *   client actually lives. This puts the primary destinations under the thumb,
  *   which is how every mobile financial app is driven.
  *
- * THE SIX ITEMS ARE ROUTES THAT EXIST
- *   Home    /dashboard            account overview
- *   Markets /dashboard/markets    instruments with live prices
- *   Trade   /dashboard/trading    the trading terminal (raised)
- *   Messages/dashboard/messages   the trading engine's message log
- *   Wallet  /dashboard/wallet     balances, deposits and withdrawals
- *   Account /dashboard/settings   profile and security
+ * THE FIVE ITEMS ARE ROUTES THAT EXIST
+ *   Home   /dashboard            account overview
+ *   Markets/dashboard/markets    instruments with live prices
+ *   Trade  /dashboard/trading    the trading terminal (raised, centre)
+ *   Wallet /dashboard/wallet     balances, deposits and withdrawals
+ *   Account/dashboard/settings   profile and security
  *
- * TRADE IS RAISED. It is the one action the product exists for, so it gets the
- * accent fill and sits proud of the bar instead of looking like another tab. It
- * is still a plain link — no hidden gesture, nothing that can trap a keyboard
- * user. With six destinations there is no exact centre column, so it sits as
- * close to the middle as the order allows rather than being forced there.
- *
- * MESSAGES sits beside Trade because it is the same subject: what the engine did
- * with the account's money.
+ * TRADE IS THE CENTRE, RAISED. It is the one action the product exists for, so it
+ * gets the accent fill and sits proud of the bar instead of looking like a fourth
+ * tab. It is still a plain link — no hidden gesture, nothing that can trap a
+ * keyboard user.
  *
  * LAYERING (the shell's z-index ladder, lowest to highest)
  *   topbar z-30 · this bar z-30 · sidebar drawer z-40 · dialogs/menus z-50 ·
@@ -53,7 +48,6 @@ export const MOBILE_NAV: MobileNavItem[] = [
   { label: 'Home', shortLabel: 'Home', href: '/dashboard', icon: House, exact: true },
   { label: 'Markets', shortLabel: 'Markets', href: '/dashboard/markets', icon: LineChart },
   { label: 'Trade', shortLabel: 'Trade', href: '/dashboard/trading', icon: CandlestickChart },
-  { label: 'Messages', shortLabel: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   { label: 'Wallet', shortLabel: 'Wallet', href: '/dashboard/wallet', icon: Wallet },
   { label: 'Account', shortLabel: 'Account', href: '/dashboard/settings', icon: UserRound },
 ];
