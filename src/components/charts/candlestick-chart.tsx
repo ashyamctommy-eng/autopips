@@ -75,6 +75,17 @@ export const OVERLAY_COLORS = {
   target: '#10B981',
 } as const;
 
+/**
+ * Empty bars kept to the right of the newest candle.
+ *
+ * The time-axis label is centred under its bar, so a bar flush against the right
+ * edge has its label cut in half by the canvas boundary. This is the space that
+ * stops that happening, and it is the single source of the `rightOffset` the
+ * chart is created with and the offset re-applied after `fitContent()` — the two
+ * must agree or the option is silently discarded.
+ */
+const RIGHT_OFFSET_BARS = 3;
+
 /** One horizontal level drawn across the chart. */
 export interface ChartPriceLine {
   price: number;
@@ -131,6 +142,12 @@ export function CandlestickChart({
   const seriesRef = React.useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = React.useRef<ISeriesApi<'Histogram'> | null>(null);
   const priceLineRefs = React.useRef<IPriceLine[]>([]);
+  /**
+   * Instrument + timeframe the current view was fitted to. Scroll position is a
+   * user-owned thing; this is how the chart knows when re-fitting is legitimate
+   * (a different series) rather than an interruption (the same series ticking).
+   */
+  const fittedKeyRef = React.useRef<string | null>(null);
 
   /*
    * Live palette. The initial value is read from the DOM on the client — the
@@ -168,7 +185,12 @@ export function CandlestickChart({
         horzLines: { color: initial.grid, style: LineStyle.Solid },
       },
       rightPriceScale: { borderColor: initial.border, scaleMargins: { top: 0.15, bottom: 0.1 } },
-      timeScale: { borderColor: initial.border, timeVisible: true, secondsVisible: false, rightOffset: 3 },
+      timeScale: {
+        borderColor: initial.border,
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: RIGHT_OFFSET_BARS,
+      },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: { color: initial.crosshair, width: 1, style: LineStyle.Dashed },
@@ -310,8 +332,32 @@ export function CandlestickChart({
       volume.applyOptions({ visible: volumes.length > 0 });
     }
 
-    if (data.length > 0) chartRef.current?.timeScale().fitContent();
-  }, [candles, theme]);
+    /*
+     * Fit ONCE per instrument/timeframe, then leave the view where the user put it.
+     *
+     * `fitContent()` fits every bar and pins the newest one to the right edge of
+     * the pane. The time-axis label under that bar is centred on it, so half the
+     * final label falls outside the canvas and is clipped — and because
+     * `fitContent()` recomputes the visible range, it also discards the
+     * `rightOffset` the chart was created with. That is why the clipping survived
+     * a `rightOffset` that was already set: the option was applied and then
+     * thrown away on the very next seed.
+     *
+     * `scrollToPosition(n)` re-establishes the offset, leaving n bars of empty
+     * space to the right so the newest label has room to be drawn. Both calls are
+     * gated on the series identity: re-fitting on every live update would yank the
+     * chart back while the user is reading it and discard a deliberate pan or zoom.
+     */
+    const seriesKey = `${symbol ?? ''}|${timeframe ?? ''}`;
+    if (data.length > 0 && fittedKeyRef.current !== seriesKey) {
+      const timeScale = chartRef.current?.timeScale();
+      if (timeScale) {
+        timeScale.fitContent();
+        timeScale.scrollToPosition(RIGHT_OFFSET_BARS, false);
+        fittedKeyRef.current = seriesKey;
+      }
+    }
+  }, [candles, theme, symbol, timeframe]);
 
   /* Draw the order overlay: entry / stop loss / take profit. */
   React.useEffect(() => {
