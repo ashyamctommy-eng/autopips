@@ -57,7 +57,9 @@ export type PlatformSettingKey =
   | 'risk.risk_per_trade_pct'
   | 'risk.daily_loss_limit_usd'
   | 'risk.allowed_symbols'
-  | 'risk.min_payout_percentage';
+  | 'risk.min_payout_percentage'
+  // ── engine controls (Admin → Settings) ──
+  | 'engine.worker_enabled';
 
 type SettingKind =
   | 'secret'
@@ -252,6 +254,16 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     kind: 'number',
     defaultValue: '1',
     inputHint: 'e.g. 1',
+  },
+  {
+    key: 'engine.worker_enabled',
+    envName: 'ENGINE_WORKER_ENABLED',
+    label: 'Automated bot engine (strategy generation)',
+    description:
+      'When true (the default) the worker generates trading signals from the enabled strategies. Setting it to false PAUSES STRATEGY GENERATION ONLY: open positions are still marked to market and their stop-loss and take-profit levels are still evaluated, because pausing the exits would leave every open position unprotected. Use it to stop new trades without closing the book; use the emergency stop on Bot control to halt order placement instead.',
+    kind: 'boolean',
+    defaultValue: 'true',
+    inputHint: 'true or false',
   },
   {
     key: 'risk.min_payout_percentage',
@@ -561,6 +573,20 @@ export function resolvedPayoutAddressAllowlist(): string[] {
  */
 export function resolvedPayoutTwoPersonApproval(): boolean {
   return getSetting('payout.two_person_approval').trim().toLowerCase() === 'true';
+}
+
+/**
+ * Whether the worker's strategy engine may generate NEW signals.
+ *
+ * `true` is the previous behaviour. `false` pauses strategy generation and
+ * NOTHING ELSE: the exit path (`position.service.ts` — marking open positions and
+ * evaluating their stop loss / take profit) never consults this setting, because a
+ * switch that also silenced the exits would leave every open position unprotected.
+ * The runtime keeps its lease and keeps ticking, so it reports a paused engine
+ * rather than looking crashed.
+ */
+export function resolvedWorkerEngineEnabled(): boolean {
+  return getSetting('engine.worker_enabled').trim().toLowerCase() === 'true';
 }
 
 // ─── admin console ───────────────────────────────────────────────────────────

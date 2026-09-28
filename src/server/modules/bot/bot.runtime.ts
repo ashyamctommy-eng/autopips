@@ -33,6 +33,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { serverEnv } from '@/lib/env';
+import { resolvedWorkerEngineEnabled } from '@/server/modules/settings/settings.service';
 import { prisma } from '@/lib/prisma';
 import { redis } from '@/lib/redis';
 import { AUDIT, recordAuditSafe } from '../audit/audit.service';
@@ -138,6 +139,11 @@ export interface BotRuntimeStatus {
   lastCycleError?: string | null;
   /** Completed cycles since this runtime started. */
   cycleCount: number;
+  /**
+   * Whether the engine switch currently allows NEW signals. When false the loop is
+   * healthy and the exits are still live — only strategy generation is paused.
+   */
+  engineEnabled: boolean;
   /** A fresh Redis read proved this process still owns the single-writer lock. */
   lockHeld: boolean;
   /** Age of the Redis heartbeat this runtime publishes, or null when absent. */
@@ -353,6 +359,23 @@ async function runCycle(): Promise<void> {
       });
     }
 
+    // ── the engine switch (Admin → Settings) ────────────────────────────────
+    // `engine.worker_enabled = false` pauses STRATEGY GENERATION — this block, and
+    // nothing else. It deliberately does NOT gate the exit path: open positions
+    // keep being marked to market and their stop-loss / take-profit levels keep
+    // being evaluated by the tick engine (`position.service.ts`), which never
+    // consults this setting. A switch that also silenced the exits would leave
+    // every open position unprotected, which is the opposite of a safety control.
+    //
+    // The cycle still completes (sync, fees, heartbeat), so a paused runtime stays
+    // healthy and reports `engineEnabled: false` rather than looking crashed or
+    // flapping the boot supervisor. Settings are cached for 30s, so a console
+    // change takes effect within a tick or two and needs no redeploy.
+    if (!resolvedWorkerEngineEnabled()) {
+      state.lastCycleAt = new Date().toISOString();
+      return;
+    }
+
     const connections = await prisma.brokerConnection.findMany({ where: { status: 'CONNECTED' } });
     const enabled = Object.entries(strategies).filter(([, config]) => config.enabled);
     const riskManagementEnabled = serverEnv().BROKER_RISK_MANAGEMENT_ENABLED;
@@ -445,6 +468,7 @@ function snapshotStatus(): Omit<BotRuntimeStatus, 'lockHeld' | 'heartbeatAgeSeco
     lastCycleAt: state.lastCycleAt ?? undefined,
     lastCycleError: state.lastCycleError,
     cycleCount: state.cycleCount,
+    engineEnabled: resolvedWorkerEngineEnabled(),
   };
 }
 
