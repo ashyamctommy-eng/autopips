@@ -121,6 +121,47 @@ communicate with the web tier over **Redis pub/sub**, so any replica can publish
 event and the socket tier fans it out to authorised rooms. The bot runtime takes a Redis
 lock, so only one instance trades at a time.
 
+### The three worker runtimes
+
+The worker process is a supervisor, not a monolith: `src/server/main.ts` starts each
+runtime below and restarts it if it stops on its own.
+
+| Runtime | Responsibility | Why it is its own loop |
+| --- | --- | --- |
+| `bot-runtime` | strategy evaluation, the signal → order path, fee accrual, broker sync | takes the Redis single-writer lock `autopips:lock:bot-runtime`, so exactly one instance ever trades |
+| `maturity-runtime` | releases principal when a plan term ends | a halted platform must still return capital on time |
+| `exit-watch` | one public price subscription per symbol with an **OPEN position**, so stop-loss and take-profit levels are evaluated with no client watching | pausing strategy generation must never pause the exits |
+
+### Market data (hybrid feed)
+
+Two feeds, routed **per instrument** (`providerForSymbol`):
+
+- **Twelve Data** — historical candles for FX, metals, crypto and the commodities it
+  carries, when `MARKET_DATA_PROVIDER=twelve`.
+- **Deriv public WS** — live ticks, plus everything Twelve Data does not carry: synthetic
+  indices (`R_10`, `R_100`), unmapped symbols, and instruments the current Twelve Data
+  plan cannot price.
+
+Live ticks are always Deriv, and **order fills follow the tick feed** rather than the
+candle provider: a client is shown a Deriv price, so pricing their fill from another
+vendor's one-minute candle would hand them a fill they never saw. Turning
+`MARKET_DATA_PROVIDER=twelve` on is therefore safe for every listed instrument — a
+synthetic or unmapped symbol simply keeps using Deriv — while a mapped symbol the vendor
+fails to serve is a loud failure, never a silent substitution.
+
+### Internal execution
+
+`EXECUTION_MODE` (default `internal`) books client trades on the platform's own ledger
+instead of sending them to a broker: a `Position` row holds the stake (the money at risk)
+and the multiplier (the exposure), marked from the price feed, with its own stop loss and
+take profit. The stake is reserved out of withdrawable cash, so opening a position is
+equity-neutral. `broker` restores the previous path, and internal positions are refused
+outright while it is set.
+
+Broker-routed trades and internal positions are **different tables** — `TradeRecord` (per
+investment, per broker connection) and `Position` (per user) — and the dashboard shows
+both, because both are real money.
+
 ### Modules
 
 ```
@@ -139,13 +180,16 @@ src/
 │   │   ├── auth/            Argon2id, JWT sessions, TOTP 2FA
 │   │   ├── kyc/             internal encrypted store, admin review
 │   │   ├── payments/        NOWPayments client, IPN verification, deposits, withdrawals
-│   │   ├── broker/          Deriv client + adapter, registry, sync
-│   │   ├── bot/             risk engine, lot allocator, strategy engine, order manager, fees
+│   │   ├── broker/          Deriv client + adapter (public feed, OTP account sockets), registry
+│   │   ├── bot/             strategies, risk engine, stake allocator, order manager, fees
+│   │   ├── market/          hybrid feed: public ticks, Twelve Data candles, quote fan-out, exit watch
+│   │   ├── positions/       internal engine: open/close, mark-to-market, stops/targets, wallet
+│   │   ├── settings/        console settings: definitions, validation, per-process cache
 │   │   ├── account/         client account service
 │   │   ├── admin/           admin service
 │   │   └── audit/           append-only audit logger
 │   ├── ws/                  event bus, socket server
-│   └── main.ts              socket + bot runtime entrypoint
+│   └── main.ts              socket server + runtime supervisor (bot, maturity, exit watch)
 └── middleware.ts            coarse route protection (presence check only)
 ```
 
@@ -170,6 +214,11 @@ POST   /api/v1/payments/nowpayments/ipn       (HMAC-authenticated webhook)
 
 GET    /api/v1/market/candles
 
+GET    /api/v1/wallet                         derived from the ledger — no balance column
+GET    /api/v1/positions                      the internal book (open, closed, all)
+POST   /api/v1/positions                      open one — server-priced fill, KYC-gated
+POST   /api/v1/positions/:id/close            close at the current market price
+
 GET    /api/v1/admin/overview | aum | users | plans | brokers | withdrawals | logs
 PATCH  /api/v1/admin/users/:id | plans/:id
 POST   /api/v1/admin/plans | brokers | brokers/:id/status | withdrawals/:id/decision
@@ -181,6 +230,29 @@ POST   /api/v1/admin/kyc/:id/decision
 
 Every route returns a uniform envelope — `{ ok: true, data }` or
 `{ ok: false, error: { code, message, details } }` — and validates input with zod.
+
+### Realtime channels
+
+Socket.io namespace `/ws/trading`, engine.io path `/ws/socket.io`. The handshake uses the
+session cookie, or a short-lived token (`GET /api/v1/auth/socket-token`) when the worker
+is on a different origin.
+
+```
+client -> server   trading:subscribe | trading:unsubscribe     investment room
+                   market:<symbol>                             public price room
+
+server -> client   trade:opened | trade:updated | trade:closed position deltas
+                   price:tick                                  public quotes, filtered by symbol
+                   account:equity                              equity roll-ups
+                   bot:activity                                audit-backed activity stream
+                   broker:status | admin:system_status          operational state
+                   server:error                                protocol / authorisation errors
+```
+
+Rooms: `user:<userId>` — joined automatically for the authenticated socket, which is why
+account-wide `bot:activity` arrives without subscribing to anything; `trading:<investmentId>`
+— joined only after an ownership check; `market:<symbol>` — public prices, capped per
+socket; `admin` — privileged roles only.
 
 ---
 
@@ -236,18 +308,38 @@ is safe in CI without infrastructure; when Postgres and Redis are present they r
   a rejection. Client allocation is scaled by `Client Investment Capital / Master Account
   Equity` and only ever rounded **down** — the conservation property (a client is never
   granted more exposure than the ratio allows) is asserted by `tests/lot-allocator.test.ts`.
-- **Deriv trades are contracts, and the bot does not place them yet.** A Deriv trade is a
-  *contract*: stake (buy price) × multiplier, identified by a contract id, with an
-  entry/exit spot and a profit. Deriv reports no lots, no contract size, no tick value and
-  no free margin. The ledger and the allocator above still compute open exposure as
-  `volume × entryPrice` from the old MT5 lot model, so booking a contract with them would
-  mis-state risk; that exposure/notional model must be decided and reworked before
-  positions are written to `TradeRecord`. Until then the execution path **refuses a Deriv
-  order with a clear error rather than mis-sizing one**. Everything else — KYC, crypto
-  deposits/withdrawals, the ledger, the realtime market feed — is live; end-to-end trading
-  is not.
+- **Trades are booked internally; the broker path is retired by default.** With
+  `EXECUTION_MODE=internal` a trade is a `Position` on the platform's own book: the **stake
+  is the money at risk** (a Deriv contract cannot take more than it), the multiplier scales
+  the exposure and the rate the P/L moves at, and the stake is reserved out of withdrawable
+  cash — opening a position is equity-neutral. `TradeRecord.notional` stores
+  `stake × multiplier` explicitly, because `volume × entryPrice` is exactly right for lots
+  and wrong by a factor of the price for a stake. In internal mode the managed bot's broker
+  order path is **refused with a clear reason** (`EXTERNAL_EXECUTION_DISABLED`) rather than
+  sending a real order alongside the internal position: one internal position plus one live
+  contract would be double exposure. Positions opened from the order ticket are live today;
+  the managed bot does not open internal positions itself yet.
 - **Fees** are management (pro-rata) and performance (high-water-mark, charged only on
   new profit).
+
+---
+
+## Feature flags & admin controls
+
+| Control | Where | Behaviour |
+| --- | --- | --- |
+| `engine.worker_enabled` | Admin → Settings (env `ENGINE_WORKER_ENABLED`), default `true` | Pauses **strategy generation only**. Open positions keep being marked to market and their stop-loss / take-profit levels keep being evaluated (`exit-watch` is a separate runtime), the loop keeps its lease and keeps heartbeating, and the runtime reports `engineEnabled: false` — a paused engine, not a dead worker. Takes effect within a tick or two (30s settings cache), no redeploy. |
+| `bot.enabled` (emergency stop) | Admin → Bot control | Halt on **order placement**. Fail-closed: written to Redis first, read unconditionally per order, mirrored to the database, and audited. Stopping requires a reason. Use this to halt trading; use `engine.worker_enabled` to stop *new* signals without touching the exit path. |
+| `risk.risk_per_trade_pct` | Admin → Bot control | Fraction of capital put at risk per trade (default 1%). |
+| `risk.max_stake_usd`, `risk.daily_loss_limit_usd`, `risk.allowed_symbols`, `risk.min_payout_percentage` | Admin → Bot control | Pre-trade ceilings; `0` means no cap. |
+| `payout.two_person_approval` | Admin → Settings | When true (default), an automated payout broadcast needs a second, different admin. Manual settlement is never blocked. |
+| `EXECUTION_MODE` | environment | `internal` (default) books on the platform's own ledger; `broker` restores the previous path. |
+| `MARKET_DATA_PROVIDER` | environment | `deriv` (default) or `twelve` — see *Market data* above for the per-instrument routing. |
+
+Every setting is defined once in `src/server/modules/settings/settings.service.ts` with its
+kind, default and environment fallback; the console form, the API and the validation are
+generated from those definitions, and each change is audited (`ADMIN_SETTINGS_UPDATED`,
+value never logged).
 
 ---
 
@@ -256,6 +348,15 @@ is safe in CI without infrastructure; when Postgres and Redis are present they r
 **Railway (fastest path to live):** see **[RAILWAY.md](./RAILWAY.md)** — a step-by-step
 runbook for the two services, the managed Postgres/Redis, the exact variable table, and
 the cross-origin realtime wiring.
+
+The variables that decide how the platform behaves (set per service; the Twelve Data key
+may also live in Admin → Settings instead of the environment):
+
+| Variable | Value | Effect |
+| --- | --- | --- |
+| `EXECUTION_MODE` | `internal` | books trades on the platform's own ledger; `broker` restores the previous path |
+| `MARKET_DATA_PROVIDER` | `twelve` | prefer Twelve Data for candles; live ticks and fills stay on Deriv, and synthetics/unmapped symbols fall back per instrument |
+| `TWELVE_DATA_API_KEY` | your key | required while the provider is `twelve` — without it, charts for FX/metals/crypto refuse (orders still price from the live tick feed) |
 
 **Self-hosted / Docker:** **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the full runbook
 (environment table, secret generation, NOWPayments/Deriv setup, TLS, the required
