@@ -11,6 +11,7 @@ import {
   History,
   LayoutDashboard,
   LineChart,
+  MessageSquare,
   PanelLeft,
   Settings,
   ShieldCheck,
@@ -47,6 +48,10 @@ export const CLIENT_NAV: NavItem[] = [
   { label: 'Live Trading', href: '/dashboard/trading', icon: CandlestickChart },
   { label: 'Positions', href: '/dashboard/positions', icon: Activity },
   { label: 'History', href: '/dashboard/history', icon: History },
+  // The trading engine's message log. Reached from the mobile bar's Messages tab
+  // as well, so it is listed here too — a destination only reachable on one
+  // surface is a destination half the users cannot find.
+  { label: 'Messages', href: '/dashboard/messages', icon: MessageSquare },
   { label: 'Wallet', href: '/dashboard/wallet', icon: Wallet },
   { label: 'KYC', href: '/dashboard/kyc', icon: ShieldCheck },
   { label: 'Deposits', href: '/dashboard/deposits', icon: ArrowDownToLine },
