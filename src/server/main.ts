@@ -388,6 +388,30 @@ const RUNTIME_SPECS: RuntimeSpec[] = [
     // function belongs to which runtime.
     statusExport: 'maturityRuntimeStatus',
   },
+  {
+    // The exit watch holds one PUBLIC price subscription per symbol that has an
+    // OPEN position, so stop-loss and take-profit levels are evaluated even when
+    // no client has the trading dashboard open.
+    //
+    // WHY IT IS ITS OWN SUPERVISED RUNTIME and not part of the bot cycle: pausing
+    // strategy generation must NOT pause the exits. `automatedTradingEnabled`
+    // (`engine.worker_enabled`) stops the bot evaluating strategies; if the exits
+    // lived in that cycle they would stop with it, and every open position would
+    // be left unprotected by an act taken for safety. The two are deliberately
+    // separate loops with separate lifetimes.
+    name: 'exit-watch',
+    modules: [
+      'src/server/modules/market/exit-watch.runtime.ts',
+      'dist/server/modules/market/exit-watch.runtime.js',
+    ],
+    starters: ['startExitWatch'],
+    stoppers: ['stopExitWatch'],
+    supervised: true,
+    // Works when it self-stops, but a watch that has stopped quietly is a stop
+    // loss that is not being enforced — so it reports its own status and the
+    // supervisor restarts it.
+    statusExport: 'exitWatchStatus',
+  },
   // There is deliberately NO standalone 'broker-sync' runtime registered here.
   //
   // `broker.sync.ts` exports `runSyncCycle()` — a ONE-SHOT tick, not a loop — and
