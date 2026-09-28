@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { BotActivityFeed } from '@/components/dashboard/bot-activity-feed';
+import { InternalPositions } from '@/components/dashboard/internal-positions';
 import { OpenPositions } from '@/components/dashboard/open-positions';
 import { TradingPanel, type TradingPanelInvestment } from '@/components/dashboard/trading-panel';
 import { PageHeader } from '@/components/shared/page-header';
@@ -16,6 +17,10 @@ import {
 } from '@/server/modules/account/account.service';
 import { requireSessionUser } from '@/server/modules/auth/session';
 import { listPublicSymbols } from '@/server/modules/market/public-market.service';
+import {
+  getWallet,
+  listPositions as listInternalPositions,
+} from '@/server/modules/positions/position.service';
 
 /**
  * Live trading (server component).
@@ -37,6 +42,8 @@ export const dynamic = 'force-dynamic';
 const INSTRUMENT_SAMPLE = 200;
 /** Audit rows read as the feed's initial (stored) state. */
 const ACTIVITY_TAKE = 50;
+/** Open rows of the internal book shown on this screen. */
+const INTERNAL_POSITION_TAKE = 50;
 
 /**
  * Optional `?symbol=` deep link from the markets list. Read as untrusted input
@@ -59,11 +66,16 @@ export default async function DashboardTradingPage({
     : searchParams?.symbol;
   const initialSymbol = requestedSymbol ? normaliseMarketSymbol(requestedSymbol) : null;
 
-  const [positions, investments, trades, activity] = await Promise.all([
+  const [positions, investments, trades, activity, internal, wallet] = await Promise.all([
     listPositions(user.id),
     listInvestments(user.id),
     listTrades(user.id, { take: INSTRUMENT_SAMPLE }),
     listActivity(user.id, ACTIVITY_TAKE),
+    // The internal book is a different table from `positions` above: those are
+    // broker `TradeRecord` rows per investment, these are the `Position` rows the
+    // platform's own engine holds against the client's stake. Both are money.
+    listInternalPositions(user.id, { status: 'OPEN', take: INTERNAL_POSITION_TAKE }),
+    getWallet(user.id),
   ]);
 
   // The broker's instrument list, read from its public feed. A failure here is
@@ -96,6 +108,13 @@ export default async function DashboardTradingPage({
     planName: investment.planName,
     status: investment.status,
   }));
+
+  // Opening a position commits real money, so the API requires an APPROVED identity
+  // check. Telling the ticket now is better than letting the user fill the form and
+  // be refused; admins and trading managers are exempt, exactly as
+  // `requireVerifiedClient` exempts them.
+  const kycApproved =
+    user.role === 'ADMIN' || user.role === 'TRADING_MANAGER' || user.kycStatus === 'APPROVED';
 
   return (
     <Section width="wide" className="flex flex-col gap-6">
@@ -131,7 +150,11 @@ export default async function DashboardTradingPage({
         investmentId={activeInvestment?.id ?? null}
         initialPositions={openPositions}
         initialSymbol={initialSymbol}
+        kycApproved={kycApproved}
+        availableUsd={wallet.availableUsd}
       />
+
+      <InternalPositions positions={internal.items} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">

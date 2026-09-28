@@ -11,6 +11,7 @@ import {
 import { LiveDot, type LiveDotState } from '@/components/shared/live-dot';
 import { SignedUsd, Usd } from '@/components/shared/money';
 import { StatusBadge } from '@/components/shared/status-badge';
+import { OrderTicket } from '@/components/dashboard/order-ticket';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -94,6 +95,10 @@ export interface TradingPanelProps {
    * public feed did not list it, because the caller navigated here for it.
    */
   initialSymbol?: string | null;
+  /** KYC must be APPROVED for the order ticket to be usable; the API refuses otherwise. */
+  kycApproved: boolean;
+  /** Ledger withdrawable cash — the ceiling the ticket's stake is reserved from. */
+  availableUsd: number | null;
   /**
    * Open positions as hydrated by the server, used for the chart's entry / stop
    * / target overlay. Live deltas from the socket are folded on top, so a moved
@@ -215,6 +220,8 @@ export function TradingPanel({
   investmentId,
   initialPositions,
   initialSymbol = null,
+  kycApproved,
+  availableUsd,
 }: TradingPanelProps) {
   const [roomId, setRoomId] = React.useState<string | null>(investmentId);
   const instrumentOptions = React.useMemo(() => {
@@ -519,7 +526,18 @@ export function TradingPanel({
         </CardContent>
       </Card>
 
-      <Card>
+      <div className="flex flex-col gap-4">
+        {/* The ticket trades whatever the chart is showing, at the price the
+            market feed just reported. It sits above the telemetry so the action
+            is reachable without scrolling past the readouts. */}
+        <OrderTicket
+          symbol={symbol}
+          quote={{ bid: tick?.bid ?? null, ask: tick?.ask ?? null, mid }}
+          kycApproved={kycApproved}
+          availableUsd={availableUsd}
+        />
+
+        <Card>
         <CardHeader className="p-5 pb-2">
           <CardTitle>Execution context</CardTitle>
         </CardHeader>
@@ -579,6 +597,7 @@ export function TradingPanel({
           </p>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
