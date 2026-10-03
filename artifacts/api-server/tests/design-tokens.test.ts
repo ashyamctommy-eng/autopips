@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { safeConsolePath, safeNextPath } from '@/components/auth/next-path';
+import { safeConsolePath, safeNextPath } from '../../autopips/src/components/auth/next-path';
 
 /**
  * POST-SIGN-IN DESTINATIONS — two pages, one allow-list.
@@ -72,8 +71,8 @@ describe('safeConsolePath (console sign-in)', () => {
  * literals the config used to hard-code, so "the default look is unchanged" is
  * a test result rather than a claim.
  */
-const CONFIG = readFileSync(path.join(process.cwd(), 'tailwind.config.ts'), 'utf8');
-const CSS = readFileSync(path.join(process.cwd(), 'src/app/globals.css'), 'utf8');
+const CONFIG = readFileSync(new URL('../../autopips/tailwind.config.ts', import.meta.url), 'utf8');
+const CSS = readFileSync(new URL('../../autopips/src/app/globals.css', import.meta.url), 'utf8');
 
 /*
  * Locate the RULES, not the first mention: the file's own header comment

@@ -1,24 +1,27 @@
 import path from 'path';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type UserConfig } from 'vite';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
+export default defineConfig(async ({ command }): Promise<UserConfig> => {
 const rawPort = process.env.PORT;
 
-if (!rawPort) {
+if (command === 'serve' && !rawPort) {
   throw new Error(
     'PORT environment variable is required but was not provided.',
   );
 }
 
-const port = Number(rawPort);
+const port = rawPort ? Number(rawPort) : undefined;
 
-if (Number.isNaN(port) || port <= 0) {
+if (port !== undefined && (!Number.isInteger(port) || port <= 0)) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
+// The registered artifact lives at /. Static compilation does not need a
+// listening port or the managed development workflow's injected environment.
+const basePath = process.env.BASE_PATH ?? (command === 'build' ? '/' : undefined);
 
 if (!basePath) {
   throw new Error(
@@ -26,7 +29,7 @@ if (!basePath) {
   );
 }
 
-export default defineConfig({
+return {
   base: basePath,
   plugins: [
     react(),
@@ -76,4 +79,5 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
   },
+};
 });

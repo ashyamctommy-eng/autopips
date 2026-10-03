@@ -1,3 +1,4 @@
 - [Migration tool output](migration-tool-output.md) — normalize shell-output line endings before generating import paths.
 - [Worker restart leases](worker-restart-leases.md) — managed restarts may leave Redis leases until expiry; wait for recovery, never clear locks blindly.
+- [TSX inline probes](tsx-inline-probes.md) — explicit --tsconfig with inline evaluation silently skipped probes; require visible evidence of execution.
 - [npm local overrides](npm-local-overrides.md) — audit success can hide broken directory links; use a direct local dependency and regenerate stale locks.

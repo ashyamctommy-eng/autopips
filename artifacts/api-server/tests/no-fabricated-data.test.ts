@@ -49,7 +49,7 @@ import { REPO_ROOT } from './helpers/test-env';
  *    records the justification here — that is the point of the allow-list.
  */
 
-const SCAN_ROOTS: string[] = [path.join(REPO_ROOT, 'src', 'server'), path.join(REPO_ROOT, 'src', 'app')];
+const SCAN_ROOTS: string[] = [path.join(REPO_ROOT, 'src', 'imported', 'server'), path.join(REPO_ROOT, 'src', 'imported', 'app')];
 
 interface ScannedFile {
   /** Path relative to the repo root, POSIX separators. */
@@ -104,7 +104,7 @@ function scan(): ScannedFile[] {
   return files
     .map((full) => {
       const raw = fs.readFileSync(full, 'utf8');
-      return { rel: path.relative(REPO_ROOT, full).split(path.sep).join('/'), raw, code: stripComments(raw, full) };
+      return { rel: path.relative(REPO_ROOT, full).split(path.sep).join('/').replace(/^src\/imported\//, 'src/'), raw, code: stripComments(raw, full) };
     })
     .sort((a, b) => a.rel.localeCompare(b.rel));
 }
