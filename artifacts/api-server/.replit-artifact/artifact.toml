@@ -32,7 +32,7 @@ NODE_ENV = "production"
 path = "/api/healthz"
 
 [[services]]
-localPort = 8081
+localPort = 3001
 name = "Trading Worker"
 paths = ["/ws", "/internal/publish", "/worker-healthz"]
 
@@ -46,7 +46,7 @@ args = ["pnpm", "--filter", "@workspace/api-server", "run", "build"]
 args = ["node", "--enable-source-maps", "artifacts/api-server/dist/worker.mjs"]
 
 [services.production.run.env]
-PORT = "8081"
+PORT = "3001"
 NODE_ENV = "production"
 
 [services.production.health.startup]

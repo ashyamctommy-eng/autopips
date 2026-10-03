@@ -29,9 +29,8 @@ identity verification, trading workspaces, settlements, and a staff console.
 
 Required backend secrets: `REDIS_URL`, `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`,
 `WS_INTERNAL_TOKEN`, `NOWPAYMENTS_API_KEY`, `NOWPAYMENTS_IPN_SECRET`, `DERIV_APP_ID`.
-The database URL defaults to the workspace database; `EXTERNAL_DATABASE_URL`
-can explicitly select the original PostgreSQL instance without changing the
-runtime-managed workspace URL. An account API token (`DERIV_API_TOKEN`) is
+The app connects only to Replit's runtime-managed `DATABASE_URL`; it has no
+external database URL override. An account API token (`DERIV_API_TOKEN`) is
 optional for public data but required for authenticated broker trading.
 
 Keep the existing encryption key when using original data: changing it makes

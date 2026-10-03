@@ -164,10 +164,7 @@ function formatIssues(error: z.ZodError): string {
 export function serverEnv(): ServerEnv {
   if (cached) return cached;
 
-  const parsed = schema.safeParse({
-    ...process.env,
-    DATABASE_URL: process.env.EXTERNAL_DATABASE_URL ?? process.env.DATABASE_URL,
-  });
+  const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
     throw new Error(
       'Invalid or missing server environment variables:\n' +
