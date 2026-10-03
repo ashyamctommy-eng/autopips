@@ -22,7 +22,8 @@ identity verification, trading workspaces, settlements, and a staff console.
 - `artifacts/api-server/src/migration-api.ts`: Express request adapter and a closed,
   authorized read bridge for formerly server-rendered page data.
 - `artifacts/api-server/prisma`: original Prisma schema and migration history.
-- `.migration-backup`: untouched source reference.
+- `.migration-backup`: original source reference; dependency manifests/lockfile
+  are security-updated independently from the active pnpm workspace.
 - Existing `lib/*` and mockup packages are retained scaffold packages.
 
 ## Service configuration

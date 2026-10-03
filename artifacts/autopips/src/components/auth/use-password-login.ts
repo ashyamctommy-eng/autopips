@@ -96,8 +96,8 @@ export interface PasswordLoginController {
   /** Exposed so a caller can report a failure of its own (role refusal). */
   setFormError: (error: FormError | null) => void;
   busy: boolean;
-  emailRef: React.RefObject<HTMLInputElement>;
-  codeRef: React.RefObject<HTMLInputElement>;
+  emailRef: React.RefObject<HTMLInputElement | null>;
+  codeRef: React.RefObject<HTMLInputElement | null>;
   submitCredentials: (event: React.FormEvent<HTMLFormElement>) => Promise<void>;
   submitTwoFactor: (event: React.FormEvent<HTMLFormElement>) => Promise<void>;
   restart: () => void;

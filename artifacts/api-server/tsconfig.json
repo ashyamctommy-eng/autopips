@@ -9,6 +9,12 @@
     "types": ["node"]
   },
   "include": ["src"],
+  "exclude": [
+    "src/imported/lib/session-refresh.ts",
+    "src/imported/lib/socket-client.ts",
+    "src/imported/lib/theme.ts",
+    "src/imported/lib/utils.ts"
+  ],
   "references": [
     {
       "path": "../../lib/db"

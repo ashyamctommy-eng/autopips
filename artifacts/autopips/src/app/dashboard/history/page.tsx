@@ -77,7 +77,7 @@ export default async function DashboardHistoryPage({
     listTrades(user.id, { take: SAMPLE_SIZE }),
   ]);
 
-  const instruments = Array.from(new Set(sample.items.map((trade: any) => String(trade.instrument)))) .sort(
+  const instruments = Array.from(new Set<string>(sample.items.map((trade: TradeDTO) => String(trade.instrument)))).sort(
     (a: string, b: string) => a.localeCompare(b),
   );
 
