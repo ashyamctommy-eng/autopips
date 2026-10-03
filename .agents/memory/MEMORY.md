@@ -4,3 +4,4 @@
 - [npm local overrides](npm-local-overrides.md) — audit success can hide broken directory links; use a direct local dependency and regenerate stale locks.
 - [Manual wallet allocations](manual-wallet-allocations.md) — extend existing ledger accounting, never introduce an independent spendable balance or fake provider payments.
 - [Mobile auth scope](mobile-auth-scope.md) — preserve existing password/2FA identity; keep mobile bearer transport isolated from money-moving browser routes.
+- [Large connector payloads](large-connector-payloads.md) — compress and shard local repository data before passing it through CodeExecution shell output.
