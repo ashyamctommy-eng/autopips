@@ -115,6 +115,8 @@ export function verifyIpnSignature(input: VerifyIpnSignatureInput): IpnVerificat
   // without a redeploy. NOTE: keeping this in step with the NOWPayments
   // dashboard is what makes deposits creditable at all.
   const secret = getSetting('nowpayments.ipn_secret') || serverEnv().NOWPAYMENTS_IPN_SECRET;
+  // An empty HMAC secret must NEVER be accepted as a valid payment signature.
+  if (!secret.trim()) return { valid: false, reason: 'PROVIDER_NOT_CONFIGURED' };
   const computed = crypto
     .createHmac('sha512', secret)
     .update(canonicalizeForSignature(parsed), 'utf8')

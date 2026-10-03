@@ -1,4 +1,5 @@
 import { serverEnv } from '@/lib/env';
+import { ApiError } from '@/lib/http';
 import {
   DerivClient,
   type DerivSubscribeResult,
@@ -84,6 +85,9 @@ async function connection(): Promise<DerivClient> {
 
   connecting ??= (async () => {
     const env = serverEnv();
+    if (!env.DERIV_APP_ID.trim()) {
+      throw ApiError.serviceUnavailable('Deriv market data is not configured. Live prices are unavailable.');
+    }
     const next = new DerivClient({
       url: publicUrl(),
       appId: env.DERIV_APP_ID,

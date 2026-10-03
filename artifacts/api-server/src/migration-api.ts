@@ -40,9 +40,11 @@ const querySchema = z.object({
 }).strict();
 
 export function missingConfiguration() {
-  return ['DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'CREDENTIAL_ENCRYPTION_KEY',
-    'WS_INTERNAL_TOKEN', 'NOWPAYMENTS_API_KEY', 'NOWPAYMENTS_IPN_SECRET', 'DERIV_APP_ID']
-    .filter(key => !process.env[key]);
+  const keys = ['DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'CREDENTIAL_ENCRYPTION_KEY', 'WS_INTERNAL_TOKEN'];
+  if ((process.env.EXECUTION_MODE?.trim() || 'internal') === 'broker') {
+    keys.push('NOWPAYMENTS_API_KEY', 'NOWPAYMENTS_IPN_SECRET', 'DERIV_APP_ID');
+  }
+  return keys.filter(key => !process.env[key]?.trim());
 }
 
 function setupResponse(res: import('express').Response) {

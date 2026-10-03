@@ -225,7 +225,9 @@ function scrub(input: string): string {
 function apiKey(): string {
   // Admin console → Settings wins; serverEnv() is the fallback and still fails
   // fast at boot when neither a console row nor the env var is present.
-  return getSetting('nowpayments.api_key') || serverEnv().NOWPAYMENTS_API_KEY;
+  const key = getSetting('nowpayments.api_key') || serverEnv().NOWPAYMENTS_API_KEY;
+  if (!key.trim()) throw ApiError.serviceUnavailable('NOWPayments is not configured. Payments are unavailable.');
+  return key;
 }
 
 function apiBase(): string {

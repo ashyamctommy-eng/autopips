@@ -49,15 +49,15 @@ const schema = z.object({
   // there is no object-storage configuration and no external KYC provider.
 
   // NOWPayments
-  NOWPAYMENTS_API_KEY: z.string().min(1),
+  NOWPAYMENTS_API_KEY: z.string().default(''),
   NOWPAYMENTS_API_BASE: z.string().url().default('https://api.nowpayments.io/v1'),
-  NOWPAYMENTS_IPN_SECRET: z.string().min(1),
+  NOWPAYMENTS_IPN_SECRET: z.string().default(''),
   NOWPAYMENTS_PAYOUT_WALLET: z.string().optional().or(z.literal('')),
   NOWPAYMENTS_PAYOUT_CURRENCY: z.string().default('usdttrc20'),
   NOWPAYMENTS_ALLOWED_CURRENCIES: z.string().default('usdttrc20,usdterc20,btc,eth,ltc,trx,bnb'),
 
   // Deriv (broker + market data). See src/server/modules/broker/deriv.adapter.ts
-  DERIV_APP_ID: z.string().min(1),
+  DERIV_APP_ID: z.string().default(''),
   /**
    * Account API token. OPTIONAL on purpose: without it the platform still
    * streams public market data (charts work) and simply cannot authenticate,
@@ -145,6 +145,12 @@ const schema = z.object({
   RISK_MAX_LOT_PER_ORDER: z.coerce.number().positive().default(10),
   RISK_MIN_CLIENT_CAPITAL_USD: z.coerce.number().nonnegative().default(100),
   RISK_HWM_ENABLED: booleanish.default('true'),
+}).superRefine((env, context) => {
+  if (env.EXECUTION_MODE === 'broker') {
+    for (const key of ['NOWPAYMENTS_API_KEY', 'NOWPAYMENTS_IPN_SECRET', 'DERIV_APP_ID'] as const) {
+      if (!env[key].trim()) context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: 'Required in broker mode' });
+    }
+  }
 });
 
 export type ServerEnv = z.infer<typeof schema>;
