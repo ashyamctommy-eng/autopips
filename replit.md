@@ -51,3 +51,9 @@ encrypted broker credentials, KYC files, and settings unreadable.
   and external services; a reachable empty database is not sufficient.
 - The frontend uses same-origin `/api` and `/ws` paths. Proxy routing includes
   websocket transport paths; no hardcoded development hosts are needed.
+
+## Database choice
+
+The user chose a fresh Replit database rather than reconnecting or importing the
+original database. Keep accounts and financial records empty until real user
+actions populate them. Do not restore original data or seed demonstration money.

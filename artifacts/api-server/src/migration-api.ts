@@ -92,7 +92,10 @@ router.post('/api/migration/query', async (req, res) => {
           args[0] = user.id;
         }
       }
-      if (missingConfiguration().length) {
+      // Public plan catalog reads only the database; provider and session
+      // credentials must not stop visitors viewing an honest empty catalog.
+      const planCatalogRead = module === 'server/modules/account/account.service' && method === 'listActivePlans';
+      if (!planCatalogRead && missingConfiguration().length) {
         setupResponse(res);
         return;
       }
@@ -123,7 +126,8 @@ router.post('/api/migration/query', async (req, res) => {
 
 for (const route of importedRoutes) {
   router.all(route.path, async (req, res) => {
-    if (missingConfiguration().length) {
+    const catalogRequest = route.path === '/api/v1/plans' && (req.method === 'GET' || req.method === 'HEAD');
+    if (!catalogRequest && missingConfiguration().length) {
       setupResponse(res);
       return;
     }
