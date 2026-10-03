@@ -27,8 +27,13 @@ identity verification, trading workspaces, settlements, and a staff console.
 
 ## Service configuration
 
-Required backend secrets: `REDIS_URL`, `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`,
+Required backend secrets: `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`,
 `WS_INTERNAL_TOKEN`, `NOWPAYMENTS_API_KEY`, `NOWPAYMENTS_IPN_SECRET`, `DERIV_APP_ID`.
+`REDIS_URL` is a non-secret configuration set to `redis://127.0.0.1:6379`.
+The `Autopipsz Local Redis` workflow runs the Nix-provided Redis server on
+loopback only, with append-only persistence under the gitignored `.cache/`
+directory. This workflow starts Redis in the Repl workspace, not automatically
+in a published deployment.
 The app connects only to Replit's runtime-managed `DATABASE_URL`; it has no
 external database URL override. An account API token (`DERIV_API_TOKEN`) is
 optional for public data but required for authenticated broker trading.
@@ -56,3 +61,6 @@ encrypted broker credentials, KYC files, and settings unreadable.
 The user chose a fresh Replit database rather than reconnecting or importing the
 original database. Keep accounts and financial records empty until real user
 actions populate them. Do not restore original data or seed demonstration money.
+
+The user requires zero Railway dependencies: run Redis locally in the Repl and
+use native Replit PostgreSQL. Do not add Railway connections.
