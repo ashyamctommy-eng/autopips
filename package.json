@@ -1,87 +1,19 @@
 {
-  "name": "autopips-pro",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Autopipsz (autopips.pro) \u2014 managed trading platform. Next.js 14 App Router + modular server services + Deriv broker adapter + NOWPayments settlements.",
-  "engines": {
-    "node": ">=20.0.0"
-  },
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
   "scripts": {
-    "dev": "next dev",
-    "dev:ws": "tsx watch src/server/main.ts",
-    "build": "prisma generate && next build",
-    "build:server": "tsc -p tsconfig.server.json",
-    "start": "next start -H 0.0.0.0",
-    "prestart:ws": "node scripts/worker-preflight.mjs",
-    "start:ws": "tsx src/server/main.ts",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "prisma:validate": "prisma validate",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
-    "prisma:seed": "node scripts/bootstrap-admin.mjs",
-    "bootstrap:admin": "node scripts/bootstrap-admin.mjs"
+    "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
+    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
-  "prisma": {
-    "seed": "node scripts/bootstrap-admin.mjs"
-  },
+  "private": true,
   "dependencies": {
-    "@node-rs/argon2": "^2.0.2",
-    "@prisma/client": "^5.22.0",
-    "@radix-ui/react-avatar": "^1.1.1",
-    "@radix-ui/react-dialog": "^1.1.2",
-    "@radix-ui/react-dropdown-menu": "^2.1.2",
-    "@radix-ui/react-label": "^2.1.0",
-    "@radix-ui/react-progress": "^1.1.0",
-    "@radix-ui/react-select": "^2.1.2",
-    "@radix-ui/react-separator": "^1.1.0",
-    "@radix-ui/react-slot": "^1.1.0",
-    "@radix-ui/react-switch": "^1.1.1",
-    "@radix-ui/react-tabs": "^1.1.1",
-    "@radix-ui/react-toast": "^1.2.2",
-    "@radix-ui/react-tooltip": "^1.1.4",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "date-fns": "^3.6.0",
-    "decimal.js": "^10.4.3",
-    "framer-motion": "^11.11.17",
-    "ioredis": "^5.4.1",
-    "jose": "^5.9.6",
-    "lightweight-charts": "^4.2.3",
-    "lucide-react": "^0.462.0",
-    "next": "^14.2.18",
-    "qrcode": "^1.5.4",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "recharts": "^2.13.3",
-    "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1",
-    "speakeasy": "^2.0.0",
-    "tailwind-merge": "^2.5.4",
-    "tailwindcss-animate": "^1.0.7",
-    "ws": "^8.21.3",
-    "zod": "^3.23.8"
+    "@replit/connectors-sdk": "^0.4.3"
   },
   "devDependencies": {
-    "@types/node": "^20.17.6",
-    "@types/qrcode": "^1.5.5",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@types/speakeasy": "^2.0.10",
-    "autoprefixer": "^10.4.20",
-    "eslint": "^8.57.1",
-    "eslint-config-next": "^14.2.18",
-    "postcss": "^8.4.49",
-    "prisma": "^5.22.0",
-    "tailwindcss": "^3.4.15",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.5"
-  },
-  "overrides": {
-    "@types/socket.io-client": "3.0.0"
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3"
   }
 }
