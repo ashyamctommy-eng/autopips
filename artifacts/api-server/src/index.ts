@@ -1,5 +1,12 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { missingConfiguration } from "./migration-api";
+
+// Preview may show public content during setup. A published money-handling
+// server must never advertise readiness with missing credentials.
+if (process.env.NODE_ENV === 'production' && missingConfiguration().length) {
+  throw new Error(`Missing service configuration: ${missingConfiguration().join(', ')}`);
+}
 
 const rawPort = process.env["PORT"];
 

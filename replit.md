@@ -1,45 +1,53 @@
-# [Project name]
+# Autopipsz
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An imported managed-trading platform with public information, client accounts,
+identity verification, trading workspaces, settlements, and a staff console.
 
-## Run & Operate
+## Run and verify
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Web preview: managed workflow `artifacts/autopips: web`.
+- HTTP API: managed workflow `artifacts/api-server: API Server`.
+- Realtime/financial worker: managed workflow `artifacts/api-server: Trading Worker`.
+  Start only after the original service configuration and database are ready.
+- Backend tests: `pnpm --filter @workspace/api-server test`.
+- Adapter checks independent of service setup:
+  `pnpm --filter @workspace/api-server exec vitest run tests/migration-http.test.ts`.
+- Prisma generation is part of the backend build; it does not apply migrations.
 
-## Stack
+## Structure
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- `artifacts/autopips`: Vite React frontend, retaining original pages, components,
+  Tailwind 3 styling and themes. Its router replaces Next file-based routing.
+- `artifacts/api-server/src/imported`: original service layer and API handlers.
+- `artifacts/api-server/src/migration-api.ts`: Express request adapter and a closed,
+  authorized read bridge for formerly server-rendered page data.
+- `artifacts/api-server/prisma`: original Prisma schema and migration history.
+- `.migration-backup`: untouched source reference.
+- Existing `lib/*` and mockup packages are retained scaffold packages.
 
-## Where things live
+## Service configuration
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+Required backend secrets: `REDIS_URL`, `JWT_SECRET`, `CREDENTIAL_ENCRYPTION_KEY`,
+`WS_INTERNAL_TOKEN`, `NOWPAYMENTS_API_KEY`, `NOWPAYMENTS_IPN_SECRET`, `DERIV_APP_ID`.
+The database URL defaults to the workspace database; `EXTERNAL_DATABASE_URL`
+can explicitly select the original PostgreSQL instance without changing the
+runtime-managed workspace URL. An account API token (`DERIV_API_TOKEN`) is
+optional for public data but required for authenticated broker trading.
 
-## Architecture decisions
+Keep the existing encryption key when using original data: changing it makes
+encrypted broker credentials, KYC files, and settings unreadable.
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+## Migration constraints
 
-## Product
-
-_Describe the high-level user-facing capabilities of this app once they exist._
-
-## User preferences
-
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- Preserve original routes, design, financial arithmetic, role checks and session
+  semantics. Do not redesign or add demo balances to make the preview look full.
+- Keep Prisma and the original schema. Do not replace it with the scaffold's
+  Drizzle schema or migrate existing financial data without user authorization.
+- Do not run migrations, seed accounts, or enable the trading worker against an
+  existing database without confirming the intended target.
+- Development can serve public pages during setup; unavailable backend operations
+  explicitly return 503. Production refuses to start with missing configuration.
+- Original SQL/provider integration tests need the configured, migrated database
+  and external services; a reachable empty database is not sufficient.
+- The frontend uses same-origin `/api` and `/ws` paths. Proxy routing includes
+  websocket transport paths; no hardcoded development hosts are needed.

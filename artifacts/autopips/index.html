@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" class="dark" data-theme="dark" data-theme-preference="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0E14" />
+    <title>Autopipsz — Automated Trading Infrastructure</title>
+    <meta name="description" content="Autopipsz connects client capital to Deriv execution over its WebSocket API, with crypto settlements through NOWPayments. Managed algorithmic trading with verifiable, broker-sourced records. Targets are indicative and non-guaranteed." />
+    <meta name="keywords" content="managed trading, algorithmic trading, Deriv, Deriv WebSocket API, copy trading, Autopipsz" />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="Autopipsz — Automated Trading Infrastructure" />
+    <meta property="og:description" content="Managed algorithmic trading on institutional broker APIs. Verifiable broker-sourced P/L. Targets are indicative and non-guaranteed; capital is at risk." />
+    <meta property="og:url" content="https://autopips.pro" />
+    <meta property="og:site_name" content="Autopipsz" />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@100..800&display=swap" rel="stylesheet" />
+    <style>
+      :root { --font-sans: 'Inter'; --font-mono: 'JetBrains Mono'; }
+    </style>
+    <script>(function(){try{var k='autopips-theme';var s=null;try{s=localStorage.getItem(k)}catch(e){}var p=(s==='light'||s==='dark'||s==='system')?s:'dark';var d=!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var r=p==='system'?(d?'dark':'light'):p;var h=document.documentElement;h.setAttribute('data-theme',r);h.setAttribute('data-theme-preference',p);h.classList.toggle('dark',r==='dark')}catch(e){}})();</script>
+  </head>
+  <body class="min-h-screen bg-base-900 font-sans text-base-100">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

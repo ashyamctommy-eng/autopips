@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Autopipsz"
+description = "The imported Autopipsz managed trading platform, with public information, account dashboards, trading screens, and administration."
+version = "1.0.0"
+id = "artifacts/autopips"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20895
+
+[services.development]
+run = "pnpm --filter @workspace/autopips run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/autopips", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/autopips/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20895"
+BASE_PATH = "/"

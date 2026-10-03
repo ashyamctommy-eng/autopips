@@ -1,0 +1,707 @@
+import { prisma } from '@/lib/prisma';
+import { ApiError } from '@/lib/http';
+import { decryptCredential, encryptCredential, maskSecret } from '@/lib/crypto/credential-cipher';
+
+/**
+ * Operator-editable platform settings.
+ *
+ * WHAT THIS IS FOR
+ *   Provider credentials used to be readable only from environment variables, so
+ *   rotating a NOWPayments key or a MetaApi token meant editing service variables
+ *   and redeploying. These settings let an administrator change the handful of
+ *   values that are safe to manage at runtime, from the admin console.
+ *
+ * THE RULE (one direction only)
+ *   A stored row OVERRIDES the environment variable of the same meaning. The env
+ *   var remains the fallback and the default, so:
+ *     • a deployment is never broken by a missing console row;
+ *     • clearing a row puts the env value back — no data loss, no lockout;
+ *     • nothing that is NOT in this list can be changed from the console.
+ *
+ * SECRETS
+ *   `isSecret` keys are stored as AES-256-GCM envelopes (credential-cipher),
+ *   never plaintext, and are only ever returned to the console masked. An
+ *   encrypted value that fails to decrypt (e.g. after a CREDENTIAL_ENCRYPTION_KEY
+ *   rotation) is skipped with a warning and the env fallback is used — a broken
+ *   row cannot take the platform down.
+ *
+ * READ PATH
+ *   `getSetting()` is SYNCHRONOUS on purpose: it is called from the payment
+ *   client and the IPN verifier, which are hot paths. It reads an in-process
+ *   cache and kicks a background refresh at most once per TTL. Writes refresh
+ *   the cache eagerly, so a change made in the console is live immediately in
+ *   the process that served it (other replicas converge within the TTL).
+ */
+
+// ─── definitions ─────────────────────────────────────────────────────────────
+
+export type PlatformSettingKey =
+  | 'nowpayments.api_key'
+  | 'nowpayments.ipn_secret'
+  | 'nowpayments.api_base'
+  | 'nowpayments.allowed_currencies'
+  | 'deriv.api_token'
+  // ── market data (Admin → Settings) ──
+  | 'twelve_data.api_key'
+  | 'market.instruments'
+  // ── public disclosure (Admin → Settings) ──
+  | 'disclosure.internal_execution_notice'
+  // ── payout controls (Admin → Settings) ──
+  | 'payout.daily_cap_usd'
+  | 'payout.address_allowlist'
+  | 'payout.two_person_approval'
+  // ── bot risk controls (Admin → Bot control) ──
+  | 'bot.enabled'
+  | 'bot.disabled_reason'
+  | 'risk.max_stake_usd'
+  | 'risk.risk_per_trade_pct'
+  | 'risk.daily_loss_limit_usd'
+  | 'risk.allowed_symbols'
+  | 'risk.min_payout_percentage'
+  // ── engine controls (Admin → Settings) ──
+  | 'engine.worker_enabled';
+
+type SettingKind =
+  | 'secret'
+  | 'url'
+  | 'list'
+  | 'symbols'
+  | 'addresses'
+  | 'number'
+  | 'boolean'
+  | 'text'
+  /**
+   * Multi-paragraph prose (a public disclosure). Unlike `text` (500 chars,
+   * single-line) this preserves line breaks and allows a real document, and the
+   * console renders it as a textarea.
+   */
+  | 'longtext';
+
+interface SettingDefinition {
+  key: PlatformSettingKey;
+  envName: string;
+  label: string;
+  description: string;
+  kind: SettingKind;
+  /** Used when neither a console row nor the env var is present. */
+  defaultValue: string;
+  inputHint: string;
+}
+
+/**
+ * The complete set of keys the console may edit. Everything else on this
+ * platform stays in service variables (and is validated at boot by src/lib/env.ts).
+ * A key is listed here only if some code path actually reads it — advertising a
+ * toggle that nothing honours would be a lie.
+ */
+export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
+  {
+    key: 'nowpayments.api_key',
+    envName: 'NOWPAYMENTS_API_KEY',
+    label: 'NOWPayments API key',
+    description:
+      'Sent as `x-api-key` on every deposit/payout call. Replacing it takes effect on the next payment request — no redeploy.',
+    kind: 'secret',
+    defaultValue: '',
+    inputHint: 'e.g. 8XK4-…-2QW1',
+  },
+  {
+    key: 'nowpayments.ipn_secret',
+    envName: 'NOWPAYMENTS_IPN_SECRET',
+    label: 'NOWPayments IPN secret',
+    description:
+      'HMAC-SHA512 key used to verify incoming payment callbacks. If this does not match the NOWPayments dashboard, deposits are rejected with DEPOSIT_IPN_REJECTED and never credited.',
+    kind: 'secret',
+    defaultValue: '',
+    inputHint: 'From NOWPayments → Settings → Payments → IPN secret',
+  },
+  {
+    key: 'nowpayments.api_base',
+    envName: 'NOWPAYMENTS_API_BASE',
+    label: 'NOWPayments API base URL',
+    description: 'Override only for a sandbox/proxy endpoint. Production: https://api.nowpayments.io/v1',
+    kind: 'url',
+    defaultValue: 'https://api.nowpayments.io/v1',
+    inputHint: 'https://api.nowpayments.io/v1',
+  },
+  {
+    key: 'nowpayments.allowed_currencies',
+    envName: 'NOWPAYMENTS_ALLOWED_CURRENCIES',
+    label: 'Accepted deposit currencies',
+    description:
+      'Comma-separated tickers. This is the list clients may choose from, intersected with what the provider reports as live.',
+    kind: 'list',
+    defaultValue: 'usdttrc20,usdterc20,btc,eth,ltc,trx,bnb',
+    inputHint: 'usdttrc20,usdterc20,btc',
+  },
+  {
+    key: 'deriv.api_token',
+    envName: 'DERIV_API_TOKEN',
+    label: 'Deriv API token',
+    description:
+      'Account API token used to authenticate the broker connection (balance, portfolio and trading; it needs the “trade” scope to place orders). Without one the platform still streams public market data, but nothing authenticated works. A token stored against a specific connection in Admin → Brokers wins over this one.',
+    kind: 'secret',
+    defaultValue: '',
+    inputHint: 'api.deriv.com → API token (read + trade scopes)',
+  },
+  {
+    key: 'twelve_data.api_key',
+    envName: 'TWELVE_DATA_API_KEY',
+    label: 'Twelve Data API key',
+    description:
+      'Market-data key used when MARKET_DATA_PROVIDER=twelve to fetch historical candles, live quotes and asset catalogs. Twelve Data has no Deriv synthetic indices (R_10/R_100), so only mapped instruments can be served. Leaving this empty makes the Twelve Data path refuse and the default feed continue.',
+    kind: 'secret',
+    defaultValue: '',
+    inputHint: 'twelvedata.com → Dashboard → API keys',
+  },
+  {
+    key: 'market.instruments',
+    envName: 'MARKET_INSTRUMENTS',
+    label: 'Offered instruments (platform catalog)',
+    description:
+      'Comma-separated platform symbols the deployment offers and charts. Only list instruments that have a price source (a Twelve Data mapping such as frxXAUUSD→XAU/USD, or a synthetic the oracle can price). Case-sensitive.',
+    kind: 'symbols',
+    defaultValue: 'frxEURUSD,frxGBPUSD,frxUSDJPY,frxXAUUSD,cryBTCUSD,cryETHUSD',
+    inputHint: 'e.g. frxEURUSD,frxXAUUSD,cryBTCUSD',
+  },
+
+  // ── payout controls ────────────────────────────────────────────────────────
+  // Every one of these DEFAULTS TO THE PREVIOUS BEHAVIOUR (no new blockage),
+  // except the two-person rule, which is deliberately ON: an autonomous payout
+  // broadcast moves client money with no human in the loop, so the default has
+  // to be the safe one. The manual-settlement path is never gated by it — see
+  // `payout.two_person_approval` below.
+  {
+    key: 'payout.daily_cap_usd',
+    envName: 'PAYOUT_DAILY_CAP_USD',
+    label: 'Per-client daily payout cap (USD)',
+    description:
+      'Largest total USD value of withdrawals a single client may reserve per UTC day, summed over every non-failed withdrawal (PENDING, SENDING and FINISHED all count). 0 disables the cap. Enforced inside the same transaction that locks the client row, so concurrent requests cannot slip past it.',
+    kind: 'number',
+    defaultValue: '0',
+    inputHint: 'e.g. 5000 (0 = no cap)',
+  },
+  {
+    key: 'payout.address_allowlist',
+    envName: 'PAYOUT_ADDRESS_ALLOWLIST',
+    label: 'Payout address allow-list',
+    description:
+      'Comma-separated payout addresses a withdrawal may target. Empty means no restriction. Checked when a client requests a withdrawal and again immediately before an automated broadcast, so an address can be added to the list without waiting for redeploys.',
+    kind: 'addresses',
+    defaultValue: '',
+    inputHint: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t,0x…',
+  },
+  {
+    key: 'payout.two_person_approval',
+    envName: 'PAYOUT_TWO_PERSON_APPROVAL',
+    label: 'Two-person approval for automated payouts',
+    description:
+      'When true (the default), an automated payout broadcast requires a SECOND, different admin approval: the first admin records the approval, a different admin releases the money. Recording a txHash by hand (manual settlement) is NEVER blocked by this, so a single-operator deployment can always settle a payout; a single-operator deployment that wants automated broadcasts should set this to false, understanding that one admin session can then move money.',
+    kind: 'boolean',
+    defaultValue: 'true',
+    inputHint: 'true or false',
+  },
+
+  // ── bot risk controls ─────────────────────────────────────────────────────
+  // These live in Admin → Bot control. `bot.enabled` is ALSO mirrored into Redis
+  // (see bot-control.service.ts) because a kill switch has to take effect in the
+  // worker process immediately, not on the settings cache's TTL.
+  {
+    key: 'bot.enabled',
+    envName: 'BOT_ENABLED',
+    label: 'Bot trading enabled',
+    description:
+      'The global kill switch. false rejects every new order immediately, in every process, and pauses the bot runtime.',
+    kind: 'boolean',
+    defaultValue: 'true',
+    inputHint: 'true or false',
+  },
+  {
+    key: 'bot.disabled_reason',
+    envName: 'BOT_DISABLED_REASON',
+    label: 'Kill switch reason',
+    description: 'Why trading was stopped. Shown in the console and written to the audit log with the state change.',
+    kind: 'text',
+    defaultValue: '',
+    inputHint: 'e.g. broker incident, risk review',
+  },
+  {
+    key: 'risk.max_stake_usd',
+    envName: 'RISK_MAX_STAKE_USD',
+    label: 'Maximum stake per order (USD)',
+    description:
+      'Upper bound on the stake of a single contract. 0 disables the cap. A contract broker sizes orders by stake, so the cap is enforced where the stake is known — when an order is priced.',
+    kind: 'number',
+    defaultValue: '0',
+    inputHint: 'e.g. 250',
+  },
+  {
+    key: 'risk.daily_loss_limit_usd',
+    envName: 'RISK_DAILY_LOSS_LIMIT_USD',
+    label: 'Daily realised-loss limit (USD)',
+    description:
+      'New orders are refused once realised P/L for the UTC day is at or below minus this amount. 0 disables the limit.',
+    kind: 'number',
+    defaultValue: '0',
+    inputHint: 'e.g. 500',
+  },
+  {
+    key: 'risk.risk_per_trade_pct',
+    envName: 'RISK_PER_TRADE_PCT',
+    label: 'Risk per trade (% of capital)',
+    description:
+      'How much of an investment\'s capital a single trade may put at risk. On a Derive multiplier contract the stake IS the maximum loss, so this is the loss budget for one order — the notional it opens is derived from it. 0 refuses every stake-sized order.',
+    kind: 'number',
+    defaultValue: '1',
+    inputHint: 'e.g. 1',
+  },
+  {
+    key: 'engine.worker_enabled',
+    envName: 'ENGINE_WORKER_ENABLED',
+    label: 'Automated bot engine (strategy generation)',
+    description:
+      'When true (the default) the worker generates trading signals from the enabled strategies. Setting it to false PAUSES STRATEGY GENERATION ONLY: open positions are still marked to market and their stop-loss and take-profit levels are still evaluated, because pausing the exits would leave every open position unprotected. Use it to stop new trades without closing the book; use the emergency stop on Bot control to halt order placement instead.',
+    kind: 'boolean',
+    defaultValue: 'true',
+    inputHint: 'true or false',
+  },
+  {
+    key: 'risk.min_payout_percentage',
+    envName: 'RISK_MIN_PAYOUT_PERCENTAGE',
+    label: 'Minimum payout percentage',
+    description:
+      'A contract whose quoted payout is below this percentage of its cost is refused. 0 disables the check. Only meaningful for contracts that quote a payout.',
+    kind: 'number',
+    defaultValue: '0',
+    inputHint: 'e.g. 90',
+  },
+  {
+    key: 'risk.allowed_symbols',
+    envName: 'RISK_ALLOWED_SYMBOLS',
+    label: 'Tradable symbols (allow-list)',
+    description:
+      'Comma-separated broker symbols the bot may trade. Empty means no restriction. Symbols are case-sensitive. Charting is never restricted — this gates orders only.',
+    kind: 'symbols',
+    defaultValue: '',
+    inputHint: 'e.g. frxXAUUSD,R_100',
+  },
+  {
+    key: 'disclosure.internal_execution_notice',
+    envName: 'DISCLOSURE_INTERNAL_EXECUTION_NOTICE',
+    label: 'Internal execution disclosure',
+    description:
+      'Shown on the public Risk page in place of the broker wording WHEN EXECUTION_MODE=internal, so the page always describes how this deployment actually executes. Paragraphs are separated by a blank line. Have changes reviewed by counsel.',
+    kind: 'longtext',
+    defaultValue: `Autopipsz is not a broker, a bank or a venue. When you open a position, Autopipsz is your counterparty: the position is a contract between you and Autopipsz, priced from independent third-party market data. No order is placed on any external exchange or broker.
+
+Why this matters. Because Autopipsz takes the other side of your position, profit on a winning position is paid by Autopipsz and a loss is retained by Autopipsz. This differs from a brokerage, where your counterparty is the market. Autopipsz's ability to pay what it owes you is therefore a risk you carry, alongside market risk.
+
+Autopipsz is not a licensed venue. Positions are not traded on any regulated exchange, and no exchange, clearing house or compensation scheme stands behind them. There is no investor-compensation or deposit-protection cover, and no guarantee that Autopipsz can meet its obligations.
+
+Synthetic indices (R_10, R_100 and volatility indices) are priced from a public market feed and are not traded on any venue.
+
+Pricing is sourced from independent third-party market-data providers. Historical bars and live quotes are used as published by those providers and are not set by Autopipsz; a feed outage can delay or prevent a position from being priced, opened or closed.`,
+    inputHint: 'Paragraphs separated by a blank line.',
+  },
+] as const;
+
+const DEFINITIONS_BY_KEY = new Map<string, SettingDefinition>(
+  SETTING_DEFINITIONS.map((def) => [def.key, def]),
+);
+
+// ─── validation ──────────────────────────────────────────────────────────────
+
+const LIST_TOKEN = /^[a-z0-9]{2,16}$/i;
+
+/** Throws ApiError.badRequest with a message written for an operator, not a stack trace. */
+function validateValue(def: SettingDefinition, value: string): string {
+  const trimmed = value.trim();
+
+  if (def.kind === 'secret') {
+    if (trimmed.length < 8) {
+      throw ApiError.badRequest(`${def.label} is too short — expected at least 8 characters.`);
+    }
+    if (/\s/.test(trimmed)) {
+      throw ApiError.badRequest(`${def.label} must not contain spaces or line breaks.`);
+    }
+    return trimmed;
+  }
+
+  if (def.kind === 'url') {
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw ApiError.badRequest(`${def.label} must be an absolute URL, e.g. https://api.nowpayments.io/v1`);
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw ApiError.badRequest(`${def.label} must use http(s).`);
+    }
+    return trimmed.replace(/\/+$/, '');
+  }
+
+  if (def.kind === 'boolean') {
+    const normalised = trimmed.toLowerCase();
+    if (normalised !== 'true' && normalised !== 'false') {
+      throw ApiError.badRequest(`${def.label} must be true or false.`);
+    }
+    return normalised;
+  }
+
+  if (def.kind === 'longtext') {
+    // Public prose: line breaks are meaningful (a blank line separates
+    // paragraphs), so the value is NOT collapsed — only trimmed.
+    if (trimmed.length < 40) {
+      throw ApiError.badRequest(`${def.label} is too short to be a disclosure.`);
+    }
+    if (trimmed.length > 8000) {
+      throw ApiError.badRequest(`${def.label} is limited to 8000 characters.`);
+    }
+    return trimmed;
+  }
+
+  if (def.kind === 'text') {
+    if (trimmed.length > 500) {
+      throw ApiError.badRequest(`${def.label} is limited to 500 characters.`);
+    }
+    return trimmed;
+  }
+
+  if (def.kind === 'number') {
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      throw ApiError.badRequest(`${def.label} must be a number.`);
+    }
+    if (parsed < 0) {
+      throw ApiError.badRequest(`${def.label} cannot be negative.`);
+    }
+    return String(parsed);
+  }
+
+  if (def.kind === 'addresses') {
+    // Crypto addresses are CASE-SENSITIVE (base58/base32), so this list is NOT
+    // lower-cased here; the comparison helper lower-cases both sides because an
+    // EVM address differs from its checksummed form only in case.
+    const addresses = trimmed
+      .split(',')
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const bad = addresses.find((token) => token.length < 20 || token.length > 128 || !/^[A-Za-z0-9:_-]+$/.test(token));
+    if (bad) {
+      throw ApiError.badRequest(
+        `${def.label}: "${bad.slice(0, 40)}" is not a valid payout address (20–128 alphanumeric characters).`,
+      );
+    }
+    // An empty list is meaningful: "no restriction" — the console clears the row.
+    return Array.from(new Set(addresses)).join(',');
+  }
+
+  if (def.kind === 'symbols') {
+    // Broker symbols are case-sensitive (Deriv uses `frxXAUUSD`, `R_100`), so
+    // this list is NOT lower-cased.
+    const symbols = trimmed
+      .split(',')
+      .map((token) => token.trim())
+      .filter(Boolean);
+    const bad = symbols.find((token) => !/^[A-Za-z0-9._#+-]{2,32}$/.test(token));
+    if (bad) {
+      throw ApiError.badRequest(
+        `${def.label}: "${bad}" is not a valid broker symbol.`,
+      );
+    }
+    // An empty list is meaningful: "no restriction" — the console clears the row.
+    return Array.from(new Set(symbols)).join(',');
+  }
+
+  // list
+  const tokens = trimmed
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    throw ApiError.badRequest(`${def.label} needs at least one ticker.`);
+  }
+  const bad = tokens.find((t) => !LIST_TOKEN.test(t));
+  if (bad) {
+    throw ApiError.badRequest(`${def.label}: "${bad}" is not a valid ticker (letters/digits, 2–16 chars).`);
+  }
+  return Array.from(new Set(tokens)).join(',');
+}
+
+// ─── cache + hydration ───────────────────────────────────────────────────────
+
+const TTL_MS = 30_000;
+const RETRY_MS = 5_000;
+
+/** key → effective override (decrypted). Absent = use the env fallback. */
+const overrides = new Map<string, string>();
+let hydratedAt = 0;
+let inFlight: Promise<void> | null = null;
+let lastFailureAt = 0;
+
+async function hydrate(): Promise<void> {
+  const rows = await prisma.platformSetting.findMany();
+  const next = new Map<string, string>();
+
+  for (const row of rows) {
+    const def = DEFINITIONS_BY_KEY.get(row.key);
+    if (!def) continue; // row for a key this build no longer reads — ignore
+
+    let value = row.value;
+    if (row.isSecret) {
+      try {
+        value = decryptCredential(row.value);
+      } catch {
+        console.error(
+          `[settings] could not decrypt "${row.key}" (CREDENTIAL_ENCRYPTION_KEY changed?) — falling back to the environment value.`,
+        );
+        continue;
+      }
+    }
+    if (value.trim()) next.set(row.key, value);
+  }
+
+  overrides.clear();
+  for (const [key, value] of next) overrides.set(key, value);
+  hydratedAt = Date.now();
+}
+
+function hydrateInBackground(): void {
+  if (Date.now() - hydratedAt < TTL_MS) return;
+  if (inFlight) return;
+  if (lastFailureAt && Date.now() - lastFailureAt < RETRY_MS) return;
+
+  inFlight = hydrate()
+    .catch((err) => {
+      // A settings read must never break a payment. Keep serving the env values.
+      lastFailureAt = Date.now();
+      console.error('[settings] refresh failed:', err instanceof Error ? err.message : err);
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+}
+
+/** Await a fresh read (admin console; after a write). */
+export async function ensureSettingsLoaded(force = false): Promise<void> {
+  if (!force && Date.now() - hydratedAt < TTL_MS) return;
+  try {
+    await hydrate();
+  } catch (err) {
+    lastFailureAt = Date.now();
+    if (force) throw err;
+    console.error('[settings] refresh failed:', err instanceof Error ? err.message : err);
+  }
+}
+
+// ─── read ────────────────────────────────────────────────────────────────────
+
+/**
+ * The effective value: console override if present, else the env var, else the
+ * definition's default. Never throws — a settings outage degrades to the
+ * environment, it does not stop deposits.
+ */
+export function getSetting(key: PlatformSettingKey): string {
+  hydrateInBackground();
+  const override = overrides.get(key);
+  if (typeof override === 'string' && override.length > 0) return override;
+
+  const def = DEFINITIONS_BY_KEY.get(key)!;
+  const fromEnv = (process.env[def.envName] ?? '').trim();
+  return fromEnv || def.defaultValue;
+}
+
+/** True when a console row (not the environment) is supplying the value. */
+export function isOverridden(key: PlatformSettingKey): boolean {
+  const override = overrides.get(key);
+  return typeof override === 'string' && override.length > 0;
+}
+
+/**
+ * A numeric setting, with the definition's default when unset or unparsable.
+ * Never NaN: a bad row degrades to the default instead of disabling a limit.
+ */
+export function getSettingNumber(key: PlatformSettingKey): number {
+  const raw = getSetting(key).trim();
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    const fallback = Number(DEFINITIONS_BY_KEY.get(key)?.defaultValue ?? '0');
+    console.warn(`[settings] "${key}" holds a non-numeric value; using the default ${fallback}.`);
+    return Number.isFinite(fallback) ? fallback : 0;
+  }
+  return parsed;
+}
+
+/** A case-preserving symbol allow-list. Empty array = no restriction. */
+export function getSettingSymbols(key: PlatformSettingKey): string[] {
+  return getSetting(key)
+    .split(',')
+    .map((symbol) => symbol.trim())
+    .filter(Boolean);
+}
+
+/** The accepted-deposit currency list, honouring a console override. */
+export function resolvedAllowedCurrencies(): string[] {
+  return getSetting('nowpayments.allowed_currencies')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The per-client, per-UTC-day USD payout cap. 0 (the default) means no cap —
+ * this must never turn into an accidental limit from an unset or unparsable row.
+ */
+export function resolvedPayoutDailyCapUsd(): number {
+  return getSettingNumber('payout.daily_cap_usd');
+}
+
+/**
+ * Addresses a payout may target. Empty array = no restriction (the default).
+ * Case is preserved for the operator; comparison is case-insensitive.
+ */
+export function resolvedPayoutAddressAllowlist(): string[] {
+  return getSetting('payout.address_allowlist')
+    .split(',')
+    .map((address) => address.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Whether an automated payout broadcast needs two distinct admins.
+ * Unset/unparsable resolves to the definition default, which is `true`.
+ */
+export function resolvedPayoutTwoPersonApproval(): boolean {
+  return getSetting('payout.two_person_approval').trim().toLowerCase() === 'true';
+}
+
+/**
+ * Whether the worker's strategy engine may generate NEW signals.
+ *
+ * `true` is the previous behaviour. `false` pauses strategy generation and
+ * NOTHING ELSE: the exit path (`position.service.ts` — marking open positions and
+ * evaluating their stop loss / take profit) never consults this setting, because a
+ * switch that also silenced the exits would leave every open position unprotected.
+ * The runtime keeps its lease and keeps ticking, so it reports a paused engine
+ * rather than looking crashed.
+ */
+export function resolvedWorkerEngineEnabled(): boolean {
+  return getSetting('engine.worker_enabled').trim().toLowerCase() === 'true';
+}
+
+// ─── admin console ───────────────────────────────────────────────────────────
+
+export interface AdminSettingView {
+  key: PlatformSettingKey;
+  label: string;
+  description: string;
+  kind: SettingKind;
+  secret: boolean;
+  /**
+   * The definition's built-in default. Used to seed a `longtext` editor so the
+   * admin edits the real text instead of an empty box. Never secret material
+   * (a secret definition's default is always empty).
+   */
+  defaultValue: string;
+  inputHint: string;
+  /** Where the effective value comes from right now. */
+  source: 'console' | 'environment' | 'unset';
+  /** Masked for secrets; verbatim for everything else. Never a secret. */
+  display: string | null;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export async function listAdminSettings(): Promise<AdminSettingView[]> {
+  await ensureSettingsLoaded(true);
+  const rows = await prisma.platformSetting.findMany();
+  const byKey = new Map(rows.map((row) => [row.key, row]));
+
+  return SETTING_DEFINITIONS.map((def) => {
+    const row = byKey.get(def.key) ?? null;
+    const fromConsole = Boolean(row && (def.kind === 'secret' ? true : row.value.trim()));
+    const envValue = (process.env[def.envName] ?? '').trim();
+
+    let display: string | null = null;
+    if (row && row.value.trim()) {
+      if (def.kind === 'secret') {
+        // The stored value is an envelope; mask its plaintext length only.
+        let plaintext = '';
+        try {
+          plaintext = decryptCredential(row.value);
+        } catch {
+          plaintext = '';
+        }
+        display = plaintext ? maskSecret(plaintext) : '********';
+      } else {
+        display = row.value;
+      }
+    } else if (envValue) {
+      display = def.kind === 'secret' ? maskSecret(envValue) : envValue;
+    }
+
+    return {
+      key: def.key,
+      label: def.label,
+      description: def.description,
+      kind: def.kind,
+      secret: def.kind === 'secret',
+      defaultValue: def.defaultValue,
+      inputHint: def.inputHint,
+      source: fromConsole ? 'console' : envValue ? 'environment' : 'unset',
+      display,
+      updatedAt: row ? row.updatedAt.toISOString() : null,
+      updatedBy: row ? row.updatedBy : null,
+    };
+  });
+}
+
+/**
+ * Set or clear one setting.
+ *
+ * `null` (or an empty string) DELETES the row, which is how an operator reverts
+ * to the environment value. The plaintext of a secret is never logged or
+ * returned; callers audit the key and the action only.
+ */
+export async function saveAdminSetting(
+  key: string,
+  rawValue: string | null,
+  actor: { id: string; email: string },
+): Promise<{ key: string; action: 'set' | 'cleared' }> {
+  const def = DEFINITIONS_BY_KEY.get(key);
+  if (!def) {
+    throw ApiError.badRequest(`"${key}" is not an editable platform setting.`);
+  }
+
+  const value = (rawValue ?? '').trim();
+
+  if (value.length === 0) {
+    await prisma.platformSetting.deleteMany({ where: { key: def.key } });
+    await ensureSettingsLoaded(true);
+    return { key: def.key, action: 'cleared' };
+  }
+
+  const validated = validateValue(def, value);
+  const stored = def.kind === 'secret' ? encryptCredential(validated, 'generic') : validated;
+
+  await prisma.platformSetting.upsert({
+    where: { key: def.key },
+    create: {
+      key: def.key,
+      value: stored,
+      isSecret: def.kind === 'secret',
+      updatedBy: actor.email,
+    },
+    update: {
+      value: stored,
+      isSecret: def.kind === 'secret',
+      updatedBy: actor.email,
+    },
+  });
+
+  // Make the change live in this process immediately; other replicas pick it up
+  // on their next refresh tick.
+  await ensureSettingsLoaded(true);
+
+  return { key: def.key, action: 'set' };
+}

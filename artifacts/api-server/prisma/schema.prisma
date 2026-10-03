@@ -1,0 +1,533 @@
+// Autopipsz — autopips.pro
+// Managed trading platform data model.
+//
+// Design notes:
+//  - Zero Simulation Policy: every numeric column here is written either by a
+//    verified NOWPayments IPN callback, an admin action recorded in AuditLog,
+//    or a MetaApi (MT4/MT5) broker event. Nothing is seeded with invented P/L.
+//  - All money columns use Decimal(18, 2) / Decimal(18, 5) — never JS floats.
+//  - Indexes are additive performance metadata and do not alter the model
+//    contract defined in the build brief.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  CLIENT
+  ADMIN
+  TRADING_MANAGER
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  ADDITIONAL_INFO_REQUIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  WAITING
+  CONFIRMED
+  SENDING
+  FINISHED
+  FAILED
+  REFUNDED
+}
+
+enum InvestmentStatus {
+  PENDING
+  ACTIVE
+  PAUSED
+  MATURED
+  CANCELLED
+  CLOSED
+}
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String
+  fullName        String
+  phone           String?
+  country         String
+  role            Role      @default(CLIENT)
+  kycStatus       KycStatus @default(NOT_SUBMITTED)
+  twoFactorSecret String?
+  is2FAEnabled    Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  kycProfile   KycProfile?
+  kycDocuments KycDocument[]
+  deposits    Deposit[]
+  withdrawals Withdrawal[]
+  investments Investment[]
+  positions   Position[]
+  auditLogs   AuditLog[]
+  consents    UserConsent[]
+
+  @@index([role])
+  @@index([kycStatus])
+}
+
+model KycProfile {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  legalName         String
+  dob               DateTime
+  address           String
+  idType            String // "PASSPORT" | "NATIONAL_ID" | "DRIVERS_LICENSE"
+  idNumber          String
+  rejectionReason   String?
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  status            KycStatus @default(PENDING)
+  createdAt         DateTime  @default(now())
+
+  /// The identity documents that belong to this submission. The bytes live in
+  /// KycDocument.ciphertext — there is no external object store.
+  documents         KycDocument[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// An identity document held INSIDE the platform.
+///
+/// There is no external bucket and no third-party verification API in this
+/// product: the bytes live in this row, encrypted at rest with AES-256-GCM
+/// (`document-cipher.ts`, key derived from CREDENTIAL_ENCRYPTION_KEY), and they
+/// leave the server only through an ADMIN-authenticated route that streams them
+/// to a reviewer and writes KYC_DOCUMENT_VIEWED. No pre-signed URL exists, so
+/// there is no bearer credential that can leak.
+///
+/// TRADE-OFF: Postgres is not an object store. Uploads are capped at 10 MB per
+/// document and there are at most two per client, which keeps the table small
+/// and makes the documents part of the same backup/migration story as the rest
+/// of the ledger. If volume ever outgrows that, move the bytes to a private
+/// volume or blob store and keep this row as the index — the encryption helper
+/// and the audited read path stay as they are.
+model KycDocument {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Set when the document is attached to a submission; NULL while the client
+  /// is still filling the form in.
+  profileId   String?
+  profile     KycProfile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  /// "idFront" | "idBack" — see KYC_DOCUMENT_KINDS.
+  kind        String
+  /// The client-declared MIME type, already checked against the allow-list.
+  contentType String
+  byteLength  Int
+  /// SHA-256 of the PLAINTEXT bytes: an integrity check that survives encryption
+  /// and lets a reviewer confirm the file is the one that was uploaded.
+  sha256      String
+  /// AES-256-GCM envelope: iv(12 bytes) || authTag(16 bytes) || ciphertext.
+  ciphertext  Bytes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// One row per slot per user: re-uploading replaces the document rather than
+  /// accumulating versions, and the reviewer always sees the latest file.
+  @@unique([userId, kind])
+  @@index([profileId])
+  @@index([userId])
+}
+
+model TradingPlan {
+  id              String  @id @default(uuid())
+  name            String // e.g., "Gold Momentum Strategy"
+  description     String
+  minInvestment   Decimal @db.Decimal(18, 2)
+  maxInvestment   Decimal @db.Decimal(18, 2)
+  durationDays    Int
+  targetReturnMin Decimal @db.Decimal(18, 2) // Target % (e.g. 5.0) — INDICATIVE, NON-GUARANTEED
+  targetReturnMax Decimal @db.Decimal(18, 2) // Target % (e.g. 12.0) — INDICATIVE, NON-GUARANTEED
+  riskLevel       String // "LOW" | "MEDIUM" | "HIGH"
+  performanceFee  Decimal @db.Decimal(18, 2) // e.g. 20.0 %
+  managementFee   Decimal @db.Decimal(18, 2) // e.g. 1.5 %
+  maxDrawdown     Decimal @db.Decimal(18, 2) // Risk stop limit e.g. 15.0 %
+  isActive        Boolean @default(true)
+
+  investments Investment[]
+  createdAt   DateTime     @default(now())
+
+  @@index([isActive])
+}
+
+model Investment {
+  id            String           @id @default(uuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId        String
+  plan          TradingPlan      @relation(fields: [planId], references: [id])
+  capitalUsd    Decimal          @db.Decimal(18, 2)
+  currentValUsd Decimal          @db.Decimal(18, 2)
+  realizedPnL   Decimal          @default(0.00) @db.Decimal(18, 2)
+  unrealizedPnL Decimal          @default(0.00) @db.Decimal(18, 2)
+  feesDeducted  Decimal          @default(0.00) @db.Decimal(18, 2)
+  status        InvestmentStatus @default(PENDING)
+  startDate     DateTime?
+  maturityDate  DateTime?
+  ///
+  /// Performance-fee high-water mark, persisted.
+  /// It used to live only in Redis, so a flush or an eviction silently reset the
+  /// watermark to the starting capital and the platform re-charged performance on
+  /// profit it had already taken a fee on. The DB copy is the one that counts.
+  peakEquityUsd Decimal?         @db.Decimal(18, 2)
+  ///
+  /// When management fees were last accrued for this investment. The fee engine
+  /// needs elapsed days, and deriving them from `startDate` every run would
+  /// re-charge the whole period on a retry.
+  lastFeeAt     DateTime?
+  /// Set when the investment reaches a terminal state (MATURED, CLOSED or
+  /// CANCELLED). Before this existed an investment could never leave
+  /// ACTIVE/PAUSED, so the client's principal was locked forever.
+  closedAt      DateTime?
+  trades        TradeRecord[]
+  createdAt     DateTime         @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@index([planId])
+  /// The maturity sweep queries `status IN (ACTIVE, PAUSED) AND maturityDate <= now`.
+  @@index([maturityDate])
+}
+
+model Deposit {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountUsd      Decimal       @db.Decimal(18, 2)
+  cryptoCurrency String        @db.VarChar(32)
+  paymentId      String        @unique // NOWPayments payment_id
+  depositAddress String
+  payAmount      Decimal       @db.Decimal(18, 8)
+  status         PaymentStatus @default(PENDING)
+  ipnPayload     Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Withdrawal {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// What the client asked for, in USD. The platform's ledger unit.
+  amountUsd      Decimal       @db.Decimal(18, 2)
+  cryptoCurrency String        @db.VarChar(32)
+  payoutAddress  String
+  feeUsd         Decimal       @default(0.00) @db.Decimal(18, 2)
+  status         PaymentStatus @default(PENDING)
+  /// The admin who approved. With `secondApprovedBy` this is the two-person trail.
+  approvedBy     String?
+  ///
+  /// The SECOND, distinct admin required for a payout to leave the treasury.
+  /// One compromised admin session must not be able to move client money.
+  secondApprovedBy String?
+  txHash         String?
+
+  // ── payout reconciliation ───────────────────────────────────────────────
+  /// The amount actually sent, in COIN UNITS. `amountUsd` is USD and the provider
+  /// pays in `cryptoCurrency`; sending amountUsd as the coin amount would order
+  /// 100 BTC for a $100 withdrawal. Derived from the provider's estimate and
+  /// stored so the broadcast figure is a recorded fact, not a recomputation.
+  payAmount      Decimal?      @db.Decimal(18, 8)
+  /// The provider's payout id. Without it a payout cannot be looked up again, so
+  /// a later IPN or a failed broadcast could never be reconciled.
+  providerPayoutId String?
+  /// The provider's own status string, verbatim. Never overwritten by the
+  /// platform's own state machine — it is what the counterparty reported.
+  providerStatus String?
+  /// The payout IPN, retained exactly as received (the deposit side already does
+  /// this). An unrecognised payload is evidence, not something to discard.
+  ipnPayload     Json?
+  approvedAt     DateTime?
+  /// Set when the provider confirms settlement, NOT when it accepts the request.
+  settledAt      DateTime?
+  createdAt      DateTime      @default(now())
+  /// Nullable on purpose: this column is added to a table that already has rows,
+  /// and a NOT NULL column with no default cannot be added to a non-empty table.
+  updatedAt      DateTime?     @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([providerPayoutId])
+  /// Per-day withdrawal caps sum over a window; `createdAt` is the only anchor
+  /// that exists until this column and the settlement trail land.
+  @@index([createdAt])
+}
+
+model BrokerConnection {
+  id             String   @id @default(uuid())
+  /// Deriv TRADING ACCOUNT id (e.g. "DOT94640065" / "ROT92685247") — NOT the
+  /// Deriv user number, and not a MetaApi account id (the MetaApi bridge was
+  /// removed; the trade token is keyed by this value in Redis).
+  derivAccountId String   @unique
+  brokerName     String // e.g. "Deriv"
+  environment      String // "LIVE" or "DEMO"
+  maskedAccount    String // "***-9012"
+  /// Broker-reported snapshot. NULL means the broker did not report the figure
+  /// (Deriv reports no free margin, and nothing at all before a token is
+  /// authorised) — never 0, which would read as a real, empty balance.
+  balance          Decimal? @db.Decimal(18, 2)
+  equity           Decimal? @db.Decimal(18, 2)
+  freeMargin       Decimal? @db.Decimal(18, 2)
+  status           String // "CONNECTED" | "DISCONNECTED" | "ERROR"
+  updatedAt        DateTime @updatedAt
+
+  trades TradeRecord[]
+
+  @@index([status])
+}
+
+model TradeRecord {
+  id                String           @id @default(uuid())
+  investmentId      String
+  investment        Investment       @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+  brokerId          String
+  broker            BrokerConnection @relation(fields: [brokerId], references: [id])
+  /// Deriv contract id for the position, when the broker reports one.
+  derivContractId   String?
+  instrument        String // e.g. "XAUUSD"
+  direction         String // "BUY" | "SELL"
+  /// Lots for a lot-denominated broker; for a STAKE-denominated broker (Deriv
+  /// multipliers) this is the STAKE — the money at risk and the maximum loss.
+  volume            Decimal          @db.Decimal(18, 5)
+  /// Broker notional exposure in USD, when the broker defines one.
+  ///
+  /// For a multiplier contract the exposure is stake × multiplier, and
+  /// `volume` (the stake) × entryPrice is NOT it — leaving this NULL makes the
+  /// open-exposure metric fall back to volume × price, which is correct for lots
+  /// and would be wrong by a factor of the price for a stake.
+  notional          Decimal?         @db.Decimal(18, 2)
+  entryPrice        Decimal          @db.Decimal(18, 5)
+  exitPrice         Decimal?         @db.Decimal(18, 5)
+  stopLoss          Decimal?         @db.Decimal(18, 5)
+  takeProfit        Decimal?         @db.Decimal(18, 5)
+  grossPnL          Decimal          @default(0.00) @db.Decimal(18, 2)
+  commission        Decimal          @default(0.00) @db.Decimal(18, 2)
+  swap              Decimal          @default(0.00) @db.Decimal(18, 2)
+  netPnL            Decimal          @default(0.00) @db.Decimal(18, 2)
+  status            String // "OPEN" | "CLOSED" | "CANCELLED"
+  openedAt          DateTime         @default(now())
+  closedAt          DateTime?
+
+  @@unique([brokerId, derivContractId])
+  @@index([investmentId])
+  @@index([status])
+  @@index([instrument])
+  @@index([openedAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String // e.g. "KYC_APPROVED", "WITHDRAWAL_REQUESTED", "BROKER_ORDER_FILLED"
+  details   Json
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+/// Operator-editable platform configuration (admin console → Settings).
+///
+/// A stored row OVERRIDES the service environment variable of the same meaning;
+/// the env var stays the fallback/default, so a deployment is never dead just
+/// because a console row is absent, and a key can be rotated from the console
+/// without a redeploy.
+///
+/// Secret values (`isSecret`) are persisted as AES-256-GCM envelopes produced by
+/// src/lib/crypto/credential-cipher.ts — never as plaintext. Non-secret values
+/// are stored verbatim so the console can display them.
+model PlatformSetting {
+  key       String   @id
+  value     String
+  isSecret  Boolean  @default(false)
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+/// Which legal instrument a consent record refers to.
+///
+/// A closed enum on purpose: a free-text document name would let a client
+/// "accept" something the platform never published, and the whole point of this
+/// table is to prove WHICH document, at WHICH version, was accepted.
+enum LegalDocumentType {
+  TERMS_OF_SERVICE
+  PRIVACY_POLICY
+  RISK_DISCLOSURE
+}
+
+/// A published legal instrument, versioned.
+///
+/// Immutable once published: a new revision is a NEW row with a new `version`,
+/// never an edit, so a consent recorded against v1 can always be read back as
+/// exactly what the client saw. `contentHash` is the SHA-256 of the exact body
+/// text served at `url` for that version, which is what makes the record
+/// verifiable rather than merely declarative.
+model LegalDocument {
+  id            String            @id @default(uuid())
+  type          LegalDocumentType
+  /// Monotonic label for the revision, e.g. "2026-09-26".
+  version       String
+  title         String
+  /// Canonical public path, e.g. "/terms".
+  url           String
+  /// SHA-256 (hex) of the exact text a client accepts at this version.
+  contentHash   String
+  effectiveFrom DateTime
+  createdAt     DateTime          @default(now())
+  consents      UserConsent[]
+
+  @@unique([type, version])
+  @@index([type, effectiveFrom])
+}
+
+/// One client's acceptance of one legal document version.
+///
+/// This is the evidence a regulator asks for: WHO accepted, WHAT exactly
+/// (document + version + content hash), WHEN, and from WHERE. `ipAddress` and
+/// `userAgent` are retained for exactly that reason and are never surfaced to
+/// other clients. A row is written only on an explicit, affirmative acceptance —
+/// there is no "implied consent" path.
+model UserConsent {
+  id              String            @id @default(uuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentId      String
+  document        LegalDocument     @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  /// Denormalised so a consent can be audited without joining, and so a future
+  /// document row cannot be re-pointed under an existing acceptance.
+  documentType    LegalDocumentType
+  documentVersion String
+  contentHash     String
+  acceptedAt      DateTime          @default(now())
+  ipAddress       String?
+  userAgent       String?
+  /// "REGISTRATION" | "RECONSENT" | "ADMIN_RECORDED".
+  method          String
+
+  /// One acceptance per user per document version. Re-accepting the SAME version
+  /// is a no-op; accepting a NEW version adds a row, so the full consent history
+  /// survives.
+  @@unique([userId, documentId])
+  @@index([userId, acceptedAt])
+  @@index([documentType, documentVersion])
+}
+
+/// Durable single-use claim (replay / idempotency guard).
+///
+/// WHY THIS IS IN POSTGRES AND NOT REDIS
+///   Redis is the fast path, but it is not durable: it is evictable, flushable
+///   and can be down. Every money-critical claim used to live ONLY in Redis, and
+///   two real failure modes followed:
+///     * Redis *down* → the claim helper failed closed, so a signed deposit
+///       callback was acknowledged as a duplicate and the credit was silently
+///       dropped until someone polled for it;
+///     * Redis *flushed* → the claim vanished, so a re-delivered trade signal
+///       could place a second live broker order.
+///   Postgres is the authority for "has this already happened"; Redis is only an
+///   accelerator in front of it. Rows are TTL'd by `expiresAt` and swept lazily
+///   on the next claim for the same key.
+model IdempotencyClaim {
+  key       String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+/// Which way an internally-executed position is taken.
+enum PositionSide {
+  BUY
+  SELL
+}
+
+/// Lifecycle of an internally-executed position.
+///
+/// `CANCELLED` exists so a position that never became real (a rejected open, an
+/// operator void) is recorded rather than deleted — the audit trail must not
+/// have a gap.
+enum PositionStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+/// An INTERNALLY-EXECUTED position (`EXECUTION_MODE=internal`).
+///
+/// THE ECONOMICS (read this before changing any number)
+/// ---------------------------------------------------
+/// The platform is the counterparty: there is no broker order behind this row.
+/// `stake` is the money at risk and — exactly like the managed-trading doctrine
+/// settled in HANDOVER.md — the MAXIMUM the client can lose. `multiplier` turns
+/// the stake into an exposure:
+///
+///   notional = stake × multiplier
+///   pnl      = notional × ((price − entry) / entry) × (BUY ? 1 : −1)
+///   pnl      is CLAMPED at −stake  (a client can never owe more than the stake)
+///
+/// while the position is OPEN `pnl` is the live mark-to-market; on close it is
+/// frozen. The ledger reads it as follows, so NOTHING here is a second source of
+/// money truth:
+///
+///   OPEN   → stake joins the ledger's DEPLOYED capital, pnl joins UNREALIZED P/L
+///   CLOSED → pnl joins REALIZED P/L, and the stake returns to idle cash
+///
+/// Both directions are equity-neutral on open and on close; only the pnl moves
+/// equity. See `src/server/accounting/ledger.ts` (the single formula).
+model Position {
+  id           String         @id @default(uuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Platform symbol, e.g. `frxXAUUSD` or `cryBTCUSD`.
+  symbol       String
+  side         PositionSide
+  /// Money at risk — the maximum loss on this position, in USD.
+  stake        Decimal        @db.Decimal(18, 2)
+  /// Exposure multiple applied to the stake. 1 = spot-like.
+  multiplier   Decimal        @default(1.00) @db.Decimal(18, 2)
+  entryPrice   Decimal        @db.Decimal(18, 5)
+  /// Last mark from the price feed (or the entry price before the first tick).
+  currentPrice Decimal        @db.Decimal(18, 5)
+  stopLoss     Decimal?       @db.Decimal(18, 5)
+  takeProfit   Decimal?       @db.Decimal(18, 5)
+  /// Unrealized while OPEN (live mark), frozen once CLOSED.
+  pnl          Decimal        @default(0.00) @db.Decimal(18, 2)
+  status       PositionStatus @default(OPEN)
+  /// Which engine booked this. "INTERNAL" today; a broker tag leaves room for a
+  /// bridge later without changing the ledger contract.
+  executionMode String        @default("INTERNAL")
+  closePrice   Decimal?       @db.Decimal(18, 5)
+  closedAt     DateTime?
+  openedAt     DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  /// The wallet/ledger reads OPEN rows per user and the tick engine reads them
+  /// per symbol, so both access shapes are indexed.
+  @@index([userId, status])
+  @@index([symbol, status])
+  @@index([status])
+}

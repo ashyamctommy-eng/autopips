@@ -1,0 +1,1 @@
+- [Migration tool output](migration-tool-output.md) — normalize shell-output line endings before generating import paths.
