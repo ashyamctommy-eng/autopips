@@ -2,7 +2,8 @@ modules = ["nodejs-24", "python-base-3.13", "postgresql-16"]
 
 [deployment]
 router = "application"
-deploymentTarget = "autoscale"
+deploymentTarget = "gce"
+ignorePorts = false
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -50,3 +51,6 @@ REDIS_URL = "redis://127.0.0.1:6379"
 EXECUTION_MODE = "internal"
 DERIV_APP_ID = "1089"
 MARKET_DATA_PROVIDER = "twelve"
+
+[userenv.production]
+ADMIN_SETUP_EMAIL = "ceo@autopips.pro"

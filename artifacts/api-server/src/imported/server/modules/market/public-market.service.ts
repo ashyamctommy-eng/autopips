@@ -45,6 +45,7 @@ import type { Candle, InstrumentInfo, Quote } from '@/server/modules/broker/brok
 
 let client: DerivClient | null = null;
 let connecting: Promise<DerivClient> | null = null;
+let connectionGeneration = 0;
 
 /** Symbols currently streamed from the public feed → their listener count. */
 const tickListeners = new Map<string, number>();
@@ -60,10 +61,15 @@ const subscriptions = new Map<string, string>();
  * is empty rather than guessing.
  */
 const lastQuotes = new Map<string, Quote>();
+const quoteListeners = new Map<string, Set<(quote: Quote) => void>>();
+let intentionalClose = false;
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingTickSubscriptions = new Map<string, Promise<void>>();
 
 /** The last quote seen for a symbol in this process, or null. */
 export function lastPublicQuote(symbol: string): Quote | null {
-  return lastQuotes.get(symbol) ?? null;
+  const quote = lastQuotes.get(symbol);
+  return quote && Date.now() / 1000 - quote.time <= 30 ? quote : null;
 }
 
 /** Deriv's own ceiling for counting candles in one history call. */
@@ -88,10 +94,22 @@ async function connection(): Promise<DerivClient> {
     if (!env.DERIV_APP_ID.trim()) {
       throw ApiError.serviceUnavailable('Deriv market data is not configured. Live prices are unavailable.');
     }
+    const generation = ++connectionGeneration;
     const next = new DerivClient({
       url: publicUrl(),
       appId: env.DERIV_APP_ID,
       connectTimeoutMs: env.BROKER_CONNECT_TIMEOUT * 1_000,
+      onClose: () => {
+        // Ignore close events from replaced sockets. They must not clear a newer
+        // connection's subscriptions or start a second recovery loop.
+        if (generation !== connectionGeneration) return;
+        client = null;
+        tickListeners.clear();
+        subscriptions.clear();
+        lastQuotes.clear();
+        if (intentionalClose) return;
+        for (const symbol of quoteListeners.keys()) schedulePublicTickReconnect(symbol, 2000);
+      },
     });
     await next.connect();
     client = next;
@@ -112,10 +130,79 @@ async function connection(): Promise<DerivClient> {
 
 /** Drop the shared socket (shutdown, or after a fatal protocol error). */
 export function closePublicMarketConnection(): void {
+  intentionalClose = true;
+  connectionGeneration += 1;
+  for (const timer of reconnectTimers.values()) clearTimeout(timer);
+  reconnectTimers.clear();
   client?.close();
   client = null;
   tickListeners.clear();
   lastQuotes.clear();
+  quoteListeners.clear();
+}
+
+/**
+ * Re-subscribe without changing listener demand. A transient transport error
+ * must not erase the callbacks still owned by charts, tickets, and exit watches.
+ */
+async function ensurePublicTickSubscription(symbol: string): Promise<void> {
+  if (tickListeners.has(symbol) || (quoteListeners.get(symbol)?.size ?? 0) === 0) return;
+  const pending = pendingTickSubscriptions.get(symbol);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const socket = await connection();
+    if (tickListeners.has(symbol)) return;
+    const listeners = quoteListeners.get(symbol);
+    if (!listeners?.size) return;
+
+    const result: DerivSubscribeResult = await socket.subscribe(
+      { ticks: symbol, subscribe: 1 },
+      `public ticks(${symbol})`,
+      (message) => {
+        const quote = toQuote(symbol, message);
+        if (!quote || Date.now() / 1000 - quote.time > 30) return;
+        lastQuotes.set(symbol, quote);
+        for (const listener of quoteListeners.get(symbol) ?? []) listener(quote);
+      },
+    );
+
+    // All owners may have released while the upstream request was in flight.
+    if ((quoteListeners.get(symbol)?.size ?? 0) === 0) {
+      if (result.subscriptionId) await socket.forget(result.subscriptionId);
+      return;
+    }
+    tickListeners.set(symbol, quoteListeners.get(symbol)?.size ?? 0);
+    if (result.subscriptionId) subscriptions.set(symbol, result.subscriptionId);
+    const first = toQuote(symbol, result.first);
+    if (first && Date.now() / 1000 - first.time <= 30) {
+      lastQuotes.set(symbol, first);
+      for (const listener of quoteListeners.get(symbol) ?? []) listener(first);
+    }
+  })();
+  pendingTickSubscriptions.set(symbol, work);
+  try {
+    await work;
+  } finally {
+    if (pendingTickSubscriptions.get(symbol) === work) pendingTickSubscriptions.delete(symbol);
+  }
+}
+
+function schedulePublicTickReconnect(symbol: string, delayMs: number): void {
+  if (intentionalClose || (quoteListeners.get(symbol)?.size ?? 0) === 0) return;
+  if (reconnectTimers.has(symbol)) return;
+  const timer = setTimeout(() => {
+    reconnectTimers.delete(symbol);
+    if (intentionalClose || (quoteListeners.get(symbol)?.size ?? 0) === 0) return;
+    void ensurePublicTickSubscription(symbol).catch((error: unknown) => {
+      console.warn(
+        `[public-market] re-subscribe failed for ${symbol}; listener demand retained: ${error instanceof Error ? error.message : error}`,
+      );
+      schedulePublicTickReconnect(symbol, 5000);
+    });
+  }, delayMs);
+  timer.unref?.();
+  reconnectTimers.set(symbol, timer);
 }
 
 /**
@@ -140,7 +227,7 @@ export function closePublicMarketConnection(): void {
  *   3. the smallest candle's close, when the feed answered neither.
  */
 export async function getLatestPrice(symbol: string): Promise<number | null> {
-  const observed = lastQuotes.get(symbol);
+  const observed = lastPublicQuote(symbol);
   if (observed) {
     const mark = markPriceFromQuote(observed);
     if (mark !== null && mark > 0) return mark;
@@ -149,10 +236,8 @@ export async function getLatestPrice(symbol: string): Promise<number | null> {
   const live = await readOneQuote(symbol);
   if (live !== null && live > 0) return live;
 
-  const candles = await derivCandles(symbol, '1m', 2);
-  const last = candles[candles.length - 1];
-  if (!last) return null;
-  return Number.isFinite(last.close) && last.close > 0 ? last.close : null;
+  // Closed-session history is not an executable live price.
+  return null;
 }
 
 /** How long a live price request waits for the feed before falling back. */
@@ -293,35 +378,24 @@ export async function subscribePublicTicks(
   symbol: string,
   onQuote: (quote: Quote) => void,
 ): Promise<{ unsubscribe: () => Promise<void> }> {
-  const socket = await connection();
-  const existing = tickListeners.get(symbol) ?? 0;
+  intentionalClose = false;
+  const alreadyStreaming = tickListeners.has(symbol);
+  await connection();
+  const listeners = quoteListeners.get(symbol) ?? new Set<(quote: Quote) => void>();
+  listeners.add(onQuote);
+  quoteListeners.set(symbol, listeners);
 
-  // Remember every quote as well as forwarding it: `getLatestPrice` prices a fill
-  // from the last price this process actually SAW for the symbol, so what the
-  // client is charged is a price the platform published.
-  const record = (quote: Quote): void => {
-    lastQuotes.set(symbol, quote);
-    onQuote(quote);
-  };
-
-  if (existing === 0) {
-    const result: DerivSubscribeResult = await socket.subscribe(
-      { ticks: symbol, subscribe: 1 },
-      `public ticks(${symbol})`,
-      (message) => {
-        const quote = toQuote(symbol, message);
-        if (quote) record(quote);
-      },
-    );
-    tickListeners.set(symbol, 1);
-    if (result.subscriptionId) subscriptions.set(symbol, result.subscriptionId);
-
-    // Deriv answers a subscription with the current price: publish it so a chart
-    // has a value immediately instead of waiting for the next terminal push.
-    const first = toQuote(symbol, result.first);
-    if (first) record(first);
-  } else {
-    tickListeners.set(symbol, existing + 1);
+  try {
+    await ensurePublicTickSubscription(symbol);
+  } catch (error) {
+    if (tickListeners.has(symbol)) throw error;
+    listeners.delete(onQuote);
+    if (listeners.size === 0) quoteListeners.delete(symbol);
+    throw error;
+  }
+  if (alreadyStreaming) {
+    const last = lastPublicQuote(symbol);
+    if (last) onQuote(last);
   }
 
   let released = false;
@@ -329,16 +403,21 @@ export async function subscribePublicTicks(
     unsubscribe: async () => {
       if (released) return;
       released = true;
-      const remaining = (tickListeners.get(symbol) ?? 1) - 1;
+      quoteListeners.get(symbol)?.delete(onQuote);
+      const remaining = quoteListeners.get(symbol)?.size ?? 0;
       if (remaining > 0) {
         tickListeners.set(symbol, remaining);
         return;
       }
+      quoteListeners.delete(symbol);
+      const timer = reconnectTimers.get(symbol);
+      if (timer) clearTimeout(timer);
+      reconnectTimers.delete(symbol);
       tickListeners.delete(symbol);
       lastQuotes.delete(symbol);
       const subscriptionId = subscriptions.get(symbol);
       subscriptions.delete(symbol);
-      if (subscriptionId) await socket.forget(subscriptionId);
+      if (subscriptionId && client?.isConnected()) await client.forget(subscriptionId);
     },
   };
 }

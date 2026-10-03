@@ -9,7 +9,7 @@ export interface SessionUser {
   id: string;
   email: string;
   fullName: string;
-  role: 'CLIENT' | 'ADMIN' | 'TRADING_MANAGER';
+  role: 'CLIENT' | 'ADMIN' | 'SUPER_ADMIN' | 'TRADING_MANAGER';
   kycStatus: KycStatusValue;
   is2FAEnabled: boolean;
   country: string;

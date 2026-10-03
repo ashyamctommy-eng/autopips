@@ -1,0 +1,42 @@
+@Agent: Please implement the Super Admin Wallet Management feature and resolve the market data tradability and real-time streaming issues across the platform.
+
+────────────────────────────────────────────────────────────────────────────────────────
+1. SUPER ADMIN WALLET BALANCE ALLOCATION (UI & API)
+────────────────────────────────────────────────────────────────────────────────────────
+• Backend API (`POST /api/admin/wallets/adjust-balance`):
+  - Guard route strictly with Super Admin authentication middleware (`role === 'SUPER_ADMIN'`).
+  - Request payload: `{ userId: string, amount: number, type: 'credit' | 'debit', reason: string }`.
+  - Perform atomic database transaction: update target `wallets.balance` and log an entry in `transactions` with type `ADMIN_ADJUSTMENT`, status `completed`, and description provided in `reason`.
+
+• Frontend UI (Super Admin Console - Users / Wallets View):
+  - In the Super Admin user management table, add a "Manage Balance" action button for each user row.
+  - Clicking opens an "Adjust User Wallet Balance" modal with:
+    • Current balance indicator.
+    • Toggle for Action (`Credit (+)` / `Debit (-)`).
+    • Numeric input for Amount ($).
+    • Text input for Reason / Reference note.
+  - Submitting updates the backend, displays a success toast notification, and refreshes the user's wallet table in real time.
+
+────────────────────────────────────────────────────────────────────────────────────────
+2. FIX "NOT TRADABLE" BADGES & SYMBOL PROVIDER ROUTING
+────────────────────────────────────────────────────────────────────────────────────────
+• Dual-Provider Routing Fix:
+  - Synthetic Indices (Volatility, Boom, Crash, Jump, `R_10`, `R_100`): Route market data streams through Deriv WebSocket (`DERIV_APP_ID=1089`).
+  - FX / Metals / Crypto / Stocks (`EUR/USD`, `XAU/USD`, `BTC/USD`): Route market data candles through Twelve Data (`TWELVE_DATA_API_KEY`). Ensure symbol string formatting uses slashes (e.g., `EUR/USD`).
+
+• Instrument Tradability Status:
+  - Update seed scripts and `Instrument` table rows so all active standard instruments have `is_tradable = true`.
+  - Remove fallback "Not Tradable" blockades on trade tickets when market tick subscriptions are active.
+
+────────────────────────────────────────────────────────────────────────────────────────
+3. REAL-TIME WEBSOCKET PRICE STREAMING & WORKER
+────────────────────────────────────────────────────────────────────────────────────────
+• Ensure background tick engine subscribes to active market pairs and publishes ticks to Redis PubSub (`redis://127.0.0.1:6379`).
+• Verify frontend WebSocket gateway broadcasts live Bid/Ask prices to the trading chart (KLineChart) and trade ticket components without lag.
+
+────────────────────────────────────────────────────────────────────────────────────────
+4. VERIFICATION
+────────────────────────────────────────────────────────────────────────────────────────
+• Verify Super Admin balance allocation updates user wallets cleanly without direct SQL intervention.
+• Confirm that trading pairs display live ticking prices and green "Tradable" status.
+• Run `npm run test` and `npm run build` to ensure zero compilation or unit test regressions.

@@ -64,6 +64,8 @@ export interface AdminRequestOptions {
   /** Serialised as JSON. Omitted entirely for bodyless requests. */
   body?: unknown;
   signal?: AbortSignal;
+  /** Extra request headers (e.g. `Idempotency-Key`). Replayed verbatim on a session-refresh retry. */
+  headers?: Record<string, string>;
 }
 
 export async function adminRequest<T>(
@@ -78,6 +80,7 @@ export async function adminRequest<T>(
       headers: {
         accept: 'application/json',
         ...(hasBody ? { 'content-type': 'application/json' } : {}),
+        ...(options.headers ?? {}),
       },
       body: hasBody ? JSON.stringify(options.body) : undefined,
       cache: 'no-store',

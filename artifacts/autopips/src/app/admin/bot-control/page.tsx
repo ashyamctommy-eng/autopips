@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 import { Power } from 'lucide-react';
 
@@ -35,7 +36,7 @@ export const metadata: Metadata = {
 export default async function AdminBotControlPage() {
   const user = await requireStaffPage();
   const [view, activity] = await Promise.all([getBotControlView(), getAdminActivity(80)]);
-  const isAdmin = user.role === 'ADMIN';
+  const isAdmin = isAdminRole(user.role);
   const state = view.killSwitch;
 
   return (

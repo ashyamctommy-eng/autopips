@@ -75,8 +75,9 @@ export async function requireRole(...roles: Role[]): Promise<ActiveSession> {
   return session;
 }
 
-export const requireAdmin = () => requireRole('ADMIN');
-export const requireAdminOrManager = () => requireRole('ADMIN', 'TRADING_MANAGER');
+export const requireSuperAdmin = () => requireRole('SUPER_ADMIN');
+export const requireAdmin = () => requireRole('SUPER_ADMIN', 'ADMIN');
+export const requireAdminOrManager = () => requireRole('SUPER_ADMIN', 'ADMIN', 'TRADING_MANAGER');
 
 export async function getSessionUser(): Promise<SessionUser | null> {
   const session = await getSession();
@@ -108,7 +109,7 @@ export async function requireSessionUser(): Promise<SessionUser> {
  */
 export async function requireVerifiedClient(): Promise<SessionUser> {
   const user = await requireSessionUser();
-  if (user.role === 'ADMIN' || user.role === 'TRADING_MANAGER') return user;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'TRADING_MANAGER') return user;
   if (user.kycStatus !== 'APPROVED') throw ApiError.kycRequired();
   return user;
 }

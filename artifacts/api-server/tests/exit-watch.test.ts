@@ -72,7 +72,7 @@ describe('planExitSubscriptions', () => {
 
 describe('the watch reads the public feed, not the broker stream', () => {
   const source = fs.readFileSync(
-    path.join(REPO_ROOT, 'src/server/modules/market/exit-watch.runtime.ts'),
+    path.join(REPO_ROOT, 'src/imported/server/modules/market/exit-watch.runtime.ts'),
     'utf8',
   );
 

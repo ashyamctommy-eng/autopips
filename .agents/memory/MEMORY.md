@@ -2,3 +2,5 @@
 - [Worker restart leases](worker-restart-leases.md) — managed restarts may leave Redis leases until expiry; wait for recovery, never clear locks blindly.
 - [TSX inline probes](tsx-inline-probes.md) — explicit --tsconfig with inline evaluation silently skipped probes; require visible evidence of execution.
 - [npm local overrides](npm-local-overrides.md) — audit success can hide broken directory links; use a direct local dependency and regenerate stale locks.
+- [Manual wallet allocations](manual-wallet-allocations.md) — extend existing ledger accounting, never introduce an independent spendable balance or fake provider payments.
+- [Mobile auth scope](mobile-auth-scope.md) — preserve existing password/2FA identity; keep mobile bearer transport isolated from money-moving browser routes.

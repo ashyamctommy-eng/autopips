@@ -62,7 +62,7 @@ import { planInputSchema, planUpdateSchema, type PlanInput, type PlanUpdateInput
 /* -------------------------------------------------------------------------- */
 
 /** Prisma `Role` members, as a runtime-checkable tuple for zod. */
-export const ADMIN_USER_ROLES = ['CLIENT', 'ADMIN', 'TRADING_MANAGER'] as const satisfies readonly Role[];
+export const ADMIN_USER_ROLES = ['CLIENT', 'ADMIN', 'SUPER_ADMIN', 'TRADING_MANAGER'] as const satisfies readonly Role[];
 
 /** Prisma `KycStatus` members — mirrors prisma/schema.prisma. */
 export const KYC_STATUS_VALUES = [
@@ -235,6 +235,7 @@ async function aggregateUserLedgers(
     depositTotals,
     openPositionTotals,
     closedPositionTotals,
+    adjustmentTotals,
   ] = await Promise.all([
       // unrealized P/L + fees live on every non-cancelled investment
       prisma.investment.groupBy({
@@ -274,6 +275,9 @@ async function aggregateUserLedgers(
         where: { userId: { in: userIds }, status: { in: [...CLOSED_POSITION_STATUSES] } },
         _sum: { pnl: true },
       }),
+      prisma.walletAdjustment.groupBy({
+        by: ['userId'], where: { userId: { in: userIds } }, _sum: { amount: true },
+      }),
     ]);
 
   const ownerByInvestment = new Map(investmentRows.map((row) => [row.id, row.userId]));
@@ -304,6 +308,7 @@ async function aggregateUserLedgers(
   const depositsByUser = new Map(
     depositTotals.map((row) => [row.userId, D(row._sum.amountUsd)]),
   );
+  const adjustmentsByUser = new Map(adjustmentTotals.map(row => [row.userId, D(row._sum.amount)]));
 
   for (const userId of userIds) {
     const portfolio = portfolioByUser.get(userId);
@@ -316,6 +321,7 @@ async function aggregateUserLedgers(
 
     // Same single formula implementation as the client-facing ledger.
     const { equity } = buildEquityFromAggregates({
+      adminAdjustments: adjustmentsByUser.get(userId) ?? 0,
       creditedDeposits: depositsByUser.get(userId) ?? 0,
       paidWithdrawals: withdrawalsByUser.get(userId) ?? 0,
       deployedCapital: deployed,
@@ -435,12 +441,14 @@ export interface UserMutationResult {
  */
 export async function updateUserRole(input: UpdateUserRoleInput): Promise<UserMutationResult> {
   const { adminUserId, targetUserId, role, ip } = input;
+  if (role === 'SUPER_ADMIN') throw ApiError.forbidden('Super Admin cannot be granted by the staff role editor.');
 
   const target = await prisma.user.findUnique({
     where: { id: targetUserId },
     select: { id: true, email: true, role: true },
   });
   if (!target) throw ApiError.notFound('User not found.');
+  if (target.role === 'SUPER_ADMIN') throw ApiError.forbidden('Super Admin roles cannot be changed from the staff role editor.');
 
   if (target.role === role) {
     throw ApiError.conflict(`This user already has the ${role} role; nothing to change.`);
@@ -1152,6 +1160,10 @@ export async function getBotControlView(): Promise<{
   const killSwitch = await getBotControlState();
 
   try {
+    if ((process.env.EXECUTION_MODE ?? 'internal') === 'internal') {
+      const { listPublicSymbols } = await import('../market/public-market.service');
+      return { killSwitch, symbols: await listPublicSymbols(), symbolsError: null };
+    }
     const connections = await listBrokerConnections();
     const connection = connections.find((row) => row.status === 'CONNECTED') ?? connections[0];
     if (!connection) {

@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 
 import { PageHeader } from '@/components/shared/page-header';
@@ -45,7 +46,7 @@ export default async function AdminKycPage() {
         <KycReviewer
           initialRows={initialRows}
           initialStatus={DEFAULT_STATUS}
-          canDecide={user.role === 'ADMIN'}
+          canDecide={isAdminRole(user.role)}
         />
       </div>
     </Section>

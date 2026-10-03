@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 
 import { WithdrawalDecisions } from '@/components/admin/withdrawal-decisions';
@@ -36,7 +37,7 @@ export default async function AdminWithdrawalsPage() {
       />
 
       <div className="mt-6">
-        <WithdrawalDecisions initialItems={rows} canDecide={user.role === 'ADMIN'} />
+        <WithdrawalDecisions initialItems={rows} canDecide={isAdminRole(user.role)} />
       </div>
     </Section>
   );

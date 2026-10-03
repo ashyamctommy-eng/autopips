@@ -94,7 +94,7 @@ const WITHDRAWAL_STATUS_REJECTED: PaymentStatusValue = 'FAILED';
 // ─── small guards ───────────────────────────────────────────────────────────
 
 function isStaff(user: Pick<SessionUser, 'role'>): boolean {
-  return user.role === 'ADMIN' || user.role === 'TRADING_MANAGER';
+  return user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'TRADING_MANAGER';
 }
 
 /**

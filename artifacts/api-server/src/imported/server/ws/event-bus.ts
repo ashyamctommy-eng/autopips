@@ -285,12 +285,12 @@ export async function publishTradeEvent(
 }
 
 /** Account-level P/L snapshot for one user (`account:equity`). */
-export async function publishEquity(userId: string, payload: unknown): Promise<PublishOutcome> {
+export async function publishEquity(userId: string, payload: unknown, includeAdmin = false): Promise<PublishOutcome> {
   if (!userId) {
     warnThrottled('equity-without-user', 'userId missing');
     return 'none';
   }
-  return publishEnvelope(envelope(WS_EVENTS.equity, payload, [userRoom(userId)]));
+  return publishEnvelope(envelope(WS_EVENTS.equity, payload, includeAdmin ? [userRoom(userId), ADMIN_ROOM] : [userRoom(userId)]));
 }
 
 /** Broker connection state. Platform-wide, so it goes to the admin room. */

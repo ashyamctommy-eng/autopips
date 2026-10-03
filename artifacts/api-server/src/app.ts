@@ -5,6 +5,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import cookieParser from "cookie-parser";
 import migrationApi from "./migration-api";
+import mobileApi from "./mobile-api";
 
 const app: Express = express();
 
@@ -33,6 +34,7 @@ app.use(express.json({ limit: '10mb', verify(req, _res, buffer) { (req as any).r
 app.use(express.urlencoded({ extended: true, verify(req, _res, buffer) { (req as any).rawBody = buffer; } }));
 app.use(express.raw({ type: 'multipart/form-data', limit: '25mb', verify(req, _res, buffer) { (req as any).rawBody = buffer; } }));
 
+app.use(mobileApi);
 app.use(migrationApi);
 
 app.use("/api", router);

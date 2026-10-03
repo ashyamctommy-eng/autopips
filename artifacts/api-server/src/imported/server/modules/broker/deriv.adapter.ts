@@ -195,7 +195,8 @@ export function mapDerivActiveSymbols(payload: unknown): InstrumentInfo[] {
       pipSize,
       // Tradable = the venue is open AND the instrument is not suspended. The
       // previous `||` made a suspended instrument on an open venue look tradable.
-      isTradable: raw.exchange_is_open === 1 && raw.is_trading_suspended !== 1,
+      isTradable: (raw.exchange_is_open === 1 || raw.exchange_is_open === true) &&
+        raw.is_trading_suspended !== 1 && raw.is_trading_suspended !== true,
     });
   }
 

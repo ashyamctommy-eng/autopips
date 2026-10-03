@@ -19,7 +19,7 @@ export const GET = handler(async (request: Request, context: { params: { id: str
   const user = await requireSessionUser();
   const { id } = paramsSchema.parse(context.params);
 
-  const isStaff = user.role === 'ADMIN' || user.role === 'TRADING_MANAGER';
+  const isStaff = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'TRADING_MANAGER';
   const deposit = await reconcileDeposit(user.id, id, { allUsers: isStaff });
 
   return ok({ deposit });

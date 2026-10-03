@@ -60,7 +60,7 @@ describe('providerForSymbol — flag on', () => {
   });
 
   it('routes mapped FX, metals and crypto to Twelve Data', () => {
-    for (const symbol of ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxXAUUSD', 'cryBTCUSD', 'cryETHUSD']) {
+    for (const symbol of ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxXAUUSD', 'cryBTCUSD', 'cryETHUSD', 'EUR/USD', 'XAU/USD', 'BTC/USD', 'stockAAPL', 'AAPL']) {
       expect(providerForSymbol(symbol)).toBe('twelve');
     }
   });

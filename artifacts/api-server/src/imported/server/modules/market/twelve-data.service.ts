@@ -74,6 +74,9 @@ export const TWELVE_DATA_SYMBOLS: Readonly<Record<string, string>> = {
   cryETHUSD: 'ETH/USD',
   cryLTCUSD: 'LTC/USD',
   cryXRPUSD: 'XRP/USD',
+  stockAAPL: 'AAPL',
+  stockMSFT: 'MSFT',
+  stockNVDA: 'NVDA',
 };
 
 /**
@@ -134,7 +137,8 @@ export function curatedPlatformInstruments(): string[] {
 
 /** Twelve Data symbol for a platform symbol, or null when unmapped. */
 export function twelveDataSymbol(brokerSymbol: string): string | null {
-  return TWELVE_DATA_SYMBOLS[brokerSymbol] ?? null;
+  return TWELVE_DATA_SYMBOLS[brokerSymbol] ??
+    (Object.values(TWELVE_DATA_SYMBOLS).includes(brokerSymbol) ? brokerSymbol : null);
 }
 
 /** Platform timeframe → Twelve Data `interval`, or null when unsupported. */

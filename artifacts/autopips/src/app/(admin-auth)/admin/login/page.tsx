@@ -1,3 +1,4 @@
+import { isStaffRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 import { redirect } from '@/lib/next/navigation';
 
@@ -33,7 +34,7 @@ export interface AdminLoginPageProps {
  */
 export default async function AdminLoginPage({ searchParams }: AdminLoginPageProps) {
   const user = await getSessionUser();
-  if (user && (user.role === 'ADMIN' || user.role === 'TRADING_MANAGER')) {
+  if (user && (isStaffRole(user.role))) {
     redirect('/admin');
   }
 

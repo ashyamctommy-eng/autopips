@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
 import { UserDirectory } from '@/components/admin/user-directory';
 import { requireStaffPage } from '../_lib/admin-data';
+import { isAdminRole, isSuperAdmin } from '@/lib/roles';
 import { listUsers } from '@/lib/services/admin.service';
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +39,8 @@ export default async function AdminUsersPage() {
         <UserDirectory
           initialItems={items}
           initialNextCursor={nextCursor}
-          canChangeRole={user.role === 'ADMIN'}
+          canChangeRole={isAdminRole(user.role)}
+          canManageBalance={isSuperAdmin(user.role)}
           currentUserId={user.id}
         />
       </div>

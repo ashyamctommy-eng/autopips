@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from '@/lib/next/navigation';
-import { ChevronLeft, ChevronRight, RefreshCw, Search, ShieldCheck, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, Search, ShieldCheck, Users, Wallet } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +21,8 @@ import {
 import { StatusBadge } from '@/components/shared/status-badge';
 import { Usd } from '@/components/shared/money';
 import { UserRoleControl } from '@/components/admin/user-role-control';
+import { WalletAdjustDialog } from '@/components/admin/wallet-adjust-dialog';
+import { useTradingSocket } from '@/hooks/use-trading-socket';
 import { adminRequest, buildQuery, errorMessage } from '@/components/admin/api-client';
 import type { AdminUserRowView, StaffRole } from '@/components/admin/types';
 import { relativeTime } from '@/lib/utils';
@@ -35,6 +37,8 @@ export interface UserDirectoryProps {
   initialNextCursor: string | null;
   canChangeRole: boolean;
   currentUserId: string;
+  /** SUPER_ADMIN only: shows the per-row Manage Balance action. */
+  canManageBalance?: boolean;
 }
 
 interface UserPage {
@@ -45,6 +49,7 @@ interface UserPage {
 const ROLE_LABEL: Record<StaffRole, string> = {
   CLIENT: 'Client',
   ADMIN: 'Administrator',
+  SUPER_ADMIN: 'Super administrator',
   TRADING_MANAGER: 'Trading manager',
 };
 
@@ -62,6 +67,7 @@ export function UserDirectory({
   initialNextCursor,
   canChangeRole,
   currentUserId,
+  canManageBalance = false,
 }: UserDirectoryProps) {
   const router = useRouter();
   const [items, setItems] = React.useState<AdminUserRowView[]>(initialItems);
@@ -102,6 +108,27 @@ export function UserDirectory({
     },
     [],
   );
+
+  const [walletUser, setWalletUser] = React.useState<AdminUserRowView | null>(null);
+  const [walletRefreshTick, setWalletRefreshTick] = React.useState(0);
+
+  // Latest pagination state for the socket-driven refresh, without re-subscribing.
+  const reloadRef = React.useRef<() => void>(() => undefined);
+  reloadRef.current = () => void load(trail, pageIndex, query);
+
+  // Any equity push (full overview or partial adjustment signal) means balances moved: re-read the page (debounced) and the open wallet.
+  const equityTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleEquity = React.useCallback(() => {
+    if (equityTimer.current) clearTimeout(equityTimer.current);
+    equityTimer.current = setTimeout(() => {
+      reloadRef.current();
+      setWalletRefreshTick((tick) => tick + 1);
+    }, 1500);
+  }, []);
+  React.useEffect(() => () => {
+    if (equityTimer.current) clearTimeout(equityTimer.current);
+  }, []);
+  useTradingSocket({ onEquityEvent: handleEquity });
 
   const applyFilters = (next: Partial<typeof query>) => {
     const merged = { ...query, ...next };
@@ -186,8 +213,28 @@ export function UserDirectory({
         align: 'right',
         cell: (row) => <Usd value={row.equity} tone="neutral" className="text-sm" />,
       },
+      ...(canManageBalance
+        ? [
+            {
+              key: 'actions',
+              header: <span className="sr-only">Actions</span>,
+              align: 'right' as const,
+              cell: (row: AdminUserRowView) => (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWalletUser(row)}
+                  aria-label={`Manage balance for ${row.email}`}
+                >
+                  <Wallet aria-hidden />
+                  Manage Balance
+                </Button>
+              ),
+            },
+          ]
+        : []),
     ],
-    [load, canChangeRole, currentUserId, trail, pageIndex, query, router],
+    [load, canChangeRole, canManageBalance, currentUserId, trail, pageIndex, query, router],
   );
 
   const kycOptions = Object.keys(KYC_STATUS_META) as KycStatusValue[];
@@ -337,6 +384,18 @@ export function UserDirectory({
           </Button>
         </div>
       </div>
+
+      {canManageBalance ? (
+        <WalletAdjustDialog
+          user={walletUser}
+          refreshSignal={walletRefreshTick}
+          onClose={() => setWalletUser(null)}
+          onAdjusted={() => {
+            void load(trail, pageIndex, query);
+            router.refresh();
+          }}
+        />
+      ) : null}
 
       <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">
         <ShieldCheck aria-hidden className="mt-0.5 size-3.5 shrink-0" />

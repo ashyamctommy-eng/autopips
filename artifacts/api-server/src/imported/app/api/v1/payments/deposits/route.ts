@@ -29,7 +29,7 @@ export const GET = handler(async (request: Request) => {
     scope: url.searchParams.get('scope') ?? undefined,
   });
 
-  const isStaff = user.role === 'ADMIN' || user.role === 'TRADING_MANAGER';
+  const isStaff = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'TRADING_MANAGER';
   const allUsers = query.scope === 'all' && isStaff;
 
   const { items, nextCursor } = await listDeposits(user.id, {

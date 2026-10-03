@@ -1,3 +1,4 @@
+import { isStaffRole } from '@/lib/roles';
 import Link from '@/lib/next/link';
 
 import { BotActivityFeed } from '@/components/dashboard/bot-activity-feed';
@@ -114,7 +115,7 @@ export default async function DashboardTradingPage({
   // be refused; admins and trading managers are exempt, exactly as
   // `requireVerifiedClient` exempts them.
   const kycApproved =
-    user.role === 'ADMIN' || user.role === 'TRADING_MANAGER' || user.kycStatus === 'APPROVED';
+    isStaffRole(user.role) || user.kycStatus === 'APPROVED';
 
   return (
     <Section width="wide" className="flex flex-col gap-6">

@@ -62,6 +62,8 @@ export const CLOSED_POSITION_STATUSES = ['CLOSED'] as const;
  * Construction is the caller's job; interpretation is not.
  */
 export interface LedgerAggregates {
+  /** Signed manual cash allocations; never trading profit or payment receipts. */
+  adminAdjustments?: Numeric;
   /** Σ Deposit.amountUsd WHERE status ∈ {CONFIRMED, FINISHED} */
   creditedDeposits: Numeric;
   /** Σ Withdrawal.amountUsd WHERE status = FINISHED */
@@ -84,22 +86,17 @@ export interface LedgerAggregates {
  * Deriving idle from net capital here would debit withdrawals twice.
  */
 export function buildEquityFromAggregates(agg: LedgerAggregates): EquityBreakdown {
-  const credited = D(agg.creditedDeposits);
+  const credited = D(agg.creditedDeposits).plus(D(agg.adminAdjustments ?? 0));
   const paid = D(agg.paidWithdrawals);
   const deployed = D(agg.deployedCapital);
 
-  // Clamped to zero only as a defensive guard: in a well-formed ledger deposits
-  // cannot be deployed without having been credited first, so `credited` is
-  // always >= `deployed`. A negative here would mean an allocation was recorded
-  // against capital that was never funded, which is a bug worth failing loudly on.
+  // Partition net contributed funding from deployed capital. This is a signed
+  // accounting component, not the spendable balance; the latter subtracts
+  // deployed stakes and pending withdrawals from total equity.
   const idle = credited.minus(deployed);
-  if (idle.lessThan(0)) {
-    console.error(
-      `[ledger] deployed capital (${deployed.toString()}) exceeds credited deposits (${credited.toString()}). ` +
-        'An investment appears to be funded by capital that was never credited.',
-    );
-  }
-  const unallocated = usd(idle.lessThan(0) ? 0 : idle);
+  // Signed partition preserves the identity even when realized gains have been
+  // deployed, or an admin debits idle gains. Clamping would invent equity.
+  const unallocated = usd(idle);
 
   const inputs: EquityInputs = {
     startingCapital: deployed,
@@ -178,7 +175,9 @@ export async function getAccountSnapshot(
     openInvestments,
     openPositions,
     closedPositions,
+    adjustments,
   ] = await Promise.all([
+    // All aggregates below and the adjustment read share the caller's transaction.
     // CANCELLED investments carry no realisable P/L or charged fees; the admin
     // projection excludes them too, so excluding them here keeps the two
     // surfaces identical (a mismatch was verified as defect D5).
@@ -219,6 +218,7 @@ export async function getAccountSnapshot(
       where: { userId, status: { in: [...CLOSED_POSITION_STATUSES] } },
       _sum: { pnl: true },
     }),
+    db.walletAdjustment.aggregate({ where: { userId }, _sum: { amount: true } }),
   ]);
 
   const credited = agg(creditedDeposits._sum.amountUsd);
@@ -231,6 +231,7 @@ export async function getAccountSnapshot(
   );
 
   const breakdown = buildEquityFromAggregates({
+    adminAdjustments: agg(adjustments._sum.amount),
     creditedDeposits: credited,
     paidWithdrawals,
     deployedCapital,
@@ -255,7 +256,7 @@ export async function getAccountSnapshot(
     openPositions: openPositions._count._all,
     totalCreditedDeposits: credited,
     totalPaidWithdrawals: paidWithdrawals,
-    netContributedCapital: usd(credited.minus(paidWithdrawals)),
+    netContributedCapital: usd(credited.plus(agg(adjustments._sum.amount)).minus(paidWithdrawals)),
   };
 }
 
@@ -291,6 +292,7 @@ export async function getPlatformLedger(): Promise<PlatformLedger> {
     openInvestments,
     openPositions,
     closedPositions,
+    adjustments,
   ] = await Promise.all([
     // Consistent with the per-user path and the admin projection (see D5).
     prisma.investment.aggregate({
@@ -326,6 +328,7 @@ export async function getPlatformLedger(): Promise<PlatformLedger> {
       where: { status: { in: [...CLOSED_POSITION_STATUSES] } },
       _sum: { pnl: true },
     }),
+    prisma.walletAdjustment.aggregate({ _sum: { amount: true } }),
   ]);
 
   const credited = agg(creditedDeposits._sum.amountUsd);
@@ -335,6 +338,7 @@ export async function getPlatformLedger(): Promise<PlatformLedger> {
   );
 
   const breakdown = buildEquityFromAggregates({
+    adminAdjustments: agg(adjustments._sum.amount),
     creditedDeposits: credited,
     paidWithdrawals,
     deployedCapital,

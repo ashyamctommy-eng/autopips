@@ -37,6 +37,7 @@ export interface UserRoleControlProps {
 const ROLE_LABELS: Record<StaffRole, string> = {
   CLIENT: 'Client',
   ADMIN: 'Administrator',
+  SUPER_ADMIN: 'Super administrator',
   TRADING_MANAGER: 'Trading manager',
 };
 
@@ -44,6 +45,7 @@ const ROLE_BLURB: Record<StaffRole, string> = {
   CLIENT: 'Client — trades with their own capital. No back-office access.',
   TRADING_MANAGER: 'Trading manager — read-only back office: AUM, users, KYC queue, payouts queue, brokers.',
   ADMIN: 'Administrator — full control, including KYC decisions, payouts, plans, brokers and the audit log.',
+  SUPER_ADMIN: 'Super administrator — everything an administrator can do, plus direct wallet balance adjustments.',
 };
 
 /**
@@ -89,15 +91,20 @@ export function UserRoleControl({
     }
   };
 
-  if (!canChangeRole) {
+  // SUPER_ADMIN is managed by bootstrap owner setup only — read-only here for every viewer.
+  const targetLocked = user.role === 'SUPER_ADMIN';
+  if (!canChangeRole || targetLocked) {
     return (
-      <span className="text-sm text-muted" title="Changing a role is ADMIN-only">
+      <span className="text-sm text-muted" title={targetLocked ? 'Super administrator is managed by owner setup and cannot be changed here' : 'Changing a role is ADMIN-only'}>
         {ROLE_LABELS[user.role]}
       </span>
     );
   }
 
-  const demotingAdmin = user.role === 'ADMIN' && pendingRole !== 'ADMIN';
+  const demotingAdmin = user.role === 'ADMIN' && pendingRole !== 'ADMIN' && pendingRole !== 'SUPER_ADMIN';
+  const grantableRoles = (Object.keys(ROLE_LABELS) as StaffRole[]).filter(
+    (role) => role !== 'SUPER_ADMIN',
+  );
 
   return (
     <>
@@ -114,7 +121,7 @@ export function UserRoleControl({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {(Object.keys(ROLE_LABELS) as StaffRole[]).map((role) => (
+          {grantableRoles.map((role) => (
             <SelectItem key={role} value={role}>
               {ROLE_LABELS[role]}
             </SelectItem>

@@ -1,5 +1,7 @@
 // Imported HTTP handlers, loaded only when requested.
 export const importedRoutes = [
+  { path: "/api/admin/wallets/adjust-balance", load: () => import("./imported/app/api/admin/wallets/adjust-balance/route") },
+  { path: "/api/admin/wallets/:id", load: () => import("./imported/app/api/admin/wallets/[id]/route") },
   { path: "/api/v1/account/activity", load: () => import("./imported/app/api/v1/account/activity/route") },
   { path: "/api/v1/account/investments", load: () => import("./imported/app/api/v1/account/investments/route") },
   { path: "/api/v1/account/overview", load: () => import("./imported/app/api/v1/account/overview/route") },

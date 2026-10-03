@@ -83,6 +83,12 @@ export interface UseTradingSocketOptions {
   onActivity?: (event: ActivityEventDTO) => void;
   onPositionUpdate?: (update: PositionUpdate) => void;
   onEquity?: (overview: AccountOverview) => void;
+  /**
+   * Fired for EVERY `account:equity` event, including partial adjustment-refresh
+   * signals that carry no full numeric overview. Treat it as "re-read from the
+   * API" — never read balances out of the payload.
+   */
+  onEquityEvent?: (payload: unknown) => void;
   onBrokerStatus?: (status: BrokerStatusPayload) => void;
   onServerError?: (error: ServerErrorMessage) => void;
 }
@@ -286,6 +292,7 @@ export function useTradingSocket(options: UseTradingSocketOptions = {}): UseTrad
     };
 
     const handleEquity = (payload: unknown) => {
+      optionsRef.current.onEquityEvent?.(payload);
       if (isAccountOverview(payload)) {
         setEquity(payload);
         optionsRef.current.onEquity?.(payload);

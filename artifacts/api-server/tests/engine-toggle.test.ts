@@ -64,7 +64,7 @@ describe('engine.worker_enabled', () => {
 
 describe('the pause boundary', () => {
   it('is actually read by the bot runtime (a setting nothing reads is not a switch)', () => {
-    const runtime = read('src/server/modules/bot/bot.runtime.ts');
+    const runtime = read('src/imported/server/modules/bot/bot.runtime.ts');
     expect(runtime).toContain('resolvedWorkerEngineEnabled()');
     // The gate must be in the cycle, before the strategies are evaluated, and it
     // must complete the cycle rather than abandoning it — the heartbeat lives in
@@ -73,7 +73,7 @@ describe('the pause boundary', () => {
   });
 
   it('never reaches the exit path: stops and targets stay live while the engine is paused', () => {
-    const exitPath = read('src/server/modules/positions/position.service.ts');
+    const exitPath = read('src/imported/server/modules/positions/position.service.ts');
     expect(exitPath).not.toContain('engine.worker_enabled');
     expect(exitPath).not.toContain('resolvedWorkerEngineEnabled');
     // And the marking entry point the tick engine calls is still exported.

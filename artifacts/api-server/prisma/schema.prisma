@@ -21,6 +21,7 @@ generator client {
 enum Role {
   CLIENT
   ADMIN
+  SUPER_ADMIN
   TRADING_MANAGER
 }
 
@@ -74,9 +75,27 @@ model User {
   positions   Position[]
   auditLogs   AuditLog[]
   consents    UserConsent[]
+  adjustments WalletAdjustment[] @relation("AdjustmentTarget")
+  issuedAdjustments WalletAdjustment[] @relation("AdjustmentActor")
 
   @@index([role])
   @@index([kycStatus])
+}
+
+/// Signed, append-only manual cash movements. Never payment-provider receipts.
+model WalletAdjustment {
+  id             String @id @default(uuid())
+  userId         String
+  actorId        String
+  user           User @relation("AdjustmentTarget", fields: [userId], references: [id])
+  actor          User @relation("AdjustmentActor", fields: [actorId], references: [id])
+  amount         Decimal @db.Decimal(18, 2)
+  type           String @default("ADMIN_ADJUSTMENT")
+  status         String @default("completed")
+  description    String
+  idempotencyKey String @unique
+  createdAt      DateTime @default(now())
+  @@index([userId, createdAt])
 }
 
 model KycProfile {

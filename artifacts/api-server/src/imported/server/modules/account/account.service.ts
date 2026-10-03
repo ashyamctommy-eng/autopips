@@ -152,7 +152,7 @@ function toInvestmentDTO(investment: InvestmentWithPlan): InvestmentDTO {
  * moving out, because deploying capital moves money too.
  */
 function assertVerifiedClient(user: SessionUser): void {
-  if (user.role === 'ADMIN' || user.role === 'TRADING_MANAGER') return;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'TRADING_MANAGER') return;
   if (user.kycStatus !== 'APPROVED') throw ApiError.kycRequired();
 }
 

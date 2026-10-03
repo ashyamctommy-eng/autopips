@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 
 import { AdminOnlyNotice } from '@/components/admin/admin-only-notice';
@@ -28,7 +29,7 @@ export const metadata: Metadata = {
 export default async function AdminPlansPage() {
   const user = await requireStaffPage();
 
-  if (user.role !== 'ADMIN') {
+  if (!isAdminRole(user.role)) {
     return (
       <Section width="wide">
         <PageHeader

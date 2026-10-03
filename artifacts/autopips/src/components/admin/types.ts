@@ -10,7 +10,7 @@ import type { KycStatusValue } from '@/types/api';
  */
 
 /** `Role` — src/server/modules/admin/admin.service.ts (ADMIN_USER_ROLES). */
-export type StaffRole = 'CLIENT' | 'ADMIN' | 'TRADING_MANAGER';
+export type StaffRole = 'CLIENT' | 'ADMIN' | 'SUPER_ADMIN' | 'TRADING_MANAGER';
 
 /** `AdminUserRow` — admin.service.ts listUsers()/getAdminUser(). */
 export interface AdminUserRowView {

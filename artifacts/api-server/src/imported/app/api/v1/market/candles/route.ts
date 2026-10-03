@@ -34,7 +34,7 @@ export const dynamic = 'force-dynamic';
  * Symbols the bridge can be asked for: letters, digits and common separators.
  * Mixed case, because broker symbols are case-sensitive (`frxXAUUSD`).
  */
-const SYMBOL_PATTERN = /^[A-Za-z0-9._#+-]{2,24}$/;
+const SYMBOL_PATTERN = /^[A-Za-z0-9/._#+-]{2,24}$/;
 
 /**
  * Timeframes the Deriv history endpoint accepts. Anything else is rejected

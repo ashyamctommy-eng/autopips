@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 
 import { BrokerManager } from '@/components/admin/broker-manager';
@@ -38,7 +39,7 @@ export default async function AdminBrokersPage() {
       />
 
       <div className="mt-6">
-        <BrokerManager initialConnections={connections} canManage={user.role === 'ADMIN'} />
+        <BrokerManager initialConnections={connections} canManage={isAdminRole(user.role)} />
       </div>
     </Section>
   );

@@ -53,7 +53,7 @@ import type { SessionUser } from '@/types/api';
  * load the audit log and client documents.
  */
 
-const STAFF_ROLES: readonly SessionUser['role'][] = ['ADMIN', 'TRADING_MANAGER'];
+const STAFF_ROLES: readonly SessionUser['role'][] = ['ADMIN', 'SUPER_ADMIN', 'TRADING_MANAGER'];
 
 export interface AdminLoginFormProps {
   /**

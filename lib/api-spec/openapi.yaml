@@ -11,6 +11,22 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /mobile/account:
+    get:
+      operationId: getMobileAccount
+      tags: [mobile]
+      summary: Current client's read-only account snapshot
+      parameters:
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        "200":
+          description: Server-computed account data; never client-computed balances
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MobileAccount"
   /healthz:
     get:
       operationId: healthCheck
@@ -26,6 +42,55 @@ paths:
                 $ref: "#/components/schemas/HealthStatus"
 components:
   schemas:
+    MobileAccount:
+      type: object
+      required: [user, wallet, positions, nextCursor, activity, executionMode, payments, market, updatedAt]
+      properties:
+        user:
+          type: object
+          required: [fullName, email, kycStatus]
+          properties:
+            fullName: { type: string }
+            email: { type: string }
+            kycStatus: { type: string }
+        wallet:
+          type: object
+          required: [availableUsd, deployedUsd, equityUsd, pendingWithdrawalsUsd]
+          properties:
+            availableUsd: { type: string }
+            deployedUsd: { type: string }
+            equityUsd: { type: string }
+            pendingWithdrawalsUsd: { type: string }
+        positions:
+          type: array
+          items:
+            type: object
+            required: [id, symbol, side, status, stake, entryPrice, currentPrice, pnl, openedAt]
+            properties:
+              id: { type: string }
+              symbol: { type: string }
+              side: { type: string }
+              status: { type: string }
+              stake: { type: [string, "null"] }
+              entryPrice: { type: string }
+              currentPrice: { type: [string, "null"] }
+              pnl: { type: [string, "null"] }
+              openedAt: { type: string }
+        nextCursor: { type: [string, "null"] }
+        activity:
+          type: array
+          items:
+            type: object
+            required: [id, message, severity, createdAt]
+            properties:
+              id: { type: string }
+              message: { type: string }
+              severity: { type: string }
+              createdAt: { type: string }
+        executionMode: { type: string }
+        payments: { type: string }
+        market: { type: string }
+        updatedAt: { type: string }
     HealthStatus:
       type: object
       properties:

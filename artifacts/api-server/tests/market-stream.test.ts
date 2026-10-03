@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrokerAdapter, Quote } from '@/server/modules/broker/broker.types';
+vi.stubEnv('EXECUTION_MODE', 'broker');
 
 /**
  * MARKET STREAM DEMAND — the ratchet behind "start streaming when someone is

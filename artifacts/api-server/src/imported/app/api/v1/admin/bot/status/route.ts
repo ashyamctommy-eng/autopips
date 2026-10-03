@@ -100,6 +100,10 @@ export const GET = handler(async () => {
   let symbolsError: string | null = null;
 
   try {
+    if ((process.env.EXECUTION_MODE ?? 'internal') === 'internal') {
+      const { listPublicSymbols } = await import('@/server/modules/market/public-market.service');
+      symbols = await listPublicSymbols();
+    } else {
     const connections = await listBrokerConnections();
     const connection = connections.find((row) => row.status === 'CONNECTED') ?? connections[0];
     if (connection) {
@@ -112,6 +116,7 @@ export const GET = handler(async () => {
       }));
     } else {
       symbolsError = 'No broker connection is registered yet.';
+    }
     }
   } catch (err) {
     // An unreachable broker must not break the console: the kill switch still

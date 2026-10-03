@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 import Link from '@/lib/next/link';
 import { ChevronLeft, ChevronRight, ScrollText } from 'lucide-react';
@@ -63,7 +64,7 @@ export default async function AdminLogsPage({
   const userId = firstValue(searchParams?.userId) ?? null;
   const cursor = firstValue(searchParams?.cursor) ?? null;
 
-  if (user.role !== 'ADMIN') {
+  if (!isAdminRole(user.role)) {
     return (
       <Section width="wide">
         <PageHeader

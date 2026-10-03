@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 
 import { DepositManager, type DepositRow } from '@/components/admin/deposit-manager';
@@ -62,8 +63,8 @@ export default async function AdminDepositsPage() {
       />
 
       <div className="mt-6 flex flex-col gap-6">
-        <DepositManager initialItems={rows} canCredit={user.role === 'ADMIN'} />
-        {user.role === 'ADMIN' ? <InvestmentStarter plans={activePlans} /> : null}
+        <DepositManager initialItems={rows} canCredit={isAdminRole(user.role)} />
+        {isAdminRole(user.role) ? <InvestmentStarter plans={activePlans} /> : null}
       </div>
     </Section>
   );

@@ -1,3 +1,4 @@
+import { isAdminRole } from '@/lib/roles';
 import type { Metadata } from '@/lib/next/types';
 import { KeyRound, Lock, SlidersHorizontal } from 'lucide-react';
 
@@ -35,7 +36,7 @@ export const metadata: Metadata = {
 export default async function AdminSettingsPage() {
   const user = await requireStaffPage();
   const settings = await listAdminSettings();
-  const isAdmin = user.role === 'ADMIN';
+  const isAdmin = isAdminRole(user.role);
 
   const fromConsole = settings.filter((s) => s.source === 'console').length;
   const unset = settings.filter((s) => s.source === 'unset');

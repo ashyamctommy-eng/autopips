@@ -7,6 +7,7 @@ import { AppShell } from '@/components/layout/app-shell';
 import type { TopbarNotification, TopbarUser } from '@/components/layout/topbar';
 import type { KycStatusValue } from '@/types/api';
 import { apiFetch } from '@/lib/session-refresh';
+import { useTradingSocket } from '@/hooks/use-trading-socket';
 
 /**
  * Thin client boundary around {@link AppShell}.
@@ -38,6 +39,18 @@ export function DashboardShell({
   children,
 }: DashboardShellProps) {
   const router = useRouter();
+
+  // Wallet adjustments broadcast an account:equity refresh signal (possibly partial).
+  // Re-render server data instead of trusting numeric fields in the payload.
+  const equityTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleEquityEvent = React.useCallback(() => {
+    if (equityTimer.current) clearTimeout(equityTimer.current);
+    equityTimer.current = setTimeout(() => router.refresh(), 1500);
+  }, [router]);
+  React.useEffect(() => () => {
+    if (equityTimer.current) clearTimeout(equityTimer.current);
+  }, []);
+  useTradingSocket({ onEquityEvent: handleEquityEvent });
   const [signingOut, setSigningOut] = React.useState(false);
 
   const handleSignOut = React.useCallback(() => {

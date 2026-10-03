@@ -151,7 +151,7 @@ export interface TradingSocketServer {
 }
 
 function isPrivileged(role: Role): boolean {
-  return role === 'ADMIN' || role === 'TRADING_MANAGER';
+  return role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'TRADING_MANAGER';
 }
 
 function errorMessage(err: unknown): string {

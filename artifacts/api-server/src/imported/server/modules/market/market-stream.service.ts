@@ -8,6 +8,7 @@ import {
 } from '@/server/modules/broker/broker.registry';
 import type { BrokerAdapter } from '@/server/modules/broker/broker.types';
 import { publishMarketQuote } from '@/server/modules/market/quote-fanout';
+import { subscribePublicTicks } from './public-market.service';
 
 /**
  * MARKET DATA DEMAND MANAGER — the bridge between "a client is watching a
@@ -47,6 +48,7 @@ interface SymbolStream {
   connectionId: string;
   adapter: BrokerAdapter;
 }
+const publicStreams = new Map<string, { listeners: number; unsubscribe: () => Promise<void> }>();
 
 /** Live streams, keyed by normalised symbol. */
 const streams = new Map<string, SymbolStream>();
@@ -78,6 +80,13 @@ async function resolveStreamingConnection(): Promise<BrokerConnection | null> {
  */
 async function startStream(symbol: string, listeners: number): Promise<boolean> {
   try {
+    if ((process.env.EXECUTION_MODE ?? 'internal') === 'internal') {
+      const subscription = await subscribePublicTicks(symbol, quote => {
+        void publishMarketQuote(quote).catch(() => console.warn('[market-stream] quote publication failed'));
+      });
+      publicStreams.set(symbol, { listeners, unsubscribe: subscription.unsubscribe });
+      return true;
+    }
     const connection = await resolveStreamingConnection();
     if (!connection) {
       console.warn(
@@ -117,6 +126,8 @@ async function startStream(symbol: string, listeners: number): Promise<boolean> 
 export async function acquireMarketSymbol(rawSymbol: string): Promise<boolean> {
   const symbol = normaliseMarketSymbol(rawSymbol);
   if (!symbol) return false;
+  const publicStream = publicStreams.get(symbol);
+  if (publicStream) { publicStream.listeners += 1; return true; }
 
   const existing = streams.get(symbol);
   if (existing) {
@@ -132,13 +143,13 @@ export async function acquireMarketSymbol(rawSymbol: string): Promise<boolean> {
   if (inFlight) {
     const started = await inFlight;
     if (started) {
-      const entry = streams.get(symbol);
+      const entry = publicStreams.get(symbol) ?? streams.get(symbol);
       if (entry) entry.listeners += 1;
     }
     return started;
   }
 
-  if (streams.size >= MAX_STREAMED_SYMBOLS) {
+  if (streams.size + publicStreams.size >= MAX_STREAMED_SYMBOLS) {
     console.warn(
       `[market-stream] refusing ${symbol}: ${streams.size} symbols already streaming (cap ${MAX_STREAMED_SYMBOLS}).`,
     );
@@ -158,6 +169,14 @@ export async function acquireMarketSymbol(rawSymbol: string): Promise<boolean> {
 export async function releaseMarketSymbol(rawSymbol: string): Promise<void> {
   const symbol = normaliseMarketSymbol(rawSymbol);
   if (!symbol) return;
+  const publicStream = publicStreams.get(symbol);
+  if (publicStream) {
+    if (--publicStream.listeners <= 0) {
+      publicStreams.delete(symbol);
+      await publicStream.unsubscribe();
+    }
+    return;
+  }
 
   const entry = streams.get(symbol);
   if (!entry) return;

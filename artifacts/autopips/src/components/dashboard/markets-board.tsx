@@ -203,7 +203,11 @@ const MarketRow = React.memo(function MarketRow({
               <span className="truncate font-mono text-sm font-medium text-base-100">
                 {instrument.symbol}
               </span>
-              {instrument.isTradable ? null : <Badge variant="warn">Not tradable</Badge>}
+              {instrument.isTradable === true ? (
+                <Badge variant="success">Tradable</Badge>
+              ) : (
+                <Badge variant="warn">Not tradable</Badge>
+              )}
             </div>
             <p className="mt-0.5 truncate text-xs text-muted">{instrument.displayName}</p>
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[0.68rem] uppercase tracking-wide text-muted">
