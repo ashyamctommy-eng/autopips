@@ -117,6 +117,7 @@ export function verifyIpnSignature(input: VerifyIpnSignatureInput): IpnVerificat
   const secret = getSetting('nowpayments.ipn_secret') || serverEnv().NOWPAYMENTS_IPN_SECRET;
   // An empty HMAC secret must NEVER be accepted as a valid payment signature.
   if (!secret.trim()) return { valid: false, reason: 'PROVIDER_NOT_CONFIGURED' };
+  if (serverEnv().EXECUTION_MODE === 'internal') return { valid: false, reason: 'EXTERNAL_PAYMENTS_DISABLED' };
   const computed = crypto
     .createHmac('sha512', secret)
     .update(canonicalizeForSignature(parsed), 'utf8')

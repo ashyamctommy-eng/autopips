@@ -60,4 +60,5 @@ export const importedRoutes = [
   { path: "/api/v1/positions", load: () => import("./imported/app/api/v1/positions/route") },
   { path: "/api/v1/wallet", load: () => import("./imported/app/api/v1/wallet/route") },
   { path: "/healthz", load: () => import("./imported/app/healthz/route") },
+  { path: "/api/health", load: () => import("./imported/app/healthz/route") },
 ];

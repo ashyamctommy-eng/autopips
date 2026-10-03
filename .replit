@@ -48,3 +48,5 @@ packages = ["redis"]
 [userenv.shared]
 REDIS_URL = "redis://127.0.0.1:6379"
 EXECUTION_MODE = "internal"
+DERIV_APP_ID = "1089"
+MARKET_DATA_PROVIDER = "twelve"

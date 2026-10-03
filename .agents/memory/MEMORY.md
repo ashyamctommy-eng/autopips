@@ -1,1 +1,2 @@
 - [Migration tool output](migration-tool-output.md) — normalize shell-output line endings before generating import paths.
+- [Worker restart leases](worker-restart-leases.md) — managed restarts may leave Redis leases until expiry; wait for recovery, never clear locks blindly.

@@ -42,4 +42,14 @@ describe('internal-mode configuration', () => {
       valid: false, reason: 'PROVIDER_NOT_CONFIGURED',
     });
   });
+  it('rejects even a correctly signed external payment in internal mode', async () => {
+    const secret = 'test-only-provider-secret';
+    vi.stubEnv('NOWPAYMENTS_IPN_SECRET', secret);
+    const { verifyIpnSignature } = await import('@/server/modules/payments/ipn.service');
+    const rawBody = '{"payment_id":123}';
+    const signatureHeader = createHmac('sha512', secret).update(rawBody).digest('hex');
+    expect(verifyIpnSignature({ rawBody, signatureHeader })).toEqual({
+      valid: false, reason: 'EXTERNAL_PAYMENTS_DISABLED',
+    });
+  });
 });

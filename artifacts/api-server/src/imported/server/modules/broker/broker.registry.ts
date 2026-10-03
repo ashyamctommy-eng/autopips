@@ -113,6 +113,9 @@ function asEnvironment(value: string): BrokerEnvironment {
  * caller connects it with `ensureBrokerConnected`.
  */
 export async function getAdapterForConnection(conn: BrokerConnection): Promise<BrokerAdapter> {
+  if (serverEnv().EXECUTION_MODE === 'internal') {
+    throw ApiError.serviceUnavailable('External broker accounts are disabled in internal execution mode.');
+  }
   const cached = adapterCache.get(conn.derivAccountId);
   if (cached) return cached;
 

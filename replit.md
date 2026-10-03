@@ -33,6 +33,9 @@ Deriv credentials are optional at boot in this mode, not simulated. Missing
 provider credentials must refuse provider operations, never credit fake funds,
 invent quotes, or accept unsigned payment callbacks. Broker mode continues to
 require `NOWPAYMENTS_API_KEY`, `NOWPAYMENTS_IPN_SECRET`, and `DERIV_APP_ID`.
+The user requires external payments and broker account execution disabled in
+internal mode even when credentials are supplied. Public market data is separate:
+use Twelve Data for supported history and Deriv's public feed where needed.
 `REDIS_URL` is a non-secret configuration set to `redis://127.0.0.1:6379`.
 The `Autopipsz Local Redis` workflow runs the Nix-provided Redis server on
 loopback only, with append-only persistence under the gitignored `.cache/`

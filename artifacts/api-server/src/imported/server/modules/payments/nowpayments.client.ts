@@ -260,6 +260,9 @@ interface RequestInput {
 }
 
 async function requestJson(input: RequestInput): Promise<unknown> {
+  if (serverEnv().EXECUTION_MODE === 'internal') {
+    throw ApiError.serviceUnavailable('External payments are disabled in internal execution mode.');
+  }
   const attempts = input.retryOnNetworkError ? 2 : 1;
   let lastFailure: NetworkFailure | null = null;
 
