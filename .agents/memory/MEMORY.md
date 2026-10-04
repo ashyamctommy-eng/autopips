@@ -5,4 +5,5 @@
 - [Manual wallet allocations](manual-wallet-allocations.md) — extend existing ledger accounting, never introduce an independent spendable balance or fake provider payments.
 - [Mobile auth scope](mobile-auth-scope.md) — preserve existing password/2FA identity; keep mobile bearer transport isolated from money-moving browser routes.
 - [Large connector payloads](large-connector-payloads.md) — compress and shard local repository data before passing it through CodeExecution shell output.
+- [Atomic GitHub publishes](github-atomic-publish.md) — use the connected App's Git Data API when CLI push auth fails; verify the tree, then advance the remote ref without force.
 - [Frozen production database](frozen-production-db.md) — Replit's production DB can freeze; only the owner/admin can unpause it in the Database pane.
