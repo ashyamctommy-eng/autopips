@@ -12,6 +12,7 @@ const app: Express = express();
 const allowedBrowserOrigins = new Set(
   [
     'https://autopips.replit.app',
+    'https://autopips.onrender.com',
     process.env.NEXT_PUBLIC_APP_URL,
     ...(process.env.CORS_ALLOWED_ORIGINS ?? '').split(','),
     ...(process.env.NODE_ENV === 'production'

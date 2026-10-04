@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: adminTelemetry
+    description: Super-admin-only live runtime telemetry and execution analytics
 paths:
   /mobile/account:
     get:
@@ -40,7 +42,78 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /admin/telemetry/summary:
+    get:
+      operationId: getAdminTelemetrySummary
+      tags: [adminTelemetry]
+      summary: Current platform telemetry and trading analytics
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Current platform telemetry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTelemetrySummaryEnvelope"
+  /admin/telemetry/logs:
+    get:
+      operationId: getAdminTelemetryLogs
+      tags: [adminTelemetry]
+      summary: Filtered and paginated broker execution records
+      security:
+        - SessionCookie: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: pageSize
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - in: query
+          name: strategy
+          schema: { type: string, maxLength: 64 }
+        - in: query
+          name: status
+          schema: { type: string, enum: [OPEN, CLOSED, CANCELLED] }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - in: query
+          name: q
+          description: Match an instrument or investor email
+          schema: { type: string, maxLength: 120 }
+      responses:
+        "200":
+          description: Matching execution records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTelemetryLogsEnvelope"
+  /admin/telemetry/stream:
+    get:
+      operationId: streamAdminTelemetry
+      tags: [adminTelemetry]
+      summary: Authenticated server-sent telemetry events
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Event stream; reconnects automatically when the connection drops
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE frames named telemetry; each data field is a JSON AdminTelemetryEvent.
 components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: ap_at
   schemas:
     MobileAccount:
       type: object
@@ -98,4 +171,149 @@ components:
           type: string
       required:
         - status
+    AdminTelemetryStrategyPerformance:
+      type: object
+      required: [strategyId, closedTrades, winningTrades, winRatePct, netPnlUsd]
+      properties:
+        strategyId: { type: string }
+        closedTrades: { type: integer }
+        winningTrades: { type: integer }
+        winRatePct: { type: ["number", "null"] }
+        netPnlUsd: { type: string }
+    AdminTelemetryRuntime:
+      type: object
+      required: [status, heartbeatAt, cycleCount, cycleDurationMs, intervalSeconds, enabledStrategies, activePlanCount, tradesExecuted]
+      properties:
+        status: { type: string, enum: [ONLINE, STALE, OFFLINE] }
+        heartbeatAt: { type: ["string", "null"], format: date-time }
+        cycleCount: { type: ["integer", "null"] }
+        cycleDurationMs: { type: ["integer", "null"] }
+        intervalSeconds: { type: ["integer", "null"] }
+        enabledStrategies:
+          type: array
+          items: { type: string }
+        activePlanCount: { type: ["integer", "null"] }
+        tradesExecuted: { type: ["integer", "null"] }
+        latestExecutionLatencyMs: { type: ["number", "null"] }
+    AdminTelemetryFinancials:
+      type: object
+      required: [activeCapitalUsd, idleBalanceUsd, totalEquityUsd, realizedPnlUsd, unrealizedPnlUsd]
+      properties:
+        activeCapitalUsd: { type: string }
+        idleBalanceUsd: { type: string }
+        totalEquityUsd: { type: string }
+        realizedPnlUsd: { type: string }
+        unrealizedPnlUsd: { type: string }
+    AdminTelemetryPerformance:
+      type: object
+      required: [confirmedExecutions, closedTrades, winRatePct, strategyPerformance]
+      properties:
+        confirmedExecutions: { type: integer }
+        closedTrades: { type: integer }
+        winRatePct: { type: ["number", "null"] }
+        strategyPerformance:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminTelemetryStrategyPerformance"
+    AdminTelemetryExecutionLatency:
+      type: object
+      required: [windowHours, sampleCount, averageMs, p95Ms]
+      properties:
+        windowHours: { type: integer }
+        sampleCount: { type: integer }
+        averageMs: { type: ["number", "null"] }
+        p95Ms: { type: ["number", "null"] }
+    AdminTelemetrySummary:
+      type: object
+      required: [runtime, financials, performance, executionLatency]
+      properties:
+        runtime:
+          $ref: "#/components/schemas/AdminTelemetryRuntime"
+        financials:
+          $ref: "#/components/schemas/AdminTelemetryFinancials"
+        performance:
+          $ref: "#/components/schemas/AdminTelemetryPerformance"
+        executionLatency:
+          $ref: "#/components/schemas/AdminTelemetryExecutionLatency"
+    AdminTelemetryTrade:
+      type: object
+      required: [id, strategyId, instrument, direction, status, volume, entryPrice, exitPrice, userPnlUsd, openedAt, closedAt, executionRequestedAt, executionCompletedAt, executionLatencyMs, userId, userEmail, planName]
+      properties:
+        id: { type: string }
+        strategyId: { type: ["string", "null"] }
+        instrument: { type: string }
+        direction: { type: string }
+        status: { type: string }
+        volume: { type: string }
+        entryPrice: { type: string }
+        exitPrice: { type: ["string", "null"] }
+        userPnlUsd: { type: string }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: ["string", "null"], format: date-time }
+        executionRequestedAt: { type: ["string", "null"], format: date-time }
+        executionCompletedAt: { type: ["string", "null"], format: date-time }
+        executionLatencyMs: { type: ["integer", "null"] }
+        userId: { type: string }
+        userEmail: { type: string }
+        planName: { type: string }
+    AdminTelemetryLogsPage:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminTelemetryTrade"
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+    AdminTelemetrySummaryEnvelope:
+      type: object
+      required: [ok, data]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        data:
+          $ref: "#/components/schemas/AdminTelemetrySummary"
+    AdminTelemetryLogsEnvelope:
+      type: object
+      required: [ok, data]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        data:
+          $ref: "#/components/schemas/AdminTelemetryLogsPage"
+    AdminTelemetryCycleEvent:
+      type: object
+      required: [type, eventId, timestamp, cycleCount, cycleDurationMs, intervalSeconds, enabledStrategies, activePlanCount, tradesExecuted, winRatePct, latestExecutionLatencyMs]
+      properties:
+        type: { type: string, enum: [cycle] }
+        eventId: { type: string }
+        timestamp: { type: string, format: date-time }
+        cycleCount: { type: integer }
+        cycleDurationMs: { type: integer }
+        intervalSeconds: { type: integer }
+        enabledStrategies:
+          type: array
+          items: { type: string }
+        activePlanCount: { type: ["integer", "null"] }
+        tradesExecuted: { type: integer }
+        winRatePct: { type: ["number", "null"] }
+        latestExecutionLatencyMs: { type: ["number", "null"] }
+    AdminTelemetryExecutionEvent:
+      type: object
+      required: [type, eventId, timestamp, strategyId, status, latencyMs, symbol, direction]
+      properties:
+        type: { type: string, enum: [execution] }
+        eventId: { type: string }
+        timestamp: { type: string, format: date-time }
+        strategyId: { type: string }
+        status: { type: string, enum: [FILLED, REJECTED, ERROR] }
+        latencyMs: { type: ["number", "null"] }
+        symbol: { type: string }
+        direction: { type: string }
+    AdminTelemetryEvent:
+      oneOf:
+        - $ref: "#/components/schemas/AdminTelemetryCycleEvent"
+        - $ref: "#/components/schemas/AdminTelemetryExecutionEvent"
+      discriminator:
+        propertyName: type
 

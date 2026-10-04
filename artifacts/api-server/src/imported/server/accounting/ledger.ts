@@ -263,6 +263,8 @@ export async function getAccountSnapshot(
 export interface PlatformLedger {
   /** Deployed capital across every client — the AUM figure. */
   totalManagedCapital: Decimal;
+  /** Signed credited funding (including admin adjustments) not represented by deployed capital. */
+  idleBalance: Decimal;
   /** Sum of equity contributed by every client's ledger. */
   totalEquity: Decimal;
   realizedPnL: Decimal;
@@ -349,6 +351,7 @@ export async function getPlatformLedger(): Promise<PlatformLedger> {
 
   return {
     totalManagedCapital: usd(deployedCapital),
+    idleBalance: breakdown.confirmedDeposits,
     totalEquity: breakdown.equity,
     realizedPnL: breakdown.realizedPnL,
     unrealizedPnL: breakdown.unrealizedPnL,

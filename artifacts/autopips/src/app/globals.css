@@ -293,3 +293,8 @@
     text-wrap: pretty;
   }
 }
+
+@keyframes telemetry-scan {
+  0%, 100% { transform: scaleX(0.58); opacity: 0.55; }
+  50% { transform: scaleX(1); opacity: 0.9; }
+}

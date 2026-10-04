@@ -1,6 +1,5 @@
 'use client';
 
-import * as React from 'react';
 import Link from '@/lib/next/link';
 import { usePathname } from '@/lib/next/navigation';
 
@@ -61,8 +60,9 @@ export const ADMIN_MOBILE_NAV: AdminMobileNavItem[] = DESTINATIONS.map(({ href, 
   return { ...entry, shortLabel };
 });
 
-export function AdminMobileNav() {
+export function AdminMobileNav({ role }: { role?: string }) {
   const pathname = usePathname();
+  const visibleItems = ADMIN_MOBILE_NAV.filter((item) => item.href !== '/admin/telemetry' || role === 'SUPER_ADMIN');
 
   return (
     <nav
@@ -74,7 +74,7 @@ export function AdminMobileNav() {
       )}
     >
       <ul className="mx-auto flex max-w-lg items-stretch justify-between px-1">
-        {ADMIN_MOBILE_NAV.map((item) => {
+        {visibleItems.map((item) => {
           const active = isNavItemActive(pathname, item);
           const Icon = item.icon;
 

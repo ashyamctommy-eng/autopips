@@ -32,6 +32,7 @@ export interface AppShellProps {
   pendingKycCount?: number;
   /** Pending withdrawal count badge (admin only). */
   pendingWithdrawalCount?: number;
+  adminRole?: string;
   /** Mount the toast viewport. Default true — disable if the page has its own. */
   showToaster?: boolean;
   /** Applied to the `<main>` element. */
@@ -60,6 +61,7 @@ export function AppShell({
   signOutHref,
   pendingKycCount,
   pendingWithdrawalCount,
+  adminRole,
   showToaster = true,
   contentClassName,
   topbarActions,
@@ -82,7 +84,7 @@ export function AppShell({
 
   const sidebar =
     variant === 'admin' ? (
-      <AdminSidebar pendingKycCount={pendingKycCount} pendingWithdrawalCount={pendingWithdrawalCount} />
+      <AdminSidebar pendingKycCount={pendingKycCount} pendingWithdrawalCount={pendingWithdrawalCount} role={adminRole} />
     ) : (
       <ClientSidebar kycStatus={kycStatus} />
     );
@@ -135,6 +137,7 @@ export function AppShell({
                     showCollapseToggle={false}
                     pendingKycCount={pendingKycCount}
                     pendingWithdrawalCount={pendingWithdrawalCount}
+                    role={adminRole}
                   />
                 ) : (
                   <ClientSidebar collapsed={false} showCollapseToggle={false} kycStatus={kycStatus} />
@@ -192,7 +195,7 @@ export function AppShell({
             still carries the full menu; this is the thumb-reach layer. Both
             shells have one — the admin bar is a flat five-item variant so the
             two are not confusable. */}
-        {variant === 'admin' ? <AdminMobileNav /> : <MobileNav />}
+        {variant === 'admin' ? <AdminMobileNav role={adminRole} /> : <MobileNav />}
 
         {showToaster ? <Toaster /> : null}
       </div>

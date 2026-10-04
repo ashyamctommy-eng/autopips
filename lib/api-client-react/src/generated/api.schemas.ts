@@ -57,7 +57,206 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface AdminTelemetryStrategyPerformance {
+  strategyId: string;
+  closedTrades: number;
+  winningTrades: number;
+  /** @nullable */
+  winRatePct: number | null;
+  netPnlUsd: string;
+}
+
+export type AdminTelemetryRuntimeStatus = typeof AdminTelemetryRuntimeStatus[keyof typeof AdminTelemetryRuntimeStatus];
+
+
+export const AdminTelemetryRuntimeStatus = {
+  ONLINE: 'ONLINE',
+  STALE: 'STALE',
+  OFFLINE: 'OFFLINE',
+} as const;
+
+export interface AdminTelemetryRuntime {
+  status: AdminTelemetryRuntimeStatus;
+  /** @nullable */
+  heartbeatAt: string | null;
+  /** @nullable */
+  cycleCount: number | null;
+  /** @nullable */
+  cycleDurationMs: number | null;
+  /** @nullable */
+  intervalSeconds: number | null;
+  enabledStrategies: string[];
+  /** @nullable */
+  activePlanCount: number | null;
+  /** @nullable */
+  tradesExecuted: number | null;
+  /** @nullable */
+  latestExecutionLatencyMs?: number | null;
+}
+
+export interface AdminTelemetryFinancials {
+  activeCapitalUsd: string;
+  idleBalanceUsd: string;
+  totalEquityUsd: string;
+  realizedPnlUsd: string;
+  unrealizedPnlUsd: string;
+}
+
+export interface AdminTelemetryPerformance {
+  confirmedExecutions: number;
+  closedTrades: number;
+  /** @nullable */
+  winRatePct: number | null;
+  strategyPerformance: AdminTelemetryStrategyPerformance[];
+}
+
+export interface AdminTelemetryExecutionLatency {
+  windowHours: number;
+  sampleCount: number;
+  /** @nullable */
+  averageMs: number | null;
+  /** @nullable */
+  p95Ms: number | null;
+}
+
+export interface AdminTelemetrySummary {
+  runtime: AdminTelemetryRuntime;
+  financials: AdminTelemetryFinancials;
+  performance: AdminTelemetryPerformance;
+  executionLatency: AdminTelemetryExecutionLatency;
+}
+
+export interface AdminTelemetryTrade {
+  id: string;
+  /** @nullable */
+  strategyId: string | null;
+  instrument: string;
+  direction: string;
+  status: string;
+  volume: string;
+  entryPrice: string;
+  /** @nullable */
+  exitPrice: string | null;
+  userPnlUsd: string;
+  openedAt: string;
+  /** @nullable */
+  closedAt: string | null;
+  /** @nullable */
+  executionRequestedAt: string | null;
+  /** @nullable */
+  executionCompletedAt: string | null;
+  /** @nullable */
+  executionLatencyMs: number | null;
+  userId: string;
+  userEmail: string;
+  planName: string;
+}
+
+export interface AdminTelemetryLogsPage {
+  items: AdminTelemetryTrade[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface AdminTelemetrySummaryEnvelope {
+  ok: true;
+  data: AdminTelemetrySummary;
+}
+
+export interface AdminTelemetryLogsEnvelope {
+  ok: true;
+  data: AdminTelemetryLogsPage;
+}
+
+export type AdminTelemetryCycleEventType = typeof AdminTelemetryCycleEventType[keyof typeof AdminTelemetryCycleEventType];
+
+
+export const AdminTelemetryCycleEventType = {
+  cycle: 'cycle',
+} as const;
+
+export interface AdminTelemetryCycleEvent {
+  type: AdminTelemetryCycleEventType;
+  eventId: string;
+  timestamp: string;
+  cycleCount: number;
+  cycleDurationMs: number;
+  intervalSeconds: number;
+  enabledStrategies: string[];
+  /** @nullable */
+  activePlanCount: number | null;
+  tradesExecuted: number;
+  /** @nullable */
+  winRatePct: number | null;
+  /** @nullable */
+  latestExecutionLatencyMs: number | null;
+}
+
+export type AdminTelemetryExecutionEventType = typeof AdminTelemetryExecutionEventType[keyof typeof AdminTelemetryExecutionEventType];
+
+
+export const AdminTelemetryExecutionEventType = {
+  execution: 'execution',
+} as const;
+
+export type AdminTelemetryExecutionEventStatus = typeof AdminTelemetryExecutionEventStatus[keyof typeof AdminTelemetryExecutionEventStatus];
+
+
+export const AdminTelemetryExecutionEventStatus = {
+  FILLED: 'FILLED',
+  REJECTED: 'REJECTED',
+  ERROR: 'ERROR',
+} as const;
+
+export interface AdminTelemetryExecutionEvent {
+  type: AdminTelemetryExecutionEventType;
+  eventId: string;
+  timestamp: string;
+  strategyId: string;
+  status: AdminTelemetryExecutionEventStatus;
+  /** @nullable */
+  latencyMs: number | null;
+  symbol: string;
+  direction: string;
+}
+
+export type AdminTelemetryEvent = AdminTelemetryCycleEvent | AdminTelemetryExecutionEvent;
+
 export type GetMobileAccountParams = {
 cursor?: string;
 };
+
+export type GetAdminTelemetryLogsParams = {
+/**
+ * @minimum 1
+ */
+page?: number;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+pageSize?: number;
+/**
+ * @maxLength 64
+ */
+strategy?: string;
+status?: GetAdminTelemetryLogsStatus;
+from?: string;
+to?: string;
+/**
+ * Match an instrument or investor email
+ * @maxLength 120
+ */
+q?: string;
+};
+
+export type GetAdminTelemetryLogsStatus = typeof GetAdminTelemetryLogsStatus[keyof typeof GetAdminTelemetryLogsStatus];
+
+
+export const GetAdminTelemetryLogsStatus = {
+  OPEN: 'OPEN',
+  CLOSED: 'CLOSED',
+  CANCELLED: 'CANCELLED',
+} as const;
 
