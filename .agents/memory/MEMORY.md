@@ -8,3 +8,4 @@
 - [Atomic GitHub publishes](github-atomic-publish.md) — use the connected App's Git Data API when CLI push auth fails; verify the tree, then advance the remote ref without force.
 - [Frozen production database](frozen-production-db.md) — Replit's production DB can freeze; only the owner/admin can unpause it in the Database pane.
 - [React type-version seams](react-type-version-seams.md) — adapt isolated third-party React declaration mismatches locally; avoid global type overrides that disrupt Expo.
+- [Neon Prisma migration routing](neon-prisma-migrations.md) — use Neon’s direct URL for Prisma migrations; pooled connections can strand advisory locks.
