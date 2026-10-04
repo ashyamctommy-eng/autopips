@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { missingConfiguration } from "./migration-api";
 import { serverEnv } from "./imported/lib/env";
 import { bootstrapProductionAdmin } from "./bootstrap-admin";
+import { startTelemetrySubscriber } from "./imported/server/modules/telemetry/telemetry.events";
 
 // Preview may show public content during setup. A published money-handling
 // server must never advertise readiness with missing credentials.
@@ -11,6 +12,7 @@ if (process.env.NODE_ENV === 'production' && missingConfiguration().length) {
 }
 if (process.env.NODE_ENV === 'production') serverEnv();
 await bootstrapProductionAdmin();
+void startTelemetrySubscriber();
 
 const rawPort = process.env["PORT"];
 

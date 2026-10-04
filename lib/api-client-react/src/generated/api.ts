@@ -16,6 +16,9 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AdminTelemetryLogsEnvelope,
+  AdminTelemetrySummaryEnvelope,
+  GetAdminTelemetryLogsParams,
   GetMobileAccountParams,
   HealthStatus,
   MobileAccount
@@ -198,6 +201,244 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAdminTelemetrySummaryUrl = () => {
+
+
+
+
+  return `/api/admin/telemetry/summary`
+}
+
+/**
+ * @summary Current platform telemetry and trading analytics
+ */
+export const getAdminTelemetrySummary = async ( options?: Parameters<typeof customFetch>[1]): Promise<AdminTelemetrySummaryEnvelope> => {
+
+  return customFetch<AdminTelemetrySummaryEnvelope>(getGetAdminTelemetrySummaryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminTelemetrySummaryQueryKey = () => {
+    return [
+    `/api/admin/telemetry/summary`
+    ] as const;
+    }
+
+
+export const getGetAdminTelemetrySummaryQueryOptions = <TData = Awaited<ReturnType<typeof getAdminTelemetrySummary>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminTelemetrySummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminTelemetrySummaryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminTelemetrySummary>>> = ({ signal }) => getAdminTelemetrySummary({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminTelemetrySummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminTelemetrySummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminTelemetrySummary>>>
+export type GetAdminTelemetrySummaryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Current platform telemetry and trading analytics
+ */
+
+export function useGetAdminTelemetrySummary<TData = Awaited<ReturnType<typeof getAdminTelemetrySummary>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminTelemetrySummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminTelemetrySummaryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAdminTelemetryLogsUrl = (params?: GetAdminTelemetryLogsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/telemetry/logs?${stringifiedParams}` : `/api/admin/telemetry/logs`
+}
+
+/**
+ * @summary Filtered and paginated broker execution records
+ */
+export const getAdminTelemetryLogs = async (params?: GetAdminTelemetryLogsParams, options?: Parameters<typeof customFetch>[1]): Promise<AdminTelemetryLogsEnvelope> => {
+
+  return customFetch<AdminTelemetryLogsEnvelope>(getGetAdminTelemetryLogsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAdminTelemetryLogsQueryKey = (params?: GetAdminTelemetryLogsParams,) => {
+    return [
+    `/api/admin/telemetry/logs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAdminTelemetryLogsQueryOptions = <TData = Awaited<ReturnType<typeof getAdminTelemetryLogs>>, TError = ErrorType<unknown>>(params?: GetAdminTelemetryLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminTelemetryLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAdminTelemetryLogsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAdminTelemetryLogs>>> = ({ signal }) => getAdminTelemetryLogs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAdminTelemetryLogs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAdminTelemetryLogsQueryResult = NonNullable<Awaited<ReturnType<typeof getAdminTelemetryLogs>>>
+export type GetAdminTelemetryLogsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Filtered and paginated broker execution records
+ */
+
+export function useGetAdminTelemetryLogs<TData = Awaited<ReturnType<typeof getAdminTelemetryLogs>>, TError = ErrorType<unknown>>(
+ params?: GetAdminTelemetryLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAdminTelemetryLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAdminTelemetryLogsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStreamAdminTelemetryUrl = () => {
+
+
+
+
+  return `/api/admin/telemetry/stream`
+}
+
+/**
+ * @summary Authenticated server-sent telemetry events
+ */
+export const streamAdminTelemetry = async ( options?: Parameters<typeof customFetch>[1]): Promise<string> => {
+
+  return customFetch<string>(getStreamAdminTelemetryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getStreamAdminTelemetryQueryKey = () => {
+    return [
+    `/api/admin/telemetry/stream`
+    ] as const;
+    }
+
+
+export const getStreamAdminTelemetryQueryOptions = <TData = Awaited<ReturnType<typeof streamAdminTelemetry>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof streamAdminTelemetry>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStreamAdminTelemetryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof streamAdminTelemetry>>> = ({ signal }) => streamAdminTelemetry({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof streamAdminTelemetry>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type StreamAdminTelemetryQueryResult = NonNullable<Awaited<ReturnType<typeof streamAdminTelemetry>>>
+export type StreamAdminTelemetryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Authenticated server-sent telemetry events
+ */
+
+export function useStreamAdminTelemetry<TData = Awaited<ReturnType<typeof streamAdminTelemetry>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof streamAdminTelemetry>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getStreamAdminTelemetryQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

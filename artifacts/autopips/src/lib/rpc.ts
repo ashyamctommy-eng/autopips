@@ -7,6 +7,8 @@
  * cookie. Nothing from `server/` is bundled here.
  */
 
+import { apiRequest } from '@/lib/api-request';
+
 export class RpcError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
@@ -28,9 +30,8 @@ interface RpcFailure {
 export async function rpc<T = any>(module: string, method: string, args: unknown[] = []): Promise<T> {
   let response: Response;
   try {
-    response = await fetch('/api/migration/query', {
+    response = await apiRequest('/api/migration/query', {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ module, method, args }),
     });

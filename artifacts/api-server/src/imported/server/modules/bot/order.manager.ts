@@ -17,6 +17,7 @@
  */
 
 import type { BrokerConnection } from '@prisma/client';
+import { logger } from '../../../../lib/logger';
 import { WS_EVENTS } from '@/lib/contracts';
 import { serverEnv } from '@/lib/env';
 import { ApiError } from '@/lib/http';
@@ -45,6 +46,7 @@ import { checkTradingAllowed } from './bot-control.service';
 import { allocateAcrossInvestments, MASTER_TO_CLIENT_FORMULA } from './lot.allocator';
 import { evaluatePreTradeRisk, type RiskContextWithFloor } from './risk.engine';
 import { allocateStake } from './stake.allocator';
+import { createTelemetryEventId, publishTelemetryEvent } from '../telemetry/telemetry.events';
 import type {
   LotAllocation,
   OrderOutcome,
@@ -674,10 +676,14 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
       },
     });
 
+    const executionRequestedAt = new Date();
+    const executionStartedAt = performance.now();
     let result: Awaited<ReturnType<BrokerAdapter['placeOrder']>>;
+    let infrastructureError = false;
     try {
       result = await adapter.placeOrder(request);
     } catch (err) {
+      infrastructureError = true;
       // placeOrder maps broker rejections itself; anything thrown here is an
       // infrastructure failure and is reported the same way.
       result = {
@@ -686,11 +692,27 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
         brokerMessage: err instanceof Error ? err.message : 'Unknown order error',
       };
     }
+    const executionCompletedAt = new Date();
+    const executionLatencyMs = Math.max(0, Math.round(performance.now() - executionStartedAt));
+
+    void publishTelemetryEvent({
+      type: 'execution',
+      eventId: createTelemetryEventId(),
+      timestamp: executionCompletedAt,
+      strategyId: signal.strategy,
+      status: infrastructureError ? 'ERROR' : result.ok ? 'FILLED' : 'REJECTED',
+      latencyMs: executionLatencyMs,
+      symbol: request.symbol,
+      direction: request.direction,
+    }).catch((err) => {
+      logger.warn({ err, strategyId: signal.strategy }, 'Failed to publish broker execution telemetry');
+    });
 
     const outcome: OrderOutcome = {
       investmentId: allocation.investmentId,
       request,
       ok: result.ok,
+      executionLatencyMs,
       ...(result.positionId !== undefined ? { positionId: result.positionId } : {}),
       ...(result.fillPrice !== undefined ? { fillPrice: result.fillPrice } : {}),
       ...(result.brokerMessage !== undefined ? { brokerMessage: result.brokerMessage } : {}),
@@ -765,6 +787,10 @@ export async function executeSignal(signal: TradeSignal): Promise<SignalExecutio
             stopLoss: request.stopLoss === undefined ? null : toPrismaDecimal(request.stopLoss, 5),
             takeProfit: request.takeProfit === undefined ? null : toPrismaDecimal(request.takeProfit, 5),
             status: 'OPEN',
+            strategyId: signal.strategy,
+            executionRequestedAt,
+            executionCompletedAt,
+            executionLatencyMs,
             // The next sync cycle replaces this with the broker's own open time.
             openedAt: new Date(),
           },

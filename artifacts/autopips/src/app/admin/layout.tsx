@@ -38,6 +38,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       user={{ name: user.fullName, email: user.email }}
       pendingKycCount={aum.pendingKycCount}
       pendingWithdrawalCount={pendingWithdrawalCount}
+      adminRole={user.role}
       signOutHref="/admin/logout"
     >
       {children}

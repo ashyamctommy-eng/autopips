@@ -14,9 +14,11 @@
  * does not send.
  *
  * Sessions are cookie-based (`ap_at` / refresh, httpOnly, set by the API route).
- * Nothing here reads or writes a token; `credentials: 'same-origin'` is what
- * lets the API's Set-Cookie land, and nothing is ever put in web storage.
+ * Nothing here reads or writes a token; credentialed requests let the API's
+ * Set-Cookie land, and nothing is ever put in web storage.
  */
+
+import { apiRequest } from '@/lib/api-request';
 
 export interface FieldIssue {
   /** Dotted zod path, e.g. `email` — flattened by `handler()` in lib/http.ts. */
@@ -83,9 +85,8 @@ export async function postJson<T>(
 ): Promise<AuthResult<T>> {
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await apiRequest(url, {
       method: 'POST',
-      credentials: 'same-origin',
       cache: 'no-store',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify(body),

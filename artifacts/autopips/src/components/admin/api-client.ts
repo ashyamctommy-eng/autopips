@@ -1,3 +1,4 @@
+import { apiRequest } from '@/lib/api-request';
 import { retryAfterRefresh } from '@/lib/session-refresh';
 import type { ApiEnvelope, ApiErrorEnvelope } from '@/types/api';
 
@@ -75,7 +76,7 @@ export async function adminRequest<T>(
   const hasBody = options.body !== undefined;
 
   const send = () =>
-    fetch(path, {
+    apiRequest(path, {
       method: options.method ?? 'GET',
       headers: {
         accept: 'application/json',
@@ -84,7 +85,6 @@ export async function adminRequest<T>(
       },
       body: hasBody ? JSON.stringify(options.body) : undefined,
       cache: 'no-store',
-      credentials: 'same-origin',
       signal: options.signal,
     });
 

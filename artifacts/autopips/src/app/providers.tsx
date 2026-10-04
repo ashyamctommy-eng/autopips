@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from '@/components/theme/theme-provider';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/toaster';
@@ -17,12 +19,22 @@ import { Toaster } from '@/components/ui/toaster';
  * dropdowns, tooltips) inherits from `<html>`, so it follows the theme too.
  */
 export function AppProviders({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        refetchOnWindowFocus: false,
+        retry: 1,
+      },
+    },
+  }));
   return (
-    <ThemeProvider>
-      <TooltipProvider delayDuration={150}>
-        {children}
-        <Toaster />
-      </TooltipProvider>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <TooltipProvider delayDuration={150}>
+          {children}
+          <Toaster />
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }

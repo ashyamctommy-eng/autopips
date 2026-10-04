@@ -13,6 +13,7 @@ import {
   Layers,
   Power,
   Settings,
+  Radio,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -31,6 +32,7 @@ export const ADMIN_NAV: NavItem[] = [
   { label: 'Deposits', href: '/admin/deposits', icon: ArrowDownToLine },
   { label: 'Withdrawals', href: '/admin/withdrawals', icon: ArrowUpFromLine },
   { label: 'Bot Control', href: '/admin/bot-control', icon: Power },
+  { label: 'Live Telemetry', href: '/admin/telemetry', icon: Radio },
   { label: 'Audit Logs', href: '/admin/audit', icon: ScrollText },
   { label: 'Platform Settings', href: '/admin/settings', icon: Settings },
 ];
@@ -48,6 +50,7 @@ export interface AdminSidebarProps extends Omit<React.HTMLAttributes<HTMLElement
   pendingKycCount?: number;
   /** Pending withdrawal count for the payouts badge. */
   pendingWithdrawalCount?: number;
+  role?: string;
 }
 
 /**
@@ -62,6 +65,7 @@ export function AdminSidebar({
   items = ADMIN_NAV,
   pendingKycCount,
   pendingWithdrawalCount,
+  role,
   className,
   ...props
 }: AdminSidebarProps) {
@@ -72,9 +76,14 @@ export function AdminSidebar({
     onChange: onCollapsedChange,
   });
 
+  const roleFilteredItems = React.useMemo(
+    () => role === 'SUPER_ADMIN' ? items : items.filter((item) => item.href !== '/admin/telemetry'),
+    [items, role],
+  );
+
   const nav = React.useMemo(
     () =>
-      items.map((item) => {
+      roleFilteredItems.map((item) => {
         if (item.href === '/admin/kyc' && typeof pendingKycCount === 'number' && pendingKycCount > 0) {
           return { ...item, badge: <Badge variant="warn">{pendingKycCount}</Badge> };
         }
@@ -87,7 +96,7 @@ export function AdminSidebar({
         }
         return item;
       }),
-    [items, pendingKycCount, pendingWithdrawalCount],
+    [roleFilteredItems, pendingKycCount, pendingWithdrawalCount],
   );
 
   return (

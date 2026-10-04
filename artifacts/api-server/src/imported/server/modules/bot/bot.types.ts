@@ -131,6 +131,7 @@ export interface OrderOutcome {
   investmentId: string;
   request: PlaceOrderRequest;
   ok: boolean;
+  executionLatencyMs?: number;
   positionId?: string;
   fillPrice?: number;
   brokerMessage?: string;

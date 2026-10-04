@@ -32,6 +32,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { logger } from '../../../../lib/logger';
 import { serverEnv } from '@/lib/env';
 import { resolvedWorkerEngineEnabled } from '@/server/modules/settings/settings.service';
 import { prisma } from '@/lib/prisma';
@@ -58,6 +59,8 @@ import { executeSignal } from './order.manager';
 import { evaluateStrategy, STRATEGY_RULE } from './strategy.engine';
 import { accrueFees, AUDIT_FEE_ACCRUAL_FAILED } from './fee.accrual';
 import type { TradeSignal } from './bot.types';
+import { getTelemetryAnalyticsSnapshot } from '../telemetry/telemetry.analytics';
+import { createTelemetryEventId, publishTelemetryEvent } from '../telemetry/telemetry.events';
 
 /**
  * Re-exported for callers that historically reached for these through the
@@ -323,6 +326,9 @@ async function writeHeartbeat(): Promise<void> {
 /** Runs one sync + strategy cycle. Never throws. */
 async function runCycle(): Promise<void> {
   if (state.ticking) return; // a slow broker call must not stack ticks
+  const cycleStartedAt = performance.now();
+  let tradesExecuted = 0;
+  let latestExecutionLatencyMs: number | null = null;
   state.ticking = true;
   try {
     const stillOurs = await renewLockSafely();
@@ -433,6 +439,12 @@ async function runCycle(): Promise<void> {
           );
 
           const execution = await executeSignal(signal);
+          for (const outcome of execution.outcomes) {
+            if (outcome.ok) tradesExecuted += 1;
+            if (typeof outcome.executionLatencyMs === 'number') {
+              latestExecutionLatencyMs = outcome.executionLatencyMs;
+            }
+          }
           state.lastCycleError = execution.status === 'REJECTED' ? (execution.reason ?? 'rejected') : null;
         }
       }
@@ -453,6 +465,33 @@ async function runCycle(): Promise<void> {
     if (state.startedAt) {
       state.cycleCount += 1;
       await writeHeartbeat();
+      const cycleDurationMs = Math.max(0, Math.round(performance.now() - cycleStartedAt));
+      void (async () => {
+        let activePlanCount: number | null = null;
+        let winRatePct: number | null = null;
+        try {
+          const analytics = await getTelemetryAnalyticsSnapshot();
+          activePlanCount = analytics.activePlanCount;
+          winRatePct = analytics.winRatePct;
+        } catch (err) {
+          logger.warn({ err }, 'Unable to attach database analytics to worker telemetry');
+        }
+        await publishTelemetryEvent({
+          type: 'cycle',
+          eventId: createTelemetryEventId(),
+          timestamp: new Date(),
+          cycleCount: state.cycleCount,
+          cycleDurationMs,
+          intervalSeconds: state.intervalSeconds,
+          enabledStrategies: [...state.enabledStrategies],
+          activePlanCount,
+          tradesExecuted,
+          winRatePct,
+          latestExecutionLatencyMs,
+        });
+      })().catch((err) => {
+        logger.warn({ err }, 'Failed to publish worker cycle telemetry');
+      });
     }
   }
 }

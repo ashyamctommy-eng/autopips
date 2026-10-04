@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { Save, Search } from 'lucide-react';
 
+import { apiRequest } from '@/lib/api-request';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -94,9 +95,8 @@ export function BotRiskPanel({ initial, instruments, instrumentsError }: BotRisk
   const save = React.useCallback(async () => {
     setBusy(true);
     try {
-      const response = await fetch('/api/v1/admin/bot/config', {
+      const response = await apiRequest('/api/v1/admin/bot/config', {
         method: 'PATCH',
-        credentials: 'include',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({
           max_stake_limit: Number(maxStake) || 0,

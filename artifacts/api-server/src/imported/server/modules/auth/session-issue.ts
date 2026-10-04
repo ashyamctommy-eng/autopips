@@ -161,7 +161,7 @@ export async function issueSession(
   };
 }
 
-/** Writes both auth cookies. httpOnly always; Secure in production only. */
+/** Writes both auth cookies with the same cross-site attributes used to clear them. */
 export function setAuthCookies(session: IssuedSession): void {
   const env = serverEnv();
   const store = cookies();

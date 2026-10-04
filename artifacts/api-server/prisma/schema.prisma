@@ -343,6 +343,12 @@ model TradeRecord {
   swap              Decimal          @default(0.00) @db.Decimal(18, 2)
   netPnL            Decimal          @default(0.00) @db.Decimal(18, 2)
   status            String // "OPEN" | "CLOSED" | "CANCELLED"
+  /// Strategy identifier that produced the broker-confirmed fill, when known.
+  strategyId        String?
+  /// Wall-clock timestamps and monotonic-duration result for the broker order.
+  executionRequestedAt DateTime?
+  executionCompletedAt DateTime?
+  executionLatencyMs Int?
   openedAt          DateTime         @default(now())
   closedAt          DateTime?
 
@@ -351,6 +357,8 @@ model TradeRecord {
   @@index([status])
   @@index([instrument])
   @@index([openedAt])
+  @@index([status, strategyId, closedAt])
+  @@index([executionCompletedAt])
 }
 
 model AuditLog {

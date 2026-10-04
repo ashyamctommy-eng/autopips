@@ -77,6 +77,7 @@ const GROUPS: Record<string, Group> = {
       '/admin/logs': () => import('@/app/admin/logs/page'),
       '/admin/plans': () => import('@/app/admin/plans/page'),
       '/admin/settings': () => import('@/app/admin/settings/page'),
+      '/admin/telemetry': () => import('@/app/admin/telemetry/page'),
       '/admin/users': () => import('@/app/admin/users/page'),
       '/admin/withdrawals': () => import('@/app/admin/withdrawals/page'),
     },

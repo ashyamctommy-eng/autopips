@@ -61,3 +61,108 @@ export const HealthCheckResponse = zod.object({
 })
 
 
+/**
+ * @summary Current platform telemetry and trading analytics
+ */
+export const GetAdminTelemetrySummaryResponse = zod.object({
+  "ok": zod.literal(true),
+  "data": zod.object({
+  "runtime": zod.object({
+  "status": zod.enum(['ONLINE', 'STALE', 'OFFLINE']),
+  "heartbeatAt": zod.coerce.date().nullable(),
+  "cycleCount": zod.number().int().nullable(),
+  "cycleDurationMs": zod.number().int().nullable(),
+  "intervalSeconds": zod.number().int().nullable(),
+  "enabledStrategies": zod.array(zod.string()),
+  "activePlanCount": zod.number().int().nullable(),
+  "tradesExecuted": zod.number().int().nullable(),
+  "latestExecutionLatencyMs": zod.number().nullish()
+}),
+  "financials": zod.object({
+  "activeCapitalUsd": zod.string(),
+  "idleBalanceUsd": zod.string(),
+  "totalEquityUsd": zod.string(),
+  "realizedPnlUsd": zod.string(),
+  "unrealizedPnlUsd": zod.string()
+}),
+  "performance": zod.object({
+  "confirmedExecutions": zod.number().int(),
+  "closedTrades": zod.number().int(),
+  "winRatePct": zod.number().nullable(),
+  "strategyPerformance": zod.array(zod.object({
+  "strategyId": zod.string(),
+  "closedTrades": zod.number().int(),
+  "winningTrades": zod.number().int(),
+  "winRatePct": zod.number().nullable(),
+  "netPnlUsd": zod.string()
+}))
+}),
+  "executionLatency": zod.object({
+  "windowHours": zod.number().int(),
+  "sampleCount": zod.number().int(),
+  "averageMs": zod.number().nullable(),
+  "p95Ms": zod.number().nullable()
+})
+})
+})
+
+
+/**
+ * @summary Filtered and paginated broker execution records
+ */
+export const getAdminTelemetryLogsQueryPageDefault = 1;
+
+export const getAdminTelemetryLogsQueryPageSizeDefault = 25;
+export const getAdminTelemetryLogsQueryPageSizeMax = 100;
+
+export const getAdminTelemetryLogsQueryStrategyMax = 64;
+
+export const getAdminTelemetryLogsQueryQMax = 120;
+
+
+
+export const GetAdminTelemetryLogsQueryParams = zod.object({
+  "page": zod.coerce.number().int().min(1).default(getAdminTelemetryLogsQueryPageDefault),
+  "pageSize": zod.coerce.number().int().min(1).max(getAdminTelemetryLogsQueryPageSizeMax).default(getAdminTelemetryLogsQueryPageSizeDefault),
+  "strategy": zod.coerce.string().max(getAdminTelemetryLogsQueryStrategyMax).optional(),
+  "status": zod.enum(['OPEN', 'CLOSED', 'CANCELLED']).optional(),
+  "from": zod.date().optional(),
+  "to": zod.date().optional(),
+  "q": zod.coerce.string().max(getAdminTelemetryLogsQueryQMax).optional().describe('Match an instrument or investor email')
+})
+
+export const GetAdminTelemetryLogsResponse = zod.object({
+  "ok": zod.literal(true),
+  "data": zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string(),
+  "strategyId": zod.string().nullable(),
+  "instrument": zod.string(),
+  "direction": zod.string(),
+  "status": zod.string(),
+  "volume": zod.string(),
+  "entryPrice": zod.string(),
+  "exitPrice": zod.string().nullable(),
+  "userPnlUsd": zod.string(),
+  "openedAt": zod.coerce.date(),
+  "closedAt": zod.coerce.date().nullable(),
+  "executionRequestedAt": zod.coerce.date().nullable(),
+  "executionCompletedAt": zod.coerce.date().nullable(),
+  "executionLatencyMs": zod.number().int().nullable(),
+  "userId": zod.string(),
+  "userEmail": zod.string(),
+  "planName": zod.string()
+})),
+  "page": zod.number().int(),
+  "pageSize": zod.number().int(),
+  "total": zod.number().int()
+})
+})
+
+
+/**
+ * @summary Authenticated server-sent telemetry events
+ */
+export const StreamAdminTelemetryResponse = zod.unknown()
+
+

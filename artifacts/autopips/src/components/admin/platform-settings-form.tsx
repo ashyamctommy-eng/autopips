@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { RotateCcw, Save } from 'lucide-react';
 
+import { apiRequest } from '@/lib/api-request';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -95,9 +96,8 @@ function SettingRow({
       setBusy(true);
       setError(null);
       try {
-        const response = await fetch('/api/v1/admin/settings', {
+        const response = await apiRequest('/api/v1/admin/settings', {
           method: 'PUT',
-          credentials: 'include',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify({ key: setting.key, value: next }),
         });

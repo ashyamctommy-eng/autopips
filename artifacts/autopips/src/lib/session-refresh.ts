@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { apiRequest } from '@/lib/api-request';
 
 /**
  * Session keep-alive and one-shot recovery for authenticated API calls.
@@ -43,9 +44,8 @@ export function refreshSession(): Promise<boolean> {
 
   inFlight = (async () => {
     try {
-      const response = await fetch('/api/v1/auth/refresh', {
+      const response = await apiRequest('/api/v1/auth/refresh', {
         method: 'POST',
-        credentials: 'same-origin',
         cache: 'no-store',
         headers: { accept: 'application/json' },
       });
@@ -72,14 +72,14 @@ export function refreshSession(): Promise<boolean> {
  * body is returned as-is, because it cannot be replayed.
  */
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const response = await fetch(input, init);
+  const response = await apiRequest(input, init);
   if (response.status !== 401) return response;
   if (init.body !== undefined && typeof init.body !== 'string') return response;
 
   const refreshed = await refreshSession();
   if (!refreshed) return response;
 
-  return fetch(input, init);
+  return apiRequest(input, init);
 }
 
 /**

@@ -1,7 +1,13 @@
 import { cookies } from '@/lib/request-context';
 import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
-import { ACCESS_COOKIE, REFRESH_COOKIE, verifyAccessToken, isSessionRevoked } from './token.service';
+import {
+  ACCESS_COOKIE,
+  REFRESH_COOKIE,
+  authCookieOptions,
+  verifyAccessToken,
+  isSessionRevoked,
+} from './token.service';
 import type { SessionUser } from '@/types/api';
 import type { Role } from '@prisma/client';
 
@@ -118,6 +124,6 @@ export async function requireVerifiedClient(): Promise<SessionUser> {
 export function clearAuthCookies(): void {
   const store = cookies();
   for (const name of [ACCESS_COOKIE, REFRESH_COOKIE]) {
-    store.set(name, '', { path: '/', maxAge: 0 });
+    store.set(name, '', authCookieOptions(0));
   }
 }
