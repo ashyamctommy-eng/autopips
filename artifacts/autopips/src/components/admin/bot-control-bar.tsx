@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { AlertOctagon, Play, ShieldAlert } from 'lucide-react';
 
+import { apiRequest } from '@/lib/api-request';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -88,9 +89,8 @@ export function BotControlBar({ initial }: BotControlBarProps) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch('/api/v1/admin/bot/kill-switch', {
+      const response = await apiRequest('/api/v1/admin/bot/kill-switch', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({ active, ...(stopReason ? { reason: stopReason } : {}) }),
       });

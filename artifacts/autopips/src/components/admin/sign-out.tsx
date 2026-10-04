@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { useRouter } from '@/lib/next/navigation';
 
+import { apiRequest } from '@/lib/api-request';
 import { Spinner } from '@/components/ui/spinner';
 
 /**
@@ -22,10 +23,9 @@ export default function SignOut() {
 
     const run = async () => {
       try {
-        const response = await fetch('/api/v1/auth/logout', {
+        const response = await apiRequest('/api/v1/auth/logout', {
           method: 'POST',
           headers: { accept: 'application/json' },
-          credentials: 'same-origin',
           cache: 'no-store',
         });
         if (!response.ok) throw new Error(`Sign-out failed (${response.status}).`);

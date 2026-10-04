@@ -150,8 +150,8 @@ export function BrokerManager({ initialConnections, canManage }: BrokerManagerPr
     setSubmitting(true);
     setFormError(null);
     try {
-      // The token is sent once, in this request body, over the same-origin TLS
-      // connection. `adminRequest` never logs a body.
+      // The token is sent once, in this HTTPS API request body.
+      // `adminRequest` never logs a body.
       const created = await adminRequest<BrokerConnectionDTO>('/api/v1/admin/brokers', {
         method: 'POST',
         body: {

@@ -33,6 +33,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/use-toast';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { adminRequest, errorMessage } from '@/components/admin/api-client';
+import { resolveApiUrl } from '@/lib/api-request';
 import {
   KYC_DOCUMENT_LABELS,
   KYC_ID_TYPE_LABELS,
@@ -91,8 +92,8 @@ function declaredRows(detail: KycDetailView): DeclaredRow[] {
 /**
  * One document slot, streamed on demand.
  *
- * `entry.url` comes from `GET /api/v1/admin/kyc/:id/files` — a same-origin,
- * cookie-authenticated path to the audited stream route
+ * `entry.url` comes from `GET /api/v1/admin/kyc/:id/files` — a cookie-authenticated
+ * API path to the audited stream route
  * (`GET /api/v1/admin/kyc/:id/documents/:kind`). There is no bearer credential
  * to hand out and nothing to expire: an ADMIN session is required for every
  * fetch, and the bytes are decrypted from the platform's own encrypted store only
@@ -149,6 +150,8 @@ function DocumentCard({
     );
   }
 
+  const documentUrl = resolveApiUrl(entry.url);
+
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-line bg-base-900/40 p-3">
       <div className="flex items-center justify-between gap-2">
@@ -159,7 +162,7 @@ function DocumentCard({
           ) : null}
         </span>
         <a
-          href={entry.url}
+          href={documentUrl}
           target="_blank"
           rel="noreferrer noopener"
           className="inline-flex items-center gap-1 text-xs text-brand-300 underline-offset-4 hover:underline"
@@ -171,7 +174,7 @@ function DocumentCard({
 
       {entry.contentType === 'application/pdf' ? (
         <object
-          data={entry.url}
+          data={documentUrl}
           type="application/pdf"
           className="h-64 w-full rounded border border-line bg-base-950"
           aria-label={`${label} (PDF)`}
@@ -187,7 +190,8 @@ function DocumentCard({
       ) : (
         /* eslint-disable-next-line @next/next/no-img-element -- the stream route is cookie-authenticated, so it is not a public URL the Next.js image optimiser could fetch */
         <img
-          src={entry.url}
+          crossOrigin="use-credentials"
+          src={documentUrl}
           alt={`${label} submitted for identity verification`}
           onError={() => setBroken(true)}
           className="max-h-64 w-full rounded border border-line bg-base-950 object-contain"

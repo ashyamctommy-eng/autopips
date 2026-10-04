@@ -13,7 +13,8 @@ import type { Role } from '@prisma/client';
  * Refresh rotation is single-use and tracked in Redis for instant revocation.
  *
  * The JWT never carries secrets and is never written to localStorage on the
- * client: the browser holds it in an httpOnly, SameSite=Lax cookie.
+ * client: the browser holds it in an httpOnly cookie (SameSite=None in
+ * production so the Replit web app can call the separately hosted API).
  */
 
 export const ACCESS_COOKIE = 'ap_at';
@@ -97,12 +98,13 @@ export async function isSessionRevoked(sessionId: string): Promise<boolean> {
   }
 }
 
-/** Cookie options for the auth cookies. Secure in production only. */
+/** Cookie options for browser sessions; cross-site cookies need None + Secure. */
 export function authCookieOptions(maxAgeSeconds: number) {
+  const production = serverEnv().NODE_ENV === 'production';
   return {
     httpOnly: true,
-    secure: serverEnv().NODE_ENV === 'production',
-    sameSite: 'lax' as const,
+    secure: production,
+    sameSite: production ? ('none' as const) : ('lax' as const),
     path: '/',
     maxAge: maxAgeSeconds,
   };

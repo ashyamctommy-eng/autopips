@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { CircleAlert, Send } from 'lucide-react';
 
+import { apiRequest } from '@/lib/api-request';
 import { cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -114,7 +115,7 @@ export function ContactForm({ className }: ContactFormProps) {
     setState({ kind: 'submitting' });
 
     try {
-      const response = await fetch('/api/v1/contact', {
+      const response = await apiRequest('/api/v1/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(result.data),

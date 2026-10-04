@@ -2,9 +2,8 @@
  * Browser-side socket helper for the trading channel.
  *
  * Contains NO secrets and never touches `localStorage`: the access token lives
- * in an httpOnly, SameSite=Lax cookie (`ACCESS_COOKIE` on the server), so the
- * browser sends it automatically on the handshake and JavaScript can never
- * read or leak it.
+ * in an httpOnly cookie (`ACCESS_COOKIE` on the server), so JavaScript can
+ * never read or leak it.
  *
  * Auth precedence on the server (`socket-server.ts`):
  *   1. `handshake.auth.token`  — used by this client only for the fallback
@@ -32,6 +31,7 @@
 import * as socketIoClientRuntime from 'socket.io-client';
 
 import { WS_EVENTS } from '@/lib/contracts';
+import { apiRequest } from '@/lib/api-request';
 import type { AccountOverview, ActivityEventDTO, PositionDTO } from '@/types/api';
 
 /** Namespace path — must match `TRADING_NAMESPACE` on the server. */
@@ -283,9 +283,8 @@ function pickNumber(source: unknown, key: string): number | null {
  */
 export async function fetchSocketToken(): Promise<string | null> {
   try {
-    const response = await fetch(SOCKET_TOKEN_ENDPOINT, {
+    const response = await apiRequest(SOCKET_TOKEN_ENDPOINT, {
       method: 'GET',
-      credentials: 'include',
       headers: { accept: 'application/json' },
       cache: 'no-store',
     });
@@ -313,11 +312,10 @@ export function isAuthFailure(err: unknown): boolean {
 /**
  * Is the configured socket runtime on a DIFFERENT origin than this page?
  *
- * This matters because the access cookie is host-only and `SameSite=Lax`: when
- * the realtime runtime lives on its own host (the normal shape on Railway,
- * where each service gets its own domain) the browser will NOT attach it to the
- * handshake. Same-origin deployments behind a reverse proxy do send it, so the
- * cookie stays the preferred path there.
+ * A separately hosted realtime service may not receive the browser's session
+ * cookie, especially under third-party-cookie restrictions. In that case the
+ * client uses a short-lived socket-only token rather than relying on cookie
+ * delivery across origins.
  */
 function isCrossOriginRuntime(): boolean {
   const baseUrl = import.meta.env.VITE_WS_URL;

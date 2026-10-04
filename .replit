@@ -54,3 +54,4 @@ MARKET_DATA_PROVIDER = "twelve"
 
 [userenv.production]
 ADMIN_SETUP_EMAIL = "ceo@autopips.pro"
+VITE_API_BASE_URL = "https://autopips.onrender.com"

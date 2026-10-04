@@ -643,7 +643,7 @@ export function RegisterForm({ className }: RegisterFormProps) {
         </Button>
 
         <p className="text-xs leading-relaxed text-muted">
-          Your password is sent over the same-origin API and stored as an Argon2id hash. It is never
+          Your password is sent to the API over HTTPS and stored as an Argon2id hash. It is never
           written to localStorage or any part of the page.
         </p>
       </form>
