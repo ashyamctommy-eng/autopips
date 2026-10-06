@@ -55,3 +55,19 @@ MARKET_DATA_PROVIDER = "twelve"
 [userenv.production]
 ADMIN_SETUP_EMAIL = "ceo@autopips.pro"
 VITE_API_BASE_URL = "https://autopips.onrender.com"
+
+[[ports]]
+localPort = 3001
+externalPort = 3001
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
+localPort = 20895
+externalPort = 80
