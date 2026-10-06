@@ -10,3 +10,4 @@
 - [React type-version seams](react-type-version-seams.md) — adapt isolated third-party React declaration mismatches locally; avoid global type overrides that disrupt Expo.
 - [Neon Prisma migration routing](neon-prisma-migrations.md) — use Neon’s direct URL for Prisma migrations; pooled connections can strand advisory locks.
 - [Render WebSocket hosting](render-websocket-hosting.md) — Vercel must use the worker’s public origin; the Render API origin does not serve `/ws/socket.io`.
+- [Vercel app-root config](vercel-app-root-config.md) — when Vercel’s Root Directory is `artifacts/autopips`, deployment config and output paths must be relative to that folder.
