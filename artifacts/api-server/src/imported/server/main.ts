@@ -817,12 +817,18 @@ async function main(): Promise<void> {
   });
 
   // 3. Socket server, attached before listen so no connection is missed.
+  const socketCorsOrigins = [
+    env.NEXT_PUBLIC_APP_URL,
+    ...(process.env.CORS_ALLOWED_ORIGINS ?? '').split(','),
+  ]
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
   const sockets: TradingSocketServer = createTradingSocketServer(httpServer, {
     path: DEFAULT_SOCKET_PATH,
     corsOrigins:
       env.NODE_ENV === 'production'
-        ? [env.NEXT_PUBLIC_APP_URL]
-        : [env.NEXT_PUBLIC_APP_URL, 'http://localhost:3000', 'http://127.0.0.1:3000'],
+        ? [...new Set(socketCorsOrigins)]
+        : [...new Set([...socketCorsOrigins, 'http://localhost:3000', 'http://127.0.0.1:3000'])],
   });
   await sockets.ready;
 

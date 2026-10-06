@@ -318,13 +318,18 @@ export function isAuthFailure(err: unknown): boolean {
  * delivery across origins.
  */
 function isCrossOriginRuntime(): boolean {
-  const baseUrl = import.meta.env.VITE_WS_URL;
+  const baseUrl = configuredSocketBaseUrl();
   if (!baseUrl || typeof window === 'undefined') return false;
   try {
     return new URL(baseUrl, window.location.href).origin !== window.location.origin;
   } catch {
     return false;
   }
+}
+
+/** Optional public worker origin; unset uses the same-origin Replit proxy. */
+function configuredSocketBaseUrl(): string {
+  return import.meta.env.VITE_WS_URL?.trim().replace(/\/+$/, '') ?? '';
 }
 
 /** Shared in-flight fetch so parallel handshake attempts make one request. */
@@ -361,14 +366,14 @@ export interface CreateTradingSocketOptions {
 /**
  * Connect to the `/ws/trading` namespace.
  *
- * • `NEXT_PUBLIC_WS_URL` set  → connect straight to the standalone runtime.
+ * • `VITE_WS_URL` set         → connect straight to the separately hosted worker.
  * • otherwise                 → same origin, relying on the reverse proxy that
  *                               maps `/ws/socket.io` to the runtime.
  *
  * `withCredentials: true` is what makes the httpOnly access cookie travel with
  * the handshake; the server reads it from `handshake.headers.cookie`.
  *
- * When `NEXT_PUBLIC_WS_URL` points at a DIFFERENT origin (separate realtime
+ * When `VITE_WS_URL` points at a DIFFERENT origin (separate realtime
  * host, as on Railway) that cookie will not be sent, so the client fetches a
  * short-lived socket token and presents it as `handshake.auth.token` instead.
  * Same-origin deployments keep using the cookie.
@@ -385,7 +390,7 @@ export function createTradingSocket(options: CreateTradingSocketOptions = {}): T
     return null;
   }
 
-  const baseUrl = import.meta.env.VITE_WS_URL;
+  const baseUrl = configuredSocketBaseUrl();
   const crossOrigin = isCrossOriginRuntime();
 
   return runtime(baseUrl ? `${baseUrl}${TRADING_SOCKET_NAMESPACE}` : TRADING_SOCKET_NAMESPACE, {
