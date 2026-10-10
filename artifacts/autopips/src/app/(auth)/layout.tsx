@@ -3,6 +3,7 @@ import Link from '@/lib/next/link';
 import { ArrowLeft, FileLock2, KeyRound, ShieldCheck, type LucideIcon } from 'lucide-react';
 
 import { BrandMark } from '@/components/shared/brand-mark';
+import { CookieConsent } from '@/components/public/cookie-consent';
 
 /**
  * Authentication route group — `(auth)`.
@@ -112,6 +113,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           </div>
         </footer>
       </div>
+      <CookieConsent />
     </div>
   );
 }

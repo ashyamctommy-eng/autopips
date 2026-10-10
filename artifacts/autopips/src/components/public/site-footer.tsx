@@ -3,6 +3,7 @@ import Link from '@/lib/next/link';
 
 import { cn } from '@/lib/utils';
 import { BrandMark } from '@/components/shared/brand-mark';
+import { CookiePreferencesButton } from '@/components/public/cookie-consent';
 import { TARGET_RETURN_DISCLAIMER } from '@/lib/contracts';
 
 /**
@@ -51,10 +52,16 @@ export const RISK_LINE =
 
 export interface SiteFooterProps {
   className?: string;
+  /**
+   * Admin-editable direct-line mailboxes (Admin → Platform settings). When absent
+   * the built-in {@link CONTACT_LINES} defaults are shown.
+   */
+  contacts?: readonly { label: string; email: string; blurb: string }[];
 }
 
-export function SiteFooter({ className }: SiteFooterProps) {
+export function SiteFooter({ className, contacts }: SiteFooterProps) {
   const year = new Date().getFullYear();
+  const contactLines = contacts && contacts.length > 0 ? contacts : CONTACT_LINES;
 
   return (
     <footer className={cn('border-t border-line bg-base-950/60', className)}>
@@ -109,7 +116,7 @@ export function SiteFooter({ className }: SiteFooterProps) {
               Contact
             </h2>
             <ul className="flex flex-col gap-3">
-              {CONTACT_LINES.map((line) => (
+              {contactLines.map((line) => (
                 <li key={line.email} className="flex flex-col gap-0.5">
                   <a
                     href={`mailto:${line.email}`}
@@ -135,10 +142,14 @@ export function SiteFooter({ className }: SiteFooterProps) {
           </p>
           <div className="flex flex-col gap-2 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
             <p>© {year} Baltimore Capital. All rights reserved.</p>
-            <p>
-              Baltimore Capital is not a bank and client balances are not insured. Nothing on this site is
-              investment advice.
-            </p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <CookiePreferencesButton className="text-xs text-muted" />
+              <span aria-hidden>·</span>
+              <p>
+                Baltimore Capital is not a bank and client balances are not insured. Nothing on this site is
+                investment advice.
+              </p>
+            </div>
           </div>
         </div>
       </div>

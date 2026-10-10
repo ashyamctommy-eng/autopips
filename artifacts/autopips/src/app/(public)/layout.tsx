@@ -2,6 +2,8 @@ import * as React from 'react';
 
 import { SiteHeader } from '@/components/public/site-header';
 import { SiteFooter } from '@/components/public/site-footer';
+import { CookieConsent } from '@/components/public/cookie-consent';
+import { getPublicContactLines } from '@/lib/services/settings.service';
 
 /**
  * Public (marketing) route group.
@@ -10,8 +12,19 @@ import { SiteFooter } from '@/components/public/site-footer';
  * highlight and the footer renders entirely on the server. The group is
  * anonymous — nothing in this tree reads a session, and nothing here imports a
  * server module except the pages that fetch the public plan list.
+ *
+ * The support mailboxes are admin-editable (Admin → Platform settings), read
+ * through a whitelisted anonymous RPC. If that read fails the footer falls back
+ * to its built-in defaults, so a settings outage never blanks the contact block.
  */
-export default function PublicLayout({ children }: { children: React.ReactNode }) {
+export default async function PublicLayout({ children }: { children: React.ReactNode }) {
+  let contacts: Awaited<ReturnType<typeof getPublicContactLines>> | undefined;
+  try {
+    contacts = await getPublicContactLines();
+  } catch {
+    contacts = undefined;
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-base-900">
       <a
@@ -24,7 +37,8 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       <main id="main" className="flex-1">
         {children}
       </main>
-      <SiteFooter />
+      <SiteFooter contacts={contacts} />
+      <CookieConsent />
     </div>
   );
 }

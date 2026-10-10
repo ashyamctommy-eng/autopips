@@ -28,7 +28,7 @@ const readMethods: Record<string, readonly string[]> = {
   'server/modules/payments/payments.service': ['listDeposits', 'listWithdrawals', 'listSupportedCurrencies', 'adminListDeposits', 'adminListWithdrawals'],
   'server/modules/kyc/kyc.service': ['getMyKyc', 'listKycQueue'],
   'server/modules/market/public-market.service': ['listPublicSymbols'],
-  'server/modules/settings/settings.service': ['listAdminSettings'],
+  'server/modules/settings/settings.service': ['listAdminSettings', 'publicContactLines'],
   'app/admin/_lib/admin-data': ['countPendingWithdrawals', 'attachWithdrawalEmails'],
   'server/modules/legal/disclosure': ['isInternalExecutionMode', 'internalExecutionNotice'],
 };
@@ -80,7 +80,8 @@ router.post('/api/migration/query', async (req, res) => {
         return;
       }
       const publicRead = (module === 'server/modules/account/account.service' && method === 'listActivePlans') ||
-        module === 'server/modules/legal/disclosure';
+        module === 'server/modules/legal/disclosure' ||
+        (module === 'server/modules/settings/settings.service' && method === 'publicContactLines');
       if (!publicRead) {
         const user = await session.requireSessionUser();
         const staffRead = module.includes('/admin/') || module.includes('/audit/') ||

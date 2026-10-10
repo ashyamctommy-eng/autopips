@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { ContactForm } from '@/components/public/contact-form';
 import { CONTACT_LINES } from '@/components/public/site-footer';
+import { getPublicContactLines } from '@/lib/services/settings.service';
 
 /**
  * Contact page.
@@ -26,7 +27,16 @@ export const metadata: Metadata = {
 
 const LINE_ICONS = [ShieldCheck, Lock, Scale] as const;
 
-export default function ContactPage() {
+export default async function ContactPage() {
+  // Admin-editable mailboxes (Admin → Platform settings); fall back to defaults.
+  let contacts: Awaited<ReturnType<typeof getPublicContactLines>> | undefined;
+  try {
+    contacts = await getPublicContactLines();
+  } catch {
+    contacts = undefined;
+  }
+  const lines = contacts && contacts.length > 0 ? contacts : CONTACT_LINES;
+
   return (
     <>
       <div className="mx-auto w-full max-w-[1400px] px-4 pt-10 sm:px-6 lg:px-8">
@@ -62,7 +72,7 @@ export default function ContactPage() {
                   Direct lines
                 </h2>
                 <ul className="flex flex-col gap-4">
-                  {CONTACT_LINES.map((line, index) => {
+                  {lines.map((line, index) => {
                     const Icon = LINE_ICONS[index] ?? ShieldCheck;
                     return (
                       <li key={line.email} className="flex min-w-0 gap-3">

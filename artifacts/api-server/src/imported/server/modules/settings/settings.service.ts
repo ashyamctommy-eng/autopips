@@ -58,6 +58,10 @@ export type PlatformSettingKey =
   | 'risk.daily_loss_limit_usd'
   | 'risk.allowed_symbols'
   | 'risk.min_payout_percentage'
+  // ── public support contacts (Admin → Settings) ──
+  | 'contact.support_email'
+  | 'contact.security_email'
+  | 'contact.compliance_email'
   // ── engine controls (Admin → Settings) ──
   | 'engine.worker_enabled';
 
@@ -285,6 +289,37 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     defaultValue: '',
     inputHint: 'e.g. frxXAUUSD,R_100',
   },
+  // ── public support contacts (Admin → Settings) ──
+  {
+    key: 'contact.support_email',
+    envName: 'CONTACT_SUPPORT_EMAIL',
+    label: 'Support contact email',
+    description:
+      'The "Support" mailbox shown in the site footer and on the Contact page. Client enquiries about accounts, deposits, withdrawals and KYC route here.',
+    kind: 'text',
+    defaultValue: 'support@baltimorecapital.pro',
+    inputHint: 'e.g. support@baltimorecapital.pro',
+  },
+  {
+    key: 'contact.security_email',
+    envName: 'CONTACT_SECURITY_EMAIL',
+    label: 'Security contact email',
+    description:
+      'The "Security" mailbox shown in the site footer and on the Contact page. Vulnerability reports and account-compromise notices route here.',
+    kind: 'text',
+    defaultValue: 'security@baltimorecapital.pro',
+    inputHint: 'e.g. security@baltimorecapital.pro',
+  },
+  {
+    key: 'contact.compliance_email',
+    envName: 'CONTACT_COMPLIANCE_EMAIL',
+    label: 'Compliance contact email',
+    description:
+      'The "Compliance" mailbox shown in the site footer and on the Contact page. Identity review and regulatory enquiries route here.',
+    kind: 'text',
+    defaultValue: 'compliance@baltimorecapital.pro',
+    inputHint: 'e.g. compliance@baltimorecapital.pro',
+  },
   {
     key: 'disclosure.internal_execution_notice',
     envName: 'DISCLOSURE_INTERNAL_EXECUTION_NOTICE',
@@ -483,6 +518,37 @@ function hydrateInBackground(): void {
 }
 
 /** Await a fresh read (admin console; after a write). */
+export interface PublicContactLine {
+  label: string;
+  email: string;
+  blurb: string;
+}
+
+/**
+ * Public support/direct-line mailboxes, editable in Admin → Settings. Rendered in
+ * the site footer and on /contact. Defaults match the historical hard-coded
+ * addresses, so an unconfigured deployment is unchanged.
+ */
+export function publicContactLines(): PublicContactLine[] {
+  return [
+    {
+      label: 'Support',
+      email: getSetting('contact.support_email'),
+      blurb: 'Account, deposits, withdrawals and KYC.',
+    },
+    {
+      label: 'Security',
+      email: getSetting('contact.security_email'),
+      blurb: 'Vulnerability reports and account compromise.',
+    },
+    {
+      label: 'Compliance',
+      email: getSetting('contact.compliance_email'),
+      blurb: 'Identity review and regulatory enquiries.',
+    },
+  ];
+}
+
 export async function ensureSettingsLoaded(force = false): Promise<void> {
   if (!force && Date.now() - hydratedAt < TTL_MS) return;
   try {
