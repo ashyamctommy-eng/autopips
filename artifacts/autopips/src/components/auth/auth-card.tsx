@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
  *
  * Presentational only — no state, no data, no `'use client'`. It exists so the
  * sign-in form, the two-factor step and the registration form render one visual
- * language: a hairline-bordered surface on the dark base, a thin brand-to-profit
+ * language: a hairline-bordered surface on the dark base, a thin brand-to-accent
  * accent line, a single `<h1>`, and an optional footer strip for cross-links.
  *
  * The card owns the page's only `<h1>`; callers must not render another one.
@@ -29,7 +29,7 @@ export function AuthCard({ title, description, children, footer, className }: Au
     <Card className={cn('overflow-hidden', className)}>
       <div
         aria-hidden
-        className="h-0.5 w-full bg-gradient-to-r from-brand-400 via-brand to-profit"
+        className="h-0.5 w-full bg-gradient-to-r from-brand-400 via-brand to-accent-400"
       />
       <div className="flex flex-col gap-2 p-6 pb-0 sm:p-7 sm:pb-0">
         <h1 className="text-xl font-semibold leading-tight tracking-tight text-base-100 sm:text-2xl">
