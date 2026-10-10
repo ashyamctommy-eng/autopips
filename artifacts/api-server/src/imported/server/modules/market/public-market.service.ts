@@ -389,9 +389,19 @@ export async function subscribePublicTicks(
     await ensurePublicTickSubscription(symbol);
   } catch (error) {
     if (tickListeners.has(symbol)) throw error;
-    listeners.delete(onQuote);
-    if (listeners.size === 0) quoteListeners.delete(symbol);
-    throw error;
+    if (isMarketClosedError(error)) {
+      // A CLOSED MARKET IS NOT A FAILURE. Deriv refuses tick subscriptions for
+      // instruments outside their trading hours (e.g. forex at the weekend,
+      // `MarketIsClosed`). The old code tore the demand down and reported "not
+      // streaming", so the symbol only recovered on a client reload. Keep the
+      // listeners registered and retry on a timer instead: the feed starts by
+      // itself when the market opens and the client just shows "awaiting tick".
+      schedulePublicTickReconnect(symbol, 60_000);
+    } else {
+      listeners.delete(onQuote);
+      if (listeners.size === 0) quoteListeners.delete(symbol);
+      throw error;
+    }
   }
   if (alreadyStreaming) {
     const last = lastPublicQuote(symbol);
@@ -420,6 +430,17 @@ export async function subscribePublicTicks(
       if (subscriptionId && client?.isConnected()) await client.forget(subscriptionId);
     },
   };
+}
+
+/**
+ * Deriv answers a tick subscription for an instrument outside its trading hours
+ * with `MarketIsClosed` (and the market's reopen time). That is a scheduled
+ * pause, not an outage, so it is handled by retaining demand and retrying rather
+ * than by failing the stream.
+ */
+function isMarketClosedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /MarketIsClosed|market is (presently )?closed/i.test(message);
 }
 
 /**

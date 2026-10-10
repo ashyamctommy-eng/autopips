@@ -174,6 +174,14 @@ const TWELVE_DATA_INTERVALS: Readonly<Record<string, string>> = {
  */
 export function providerForSymbol(brokerSymbol: string): MarketDataProvider {
   if (marketDataProvider() !== 'twelve') return 'deriv';
+  // GRACEFUL FALLBACK (2026-10-10). `MARKET_DATA_PROVIDER=twelve` with no key
+  // configured used to route every mapped instrument (all of forex/metals) to a
+  // vendor that can only answer "not configured" — so those charts showed "No
+  // chart data" while synthetics (Deriv) worked. The env contract promises a
+  // missing key never breaks the platform, so an UNCONFIGURED Twelve Data falls
+  // back to Deriv for everything. Add the key (env or Admin → Settings) and
+  // mapped symbols route to Twelve Data again on the next read.
+  if (twelveDataApiKey().length === 0) return 'deriv';
   if (twelveDataSymbol(brokerSymbol) === null) return 'deriv';
   if (PLAN_GATED_INSTRUMENTS[brokerSymbol] !== undefined) return 'deriv';
   return 'twelve';
