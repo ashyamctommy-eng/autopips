@@ -13,14 +13,17 @@
  *   html[data-theme='light']    → the visitor-chosen light theme (ThemeToggle)
  *   html:has(.theme-admin)      → the light executive console (/admin/*)
  *
+ * The palette is "Beacon": a warm ink-navy base, a calm azure primary
+ * ("Harbor Blue") and a warm gold secondary ("Capital Gold"). Warmer neutrals,
+ * softer geometry and a human type scale replace the previous cyan terminal
+ * look. Semantic money colours (profit green / loss red / warn orange) are
+ * unchanged in meaning.
+ *
  * The two light selectors share one variable block: the console and the
  * user-selected light theme are the same palette, so the admin scope cannot
  * drift from it. The selectors have equal specificity and the admin one is
  * listed last, so anything under `.theme-admin` stays on the light executive
  * palette whatever the visitor picked.
- *
- * The dark block below holds the exact literals the Tailwind config used to
- * hard-code, so the default rendering is unchanged.
  *
  * Note the scope: the override sits on `html`, not on the admin wrapper, because
  * Radix portals (dialogs, selects, tooltips) mount on document.body — OUTSIDE the
@@ -33,65 +36,75 @@
   :root {
     color-scheme: dark;
 
-    /* Surfaces */
-    --c-base: 11 14 20;
-    --c-base-50: 245 247 250;
-    --c-base-100: 230 234 242;
-    --c-base-700: 26 31 43;
-    --c-base-800: 20 24 34;
-    --c-base-850: 16 20 28;
-    --c-base-900: 11 14 20;
-    --c-base-950: 7 9 16;
+    /* Surfaces — warm ink navy */
+    --c-base: 11 17 32;
+    --c-base-50: 244 246 251;
+    --c-base-100: 231 235 245;
+    --c-base-700: 27 36 54;
+    --c-base-800: 21 29 46;
+    --c-base-850: 16 24 39;
+    --c-base-900: 11 17 32;
+    --c-base-950: 7 11 22;
 
-    /* Brand accent — cyan */
-    --c-brand: 34 211 238;
-    --c-brand-50: 236 254 255;
-    --c-brand-100: 207 250 254;
-    --c-brand-300: 103 232 249;
-    --c-brand-400: 34 211 238;
-    --c-brand-500: 6 182 212;
-    --c-brand-600: 8 145 178;
-    --c-brand-700: 14 116 144;
+    /* Brand accent — Harbor Blue */
+    --c-brand: 76 111 255;
+    --c-brand-50: 238 242 255;
+    --c-brand-100: 224 231 255;
+    --c-brand-300: 147 170 255;
+    --c-brand-400: 110 140 255;
+    --c-brand-500: 76 111 255;
+    --c-brand-600: 59 91 219;
+    --c-brand-700: 47 73 184;
+
+    /* Secondary accent — Capital Gold (identity highlights only) */
+    --c-accent: 240 180 80;
+    --c-accent-50: 255 247 230;
+    --c-accent-100: 253 235 200;
+    --c-accent-300: 246 206 122;
+    --c-accent-400: 240 180 80;
+    --c-accent-500: 226 154 43;
+    --c-accent-600: 185 122 24;
+    --c-accent-700: 138 90 16;
 
     /* Semantic */
-    --c-profit: 16 185 129;
-    --c-profit-400: 52 211 153;
-    --c-profit-500: 16 185 129;
-    --c-profit-600: 5 150 105;
+    --c-profit: 34 197 94;
+    --c-profit-400: 74 222 128;
+    --c-profit-500: 34 197 94;
+    --c-profit-600: 22 163 74;
     --c-loss: 244 63 94;
     --c-loss-400: 251 113 133;
     --c-loss-500: 244 63 94;
     --c-loss-600: 225 29 72;
-    --c-warn: 245 158 11;
-    --c-warn-400: 251 191 36;
-    --c-warn-500: 245 158 11;
-    --c-warn-600: 217 119 6;
+    --c-warn: 249 115 22;
+    --c-warn-400: 251 146 60;
+    --c-warn-500: 249 115 22;
+    --c-warn-600: 194 65 12;
 
     /* Hairlines and muted text keep a default alpha; `/60` scales it. */
     --c-line: 148 163 184;
-    --c-line-a: 0.14;
+    --c-line-a: 0.16;
     --c-muted: 148 163 184;
-    --c-muted-a: 0.65;
+    --c-muted-a: 0.68;
 
     /* Primary call-to-action and the text that sits on a filled accent */
-    --c-cta: 6 182 212;
-    --c-on-accent: 7 9 16;
-    --c-knob: 7 9 16;
+    --c-cta: 76 111 255;
+    --c-on-accent: 247 249 255;
+    --c-knob: 7 11 22;
 
     /* Modal / drawer backdrop — dark in both palettes */
-    --c-scrim: 7 9 16;
-    --c-scrim-a: 0.8;
+    --c-scrim: 7 11 22;
+    --c-scrim-a: 0.82;
 
-    --shadow-card: 0 1px 0 0 rgba(148, 163, 184, 0.06) inset, 0 8px 32px -12px rgba(0, 0, 0, 0.8);
-    --shadow-cta: 0 0 32px -8px rgba(34, 211, 238, 0.45);
-    --shadow-glow-cyan: 0 0 32px -8px rgba(34, 211, 238, 0.45);
-    --shadow-glow-emerald: 0 0 32px -8px rgba(16, 185, 129, 0.45);
+    --shadow-card: 0 1px 0 0 rgba(148, 163, 184, 0.06) inset, 0 10px 34px -14px rgba(2, 6, 23, 0.85);
+    --shadow-cta: 0 10px 28px -12px rgba(76, 111, 255, 0.55);
+    --shadow-glow-cyan: 0 0 34px -10px rgba(76, 111, 255, 0.5);
+    --shadow-glow-emerald: 0 0 34px -10px rgba(240, 180, 80, 0.45);
 
     --bg-grid:
-      linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
-    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(34, 211, 238, 0.18) 0%, rgba(11, 14, 20, 0) 100%);
-    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(16, 185, 129, 0.16) 0%, rgba(11, 14, 20, 0) 100%);
+      linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(76, 111, 255, 0.2) 0%, rgba(11, 17, 32, 0) 100%);
+    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(240, 180, 80, 0.14) 0%, rgba(11, 17, 32, 0) 100%);
 
     /*
      * Glass surface treatment — one definition, both palettes. `.surface` and
@@ -102,7 +115,7 @@
      */
     --blur-surface: 8px;
     --blur-surface-raised: 12px;
-    --shadow-raised: 0 1px 0 0 rgba(148, 163, 184, 0.08) inset, 0 18px 48px -20px rgba(0, 0, 0, 0.9);
+    --shadow-raised: 0 1px 0 0 rgba(148, 163, 184, 0.08) inset, 0 18px 48px -20px rgba(2, 6, 23, 0.9);
 
     /*
      * Canvas tokens. lightweight-charts and recharts take literal colour
@@ -111,16 +124,16 @@
      * Kept explicit rather than derived from the colour tokens so the alpha a
      * hairline needs can differ per palette without a second design system.
      */
-    --chart-grid: rgba(148, 163, 184, 0.06);
-    --chart-axis: rgba(148, 163, 184, 0.14);
-    --chart-tick: rgba(148, 163, 184, 0.65);
-    --chart-crosshair: rgba(148, 163, 184, 0.35);
+    --chart-grid: rgba(148, 163, 184, 0.07);
+    --chart-axis: rgba(148, 163, 184, 0.16);
+    --chart-tick: rgba(148, 163, 184, 0.68);
+    --chart-crosshair: rgba(148, 163, 184, 0.38);
   }
 
   /*
    * SHARED LIGHT PALETTE — the visitor-selected light theme AND the console.
    *
-   * Slate-50 page, white cards, slate-900 text, slate-500 muted, deep-navy
+   * Soft off-white page, white cards, ink text, slate muted, Harbor Blue
    * primary action. Same tokens, same primitives, different values: the console
    * is a back office, and a back office read on a white surface at 9am is a
    * different job from reading candles at midnight.
@@ -134,24 +147,33 @@
   html:has(.theme-admin) {
     color-scheme: light;
 
-    --c-base: 248 250 252;
-    --c-base-50: 2 6 23; /* was the near-white dark tint — invisible on white */
-    --c-base-100: 15 23 42; /* primary text — slate-900 */
+    --c-base: 247 248 252;
+    --c-base-50: 15 23 42; /* was the near-white dark tint — invisible on white */
+    --c-base-100: 16 24 39; /* primary text — ink */
     --c-base-700: 241 245 249; /* badge container — slate-100 */
     --c-base-800: 241 245 249; /* nested surface / secondary button */
     --c-base-850: 255 255 255; /* cards — pure white */
-    --c-base-900: 248 250 252; /* page — slate-50 */
+    --c-base-900: 247 248 252; /* page — off-white */
     --c-base-950: 241 245 249; /* rails, code blocks — slate-100 */
 
     /* Accents are darkened so they hold contrast on white. */
-    --c-brand: 8 145 178;
-    --c-brand-50: 14 116 144; /* cyan-700: the dark near-white tint cannot read here */
-    --c-brand-100: 21 94 117; /* cyan-800 */
-    --c-brand-300: 14 116 144;
-    --c-brand-400: 8 145 178;
-    --c-brand-500: 6 182 212;
-    --c-brand-600: 21 94 117;
-    --c-brand-700: 22 78 99;
+    --c-brand: 59 91 219;
+    --c-brand-50: 47 73 184; /* the dark near-white tint cannot read here */
+    --c-brand-100: 38 58 148;
+    --c-brand-300: 59 91 219;
+    --c-brand-400: 76 111 255;
+    --c-brand-500: 76 111 255;
+    --c-brand-600: 47 73 184;
+    --c-brand-700: 38 58 148;
+
+    --c-accent: 185 122 24;
+    --c-accent-50: 138 90 16;
+    --c-accent-100: 120 78 14;
+    --c-accent-300: 185 122 24;
+    --c-accent-400: 185 122 24;
+    --c-accent-500: 226 154 43;
+    --c-accent-600: 138 90 16;
+    --c-accent-700: 107 69 12;
 
     --c-profit: 5 150 105;
     --c-profit-400: 4 120 87;
@@ -161,29 +183,29 @@
     --c-loss-400: 190 18 60;
     --c-loss-500: 225 29 72;
     --c-loss-600: 159 18 57;
-    --c-warn: 217 119 6;
-    --c-warn-400: 180 83 9;
-    --c-warn-500: 217 119 6;
-    --c-warn-600: 146 64 14;
+    --c-warn: 194 65 12;
+    --c-warn-400: 154 52 18;
+    --c-warn-500: 194 65 12;
+    --c-warn-600: 124 45 18;
 
     --c-line: 226 232 240; /* slate-200 */
     --c-line-a: 1;
     --c-muted: 100 116 139; /* subtext — slate-500 */
     --c-muted-a: 1;
 
-    /* Solid deep navy primary action, white label (per the console spec). */
-    --c-cta: 15 23 42;
+    /* Solid Harbor Blue primary action, white label. */
+    --c-cta: 59 91 219;
     --c-on-accent: 255 255 255;
     --c-knob: 255 255 255;
 
     --c-scrim: 15 23 42;
     --c-scrim-a: 0.45;
 
-    --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 12px 32px -16px rgba(15, 23, 42, 0.18);
-    --shadow-raised: 0 1px 2px 0 rgba(15, 23, 42, 0.05), 0 18px 40px -22px rgba(15, 23, 42, 0.28);
-    --shadow-cta: 0 10px 24px -14px rgba(15, 23, 42, 0.55);
-    --shadow-glow-cyan: 0 0 24px -10px rgba(8, 145, 178, 0.35);
-    --shadow-glow-emerald: 0 0 24px -10px rgba(5, 150, 105, 0.3);
+    --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 14px 34px -18px rgba(15, 23, 42, 0.2);
+    --shadow-raised: 0 1px 2px 0 rgba(15, 23, 42, 0.05), 0 20px 44px -22px rgba(15, 23, 42, 0.28);
+    --shadow-cta: 0 10px 26px -14px rgba(59, 91, 219, 0.55);
+    --shadow-glow-cyan: 0 0 26px -12px rgba(59, 91, 219, 0.35);
+    --shadow-glow-emerald: 0 0 26px -12px rgba(185, 122, 24, 0.35);
 
     --blur-surface: 10px;
     --blur-surface-raised: 16px;
@@ -191,8 +213,8 @@
     --bg-grid:
       linear-gradient(rgba(15, 23, 42, 0.045) 1px, transparent 1px),
       linear-gradient(90deg, rgba(15, 23, 42, 0.045) 1px, transparent 1px);
-    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(8, 145, 178, 0.1) 0%, rgba(248, 250, 252, 0) 100%);
-    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(5, 150, 105, 0.1) 0%, rgba(248, 250, 252, 0) 100%);
+    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(59, 91, 219, 0.1) 0%, rgba(247, 248, 252, 0) 100%);
+    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(185, 122, 24, 0.1) 0%, rgba(247, 248, 252, 0) 100%);
 
     --chart-grid: rgba(15, 23, 42, 0.06);
     --chart-axis: rgba(15, 23, 42, 0.12);
@@ -267,11 +289,11 @@
    * drifting apart between themes.
    */
   .surface {
-    @apply rounded-xl border border-line bg-base-850/70 shadow-card backdrop-blur-[var(--blur-surface)];
+    @apply rounded-2xl border border-line bg-base-850/70 shadow-card backdrop-blur-[var(--blur-surface)];
   }
 
   .surface-raised {
-    @apply rounded-xl border border-line bg-base-850/85 shadow-raised backdrop-blur-[var(--blur-surface-raised)];
+    @apply rounded-2xl border border-line bg-base-850/85 shadow-raised backdrop-blur-[var(--blur-surface-raised)];
   }
 
   /* Subtle grid texture used behind hero / dashboard headers. */

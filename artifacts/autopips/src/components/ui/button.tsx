@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils';
 /**
  * Baltimore Capital button.
  *
- * `default` and `secondary` are the two dark surfaces; `primary` is the cyan
- * call-to-action (reserve it — one per view); `success`/`destructive` are for
+ * `default` and `secondary` are the two dark surfaces; `primary` is the Harbor
+ * Blue call-to-action (reserve it — one per view); `success`/`destructive` are for
  * money-moving confirmations only.
  */
 export const buttonVariants = cva(

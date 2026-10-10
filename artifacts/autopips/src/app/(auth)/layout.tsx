@@ -8,7 +8,7 @@ import { BrandMark } from '@/components/shared/brand-mark';
  * Authentication route group — `(auth)`.
  *
  * A focused, centred shell for `/login` and `/register`: the public site's
- * texture (grid + cyan glow) without its navigation, so signing in is not a
+ * texture (grid + brand glow) without its navigation, so signing in is not a
  * detour into the marketing funnel. Server component; it holds no session state
  * and fetches nothing.
  *

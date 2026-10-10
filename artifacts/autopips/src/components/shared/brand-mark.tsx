@@ -3,7 +3,7 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /** Stable id for the logo gradient — one definition, reused by every instance. */
-const GRADIENT_ID = 'baltimorecapital-brand-gradient';
+const GRADIENT_ID = 'baltimore-capital-mark-gradient';
 
 const SIZE_GLYPH: Record<NonNullable<BrandMarkProps['size']>, string> = {
   sm: 'size-6',
@@ -28,8 +28,17 @@ export interface BrandMarkProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 /**
- * The Baltimore Capital wordmark. Pure inline SVG + text, no external asset, so it is
- * safe in any bundle and renders identically on the server.
+ * The Baltimore Capital mark — "the Beacon B".
+ *
+ * A rounded badge carries a monogram B whose two bowls read as ascending arcs
+ * (growth), with a warm gold beacon at the shoulder: the capital point the
+ * platform guides toward. The glyph is drawn in FIXED brand colours rather than
+ * theme tokens on purpose — a logo should look the same in the dark terminal,
+ * the light theme and the admin console — while the wordmark's accent follows
+ * the active palette so it stays legible on both surfaces.
+ *
+ * Pure inline SVG + text, no external asset, so it is safe in any bundle and
+ * renders identically on the server.
  */
 export function BrandMark({
   size = 'md',
@@ -47,27 +56,38 @@ export function BrandMark({
         className={cn('shrink-0', SIZE_GLYPH[size])}
       >
         <defs>
-          {/*
-           * Token-driven so the mark follows the active palette. Inline style is
-           * used because SVG presentation attributes do not resolve var().
-           */}
           <linearGradient id={GRADIENT_ID} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" style={{ stopColor: 'rgb(var(--c-brand-400))' }} />
-            <stop offset="100%" style={{ stopColor: 'rgb(var(--c-profit-500))' }} />
+            <stop offset="0%" stopColor="#4C6FFF" />
+            <stop offset="100%" stopColor="#7C5CFF" />
           </linearGradient>
         </defs>
-        <rect
-          x="1"
-          y="1"
-          width="30"
-          height="30"
-          rx="9"
-          style={{ fill: 'rgb(var(--c-base-850))', stroke: 'rgb(var(--c-line) / var(--c-line-a))' }}
+        <rect x="1" y="1" width="30" height="30" rx="9" fill={`url(#${GRADIENT_ID})`} />
+        {/* Monogram B: one stem, two bowls that rise as they open. */}
+        <path
+          d="M12.5 9 V23"
+          fill="none"
+          stroke="#FFFFFF"
+          strokeWidth={2.6}
+          strokeLinecap="round"
         />
-        {/* Three ascending bars: the pip ladder. */}
-        <rect x="8" y="18" width="4" height="7" rx="1.5" style={{ fill: 'rgb(var(--c-muted) / 0.45)' }} />
-        <rect x="14" y="13" width="4" height="12" rx="1.5" style={{ fill: 'rgb(var(--c-brand-400) / 0.75)' }} />
-        <rect x="20" y="7" width="4" height="18" rx="1.5" style={{ fill: `url(#${GRADIENT_ID})` }} />
+        <path
+          d="M12.5 9 H17 A3.5 3.5 0 0 1 17 16 H12.5"
+          fill="none"
+          stroke="#FFFFFF"
+          strokeWidth={2.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M12.5 16 H17.5 A3.5 3.5 0 0 1 17.5 23 H12.5"
+          fill="none"
+          stroke="#FFFFFF"
+          strokeWidth={2.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {/* The beacon: capital gold, at the shoulder of the mark. */}
+        <circle cx="23.5" cy="8.5" r="2.4" fill="#F0B450" />
       </svg>
       {showWordmark ? (
         <span
@@ -77,7 +97,7 @@ export function BrandMark({
             wordmarkClassName,
           )}
         >
-          Baltimore <span className="text-brand-400">Capital</span>
+          Baltimore <span className="text-accent-400">Capital</span>
         </span>
       ) : null}
     </span>

@@ -120,51 +120,60 @@ describe('design tokens', () => {
     expect(missing).toEqual([]);
   });
 
-  it('keeps the dark palette byte-identical to the literals it replaced', () => {
-    // The palette tailwind.config.ts hard-coded before it became variables.
-    const historical: Record<string, string> = {
-      'c-base': triple('#0B0E14'),
-      'c-base-50': triple('#F5F7FA'),
-      'c-base-100': triple('#E6EAF2'),
-      'c-base-700': triple('#1A1F2B'),
-      'c-base-800': triple('#141822'),
-      'c-base-850': triple('#10141C'),
-      'c-base-900': triple('#0B0E14'),
-      'c-base-950': triple('#070910'),
-      'c-brand': triple('#22D3EE'),
-      'c-brand-50': triple('#ECFEFF'),
-      'c-brand-100': triple('#CFFAFE'),
-      'c-brand-300': triple('#67E8F9'),
-      'c-brand-400': triple('#22D3EE'),
-      'c-brand-500': triple('#06B6D4'),
-      'c-brand-600': triple('#0891B2'),
-      'c-brand-700': triple('#0E7490'),
-      'c-profit': triple('#10B981'),
-      'c-profit-400': triple('#34D399'),
-      'c-profit-500': triple('#10B981'),
-      'c-profit-600': triple('#059669'),
+  it('pins the dark palette to the "Beacon" spec', () => {
+    // A redesign is allowed to change these — but only on purpose, and only by
+    // editing this map. A stray hex that drifts a surface off-palette fails here.
+    const expected: Record<string, string> = {
+      'c-base': triple('#0B1120'),
+      'c-base-50': triple('#F4F6FB'),
+      'c-base-100': triple('#E7EBF5'),
+      'c-base-700': triple('#1B2436'),
+      'c-base-800': triple('#151D2E'),
+      'c-base-850': triple('#101827'),
+      'c-base-900': triple('#0B1120'),
+      'c-base-950': triple('#070B16'),
+      'c-brand': triple('#4C6FFF'),
+      'c-brand-50': triple('#EEF2FF'),
+      'c-brand-100': triple('#E0E7FF'),
+      'c-brand-300': triple('#93AAFF'),
+      'c-brand-400': triple('#6E8CFF'),
+      'c-brand-500': triple('#4C6FFF'),
+      'c-brand-600': triple('#3B5BDB'),
+      'c-brand-700': triple('#2F49B8'),
+      'c-accent': triple('#F0B450'),
+      'c-accent-50': triple('#FFF7E6'),
+      'c-accent-100': triple('#FDEBC8'),
+      'c-accent-300': triple('#F6CE7A'),
+      'c-accent-400': triple('#F0B450'),
+      'c-accent-500': triple('#E29A2B'),
+      'c-accent-600': triple('#B97A18'),
+      'c-accent-700': triple('#8A5A10'),
+      'c-profit': triple('#22C55E'),
+      'c-profit-400': triple('#4ADE80'),
+      'c-profit-500': triple('#22C55E'),
+      'c-profit-600': triple('#16A34A'),
       'c-loss': triple('#F43F5E'),
       'c-loss-400': triple('#FB7185'),
       'c-loss-500': triple('#F43F5E'),
       'c-loss-600': triple('#E11D48'),
-      'c-warn': triple('#F59E0B'),
-      'c-warn-400': triple('#FBBF24'),
-      'c-warn-500': triple('#F59E0B'),
-      'c-warn-600': triple('#D97706'),
+      'c-warn': triple('#F97316'),
+      'c-warn-400': triple('#FB923C'),
+      'c-warn-500': triple('#F97316'),
+      'c-warn-600': triple('#C2410C'),
       'c-line': triple('#94A3B8'),
       'c-muted': triple('#94A3B8'),
-      // The primary action keeps its dark-theme appearance: cyan fill, near-black label.
-      'c-cta': triple('#06B6D4'),
-      'c-on-accent': triple('#070910'),
-      'c-knob': triple('#070910'),
-      'c-scrim': triple('#070910'),
+      // Primary action: Harbor Blue fill, near-white label.
+      'c-cta': triple('#4C6FFF'),
+      'c-on-accent': triple('#F7F9FF'),
+      'c-knob': triple('#070B16'),
+      'c-scrim': triple('#070B16'),
     };
 
-    for (const [name, expected] of Object.entries(historical)) {
-      expect(dark.get(name), `--${name}`).toBe(expected);
+    for (const [name, value] of Object.entries(expected)) {
+      expect(dark.get(name), `--${name}`).toBe(value);
     }
-    expect(dark.get('c-line-a')).toBe('0.14');
-    expect(dark.get('c-muted-a')).toBe('0.65');
+    expect(dark.get('c-line-a')).toBe('0.16');
+    expect(dark.get('c-muted-a')).toBe('0.68');
   });
 
   it('overrides every surface and text token in the light console', () => {
@@ -181,6 +190,9 @@ describe('design tokens', () => {
       'c-brand',
       'c-brand-300',
       'c-brand-400',
+      'c-accent',
+      'c-accent-300',
+      'c-accent-400',
       'c-profit',
       'c-profit-400',
       'c-loss',
@@ -200,16 +212,16 @@ describe('design tokens', () => {
     expect(missing).toEqual([]);
   });
 
-  it('gives the console a light palette — bright surfaces, dark text, navy action', () => {
-    // Slate-50 page, white card, slate-900 text, deep-navy primary action.
-    expect(light.get('c-base-900')).toBe(triple('#F8FAFC'));
+  it('gives the console a light palette — bright surfaces, ink text, blue action', () => {
+    // Off-white page, white card, ink text, deep-blue primary action.
+    expect(light.get('c-base-900')).toBe(triple('#F7F8FC'));
     expect(light.get('c-base-850')).toBe(triple('#FFFFFF'));
-    expect(light.get('c-base-100')).toBe(triple('#0F172A'));
+    expect(light.get('c-base-100')).toBe(triple('#101828'));
     expect(light.get('c-line')).toBe(triple('#E2E8F0'));
     expect(light.get('c-muted')).toBe(triple('#64748B'));
-    expect(light.get('c-cta')).toBe(triple('#0F172A'));
+    expect(light.get('c-cta')).toBe(triple('#3B5BDB'));
     expect(light.get('c-on-accent')).toBe(triple('#FFFFFF'));
-    // Borders are solid on white, not 14%-alpha hairlines.
+    // Borders are solid on white, not 16%-alpha hairlines.
     expect(light.get('c-line-a')).toBe('1');
   });
 

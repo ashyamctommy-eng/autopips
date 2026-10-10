@@ -4,10 +4,10 @@ import type { Config } from 'tailwindcss';
 /**
  * Baltimore Capital design system.
  *
- * Dark-by-default fintech: #0B0E14 base, cyan / emerald accents — the public
- * site and the client trading workspace. The admin console runs a light
- * "executive" palette from the same tokens (see `globals.css`, `.theme-admin`),
- * so both surfaces share one set of primitives.
+ * Dark-by-default fintech: ink-navy base (#0B1120), Harbor Blue and Capital
+ * Gold accents — the public site and the client trading workspace. The admin
+ * console runs a light "executive" palette from the same tokens (see
+ * `globals.css`, `.theme-admin`), so both surfaces share one set of primitives.
  *
  * The literal palette lives in `src/app/globals.css` as CSS variables.
  */
@@ -24,6 +24,23 @@ const config: Config = {
       center: true,
       padding: '1.5rem',
       screens: { '2xl': '1400px' },
+    },
+    /*
+     * Softer geometry across the whole product. Tailwind's default radius scale
+     * is tuned for dense dashboards; "relatable" reads rounder, so every step is
+     * opened up here and existing `rounded-lg/xl/2xl` call sites inherit it
+     * without a component sweep.
+     */
+    borderRadius: {
+      none: '0px',
+      sm: '0.5rem',
+      DEFAULT: '0.75rem',
+      md: '0.875rem',
+      lg: '1rem',
+      xl: '1.25rem',
+      '2xl': '1.5rem',
+      '3xl': '1.875rem',
+      full: '9999px',
     },
     /*
      * `text-base` was ambiguous: `base` is BOTH a font-size step (1rem) and the
@@ -80,6 +97,22 @@ const config: Config = {
           600: 'rgb(var(--c-brand-600) / <alpha-value>)',
           700: 'rgb(var(--c-brand-700) / <alpha-value>)',
         },
+        /*
+         * Secondary identity accent — "Capital Gold". Deliberately its own
+         * family rather than overloading `warn`: gold means the brand (the
+         * wordmark, the mark's beacon), orange means a caution state. Keeping
+         * them separate stops a warning banner from reading as brand decoration.
+         */
+        accent: {
+          DEFAULT: 'rgb(var(--c-accent) / <alpha-value>)',
+          50: 'rgb(var(--c-accent-50) / <alpha-value>)',
+          100: 'rgb(var(--c-accent-100) / <alpha-value>)',
+          300: 'rgb(var(--c-accent-300) / <alpha-value>)',
+          400: 'rgb(var(--c-accent-400) / <alpha-value>)',
+          500: 'rgb(var(--c-accent-500) / <alpha-value>)',
+          600: 'rgb(var(--c-accent-600) / <alpha-value>)',
+          700: 'rgb(var(--c-accent-700) / <alpha-value>)',
+        },
         profit: {
           DEFAULT: 'rgb(var(--c-profit) / <alpha-value>)',
           400: 'rgb(var(--c-profit-400) / <alpha-value>)',
@@ -100,9 +133,9 @@ const config: Config = {
         },
         /*
          * The primary call-to-action. Its own token pair rather than `brand`:
-         * a cyan fill with near-black text is right on the dark trading surface,
-         * and unreadable in a light back office, where the same button is deep
-         * navy with white text. One primitive, two palettes.
+         * a blue fill with a near-white label is right on the dark trading
+         * surface, and the same token darkens to a deeper blue with pure white
+         * text in a light back office. One primitive, two palettes.
          */
         cta: {
           DEFAULT: 'rgb(var(--c-cta) / <alpha-value>)',

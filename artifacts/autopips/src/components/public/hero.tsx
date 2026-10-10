@@ -41,24 +41,25 @@ export function Hero({ className }: HeroProps) {
           <div className="mx-auto w-full max-w-[1400px] px-4 pb-16 pt-16 sm:px-6 sm:pb-20 sm:pt-20 lg:px-8">
             <div className="max-w-3xl">
               <Badge variant="brand" className="mb-5">
-                Broker APIs · Deriv
+                Managed trading · Deriv
               </Badge>
 
               <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-base-100 sm:text-4xl lg:text-5xl">
-                Automated algorithmic trading infrastructure, executed on MT4 and MT5 accounts
+                Managed trading you can actually follow.
               </h1>
 
               <p className="mt-5 max-w-2xl text-pretty text-[1rem] leading-relaxed text-muted sm:text-lg">
                 Baltimore Capital runs operator-configured strategies on a master Deriv account and
                 mirrors every position into client-funded investments over Deriv&rsquo;s WebSocket API. P/L is
-                read back from settled broker contracts, settlements clear in crypto through NOWPayments, and
-                every state change lands in an append-only audit log.
+                read back from settled contracts, settlements clear in crypto through NOWPayments, and
+                every state change lands in an append-only audit log — so the record shows what
+                happened, not just what we say happened.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <Button variant="primary" size="lg" asChild>
                   <Link href="/strategies">
-                    View strategies
+                    See the strategies
                     <ArrowRight aria-hidden />
                   </Link>
                 </Button>
