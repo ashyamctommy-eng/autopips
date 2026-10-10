@@ -425,12 +425,16 @@ export function KycReviewer({ initialRows, initialStatus, canDecide }: KycReview
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={status} onValueChange={(value) => {
-          const next = value as KycStatusValue;
-          setStatus(next);
-          void loadQueue(next);
-        }}>
-          <TabsList className="max-w-full overflow-x-auto">
+        <Tabs
+          value={status}
+          className="w-full min-w-0 sm:w-auto"
+          onValueChange={(value) => {
+            const next = value as KycStatusValue;
+            setStatus(next);
+            void loadQueue(next);
+          }}
+        >
+          <TabsList className="max-w-full justify-start overflow-x-auto">
             {KYC_STATUS_TABS.map((tab) => (
               <TabsTrigger key={tab.value} value={tab.value}>
                 {tab.label}

@@ -216,7 +216,7 @@ export function ContactForm({ className }: ContactFormProps) {
             id="contact-subject"
             name="subject"
             required
-            className={cn(inputClassName, 'pr-8')}
+            className={cn(inputClassName, 'min-w-0 pr-8')}
             value={values.subject}
             aria-invalid={fieldError('subject') ? true : undefined}
             aria-describedby={fieldError('subject') ? 'contact-subject-error' : undefined}

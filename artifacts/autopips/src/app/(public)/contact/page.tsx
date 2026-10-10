@@ -40,7 +40,7 @@ export default function ContactPage() {
 
       <Section width="wide">
         <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <Card>
+          <Card className="min-w-0">
             <CardContent className="p-5 sm:p-6">
               <h2 className="text-[1rem] font-semibold leading-tight tracking-tight text-base-100">
                 Send a message
@@ -55,7 +55,7 @@ export default function ContactPage() {
             </CardContent>
           </Card>
 
-          <div className="flex flex-col gap-5">
+          <div className="flex min-w-0 flex-col gap-5">
             <Card>
               <CardContent className="flex flex-col gap-4 p-5">
                 <h2 className="text-[1rem] font-semibold leading-tight tracking-tight text-base-100">
@@ -65,15 +65,15 @@ export default function ContactPage() {
                   {CONTACT_LINES.map((line, index) => {
                     const Icon = LINE_ICONS[index] ?? ShieldCheck;
                     return (
-                      <li key={line.email} className="flex gap-3">
+                      <li key={line.email} className="flex min-w-0 gap-3">
                         <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-base-800 text-brand-400">
                           <Icon aria-hidden className="size-4" />
                         </span>
-                        <div className="flex flex-col gap-0.5">
+                        <div className="flex min-w-0 flex-col gap-0.5">
                           <span className="text-sm font-medium text-base-100">{line.label}</span>
                           <a
                             href={`mailto:${line.email}`}
-                            className="rounded-sm text-sm text-brand-300 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+                            className="min-w-0 break-all rounded-sm text-sm text-brand-300 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
                           >
                             {line.email}
                           </a>

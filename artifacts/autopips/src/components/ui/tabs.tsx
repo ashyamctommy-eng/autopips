@@ -11,7 +11,7 @@ export const Tabs = TabsPrimitive.Root;
 export const tabsListVariants = cva('inline-flex items-center text-muted', {
   variants: {
     variant: {
-      default: 'h-9 justify-center gap-1 rounded-lg border border-line bg-base-850 p-1',
+      default: 'h-9 gap-1 rounded-lg border border-line bg-base-850 p-1',
       line: 'gap-4 border-b border-line pb-0',
     },
   },
