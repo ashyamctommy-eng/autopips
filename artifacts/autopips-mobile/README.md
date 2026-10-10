@@ -1,6 +1,6 @@
-# Autopipsz Mobile
+# Baltimore Capital Mobile
 
-Separate Expo companion for existing Autopipsz accounts. This is read-only:
+Separate Expo companion for existing Baltimore Capital accounts. This is read-only:
 overview, server-derived wallet totals, internal/broker positions, and the latest
 50 account events. No balances are seeded and no trading/payment controls exist.
 

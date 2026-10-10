@@ -38,7 +38,7 @@ export default function AccountScreen({ section }: { section: 'Overview' | 'Posi
   return <ScrollView style={{ flex: 1, backgroundColor: c.background }}
     contentContainerStyle={{ paddingHorizontal: 22, paddingTop: (Platform.OS === 'web' ? 67 : insets.top) + 18, paddingBottom: 120, gap: 20 }}
     refreshControl={<RefreshControl refreshing={query.isFetching && !query.isLoading} onRefresh={() => void query.refetch()} tintColor={c.primary} />}>
-    <View style={styles.row}><View><Text style={[styles.brand, { color: c.primary }]}>AUTOPIPSZ</Text><Text style={[styles.title, text]}>{section}</Text></View>
+    <View style={styles.row}><View><Text style={[styles.brand, { color: c.primary }]}>BALTIMORE CAPITAL</Text><Text style={[styles.title, text]}>{section}</Text></View>
       <View style={styles.row}>
       <Pressable accessibilityLabel="Refresh account" testID="refresh-account" disabled={query.isFetching} onPress={() => void query.refetch()} style={button}>
         {query.isFetching ? <ActivityIndicator color={c.primary} /> : <Feather name="refresh-cw" size={20} color={c.primary} />}

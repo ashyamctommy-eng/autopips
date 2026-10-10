@@ -49,7 +49,7 @@ export function Hero({ className }: HeroProps) {
               </h1>
 
               <p className="mt-5 max-w-2xl text-pretty text-[1rem] leading-relaxed text-muted sm:text-lg">
-                Autopipsz runs operator-configured strategies on a master Deriv account and
+                Baltimore Capital runs operator-configured strategies on a master Deriv account and
                 mirrors every position into client-funded investments over Deriv&rsquo;s WebSocket API. P/L is
                 read back from settled broker contracts, settlements clear in crypto through NOWPayments, and
                 every state change lands in an append-only audit log.

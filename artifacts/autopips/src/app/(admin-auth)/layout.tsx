@@ -39,7 +39,7 @@ export default function AdminAuthLayout({ children }: { children: React.ReactNod
 
       <footer className="px-4 pb-8 text-center sm:px-6">
         <p className="text-xs leading-relaxed text-muted">
-          © 2026 Autopipsz Systems. All administrative actions are recorded.
+          © 2026 Baltimore Capital Systems. All administrative actions are recorded.
         </p>
       </footer>
     </div>

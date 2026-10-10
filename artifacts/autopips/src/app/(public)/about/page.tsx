@@ -13,14 +13,14 @@ import { CtaBand } from '@/components/public/cta-band';
  * About / operating model.
  *
  * Describes the platform as it is built, names the real components in the stack,
- * and states the limits of what Autopipsz is. No licence is claimed, no partner
+ * and states the limits of what Baltimore Capital is. No licence is claimed, no partner
  * is named and no statistic is asserted.
  */
 
 export const metadata: Metadata = {
   title: 'About',
   description:
-    'Autopipsz is managed algorithmic trading infrastructure: a master Deriv account executes operator-run strategies, mirrored into client-funded investments, with crypto settlement and an append-only audit record.',
+    'Baltimore Capital is managed algorithmic trading infrastructure: a master Deriv account executes operator-run strategies, mirrored into client-funded investments, with crypto settlement and an append-only audit record.',
   alternates: { canonical: '/about' },
 };
 
@@ -49,11 +49,11 @@ const WHAT_IT_IS: readonly string[] = [
 ];
 
 const WHAT_IT_IS_NOT: readonly string[] = [
-  'Not a bank, a broker or a deposit-taker. Autopipsz is not a bank, is not a custodian, and no account here is a bank deposit.',
+  'Not a bank, a broker or a deposit-taker. Baltimore Capital is not a bank, is not a custodian, and no account here is a bank deposit.',
   'Not insured or capital-protected. There is no deposit insurance, no guarantee scheme and no compensation fund behind your balance.',
   'Not a guaranteed-return product. No plan promises a fixed profit, a fixed daily payout or the return of capital. Targets are objectives.',
   'Not investment advice. Nothing published here is a personal recommendation; decisions are yours and the operator’s regulatory status must be confirmed for your jurisdiction.',
-  'Not a licence holder by implication. Autopipsz does not claim any licence or regulatory authorisation on this site, and where a licence is required for you to be served, that must be established with the operator before you fund an account.',
+  'Not a licence holder by implication. Baltimore Capital does not claim any licence or regulatory authorisation on this site, and where a licence is required for you to be served, that must be established with the operator before you fund an account.',
 ];
 
 export default function AboutPage() {
@@ -64,7 +64,7 @@ export default function AboutPage() {
           breadcrumb={[{ label: 'Home', href: '/' }, { label: 'About' }]}
           eyebrow="About"
           title="Automated trading infrastructure, operated honestly"
-          description="Autopipsz connects client capital to algorithmic execution on Deriv. The proposition is narrow and deliberate: real broker execution, real settlement, and a record that shows exactly what happened."
+          description="Baltimore Capital connects client capital to algorithmic execution on Deriv. The proposition is narrow and deliberate: real broker execution, real settlement, and a record that shows exactly what happened."
         />
       </div>
 
@@ -78,7 +78,7 @@ export default function AboutPage() {
           <Card className="lg:col-span-2">
             <CardContent className="flex flex-col gap-4 p-5 text-sm leading-relaxed text-muted">
               <p>
-                Autopipsz exists to close that gap. Capital is deployed into a strategy that runs on
+                Baltimore Capital exists to close that gap. Capital is deployed into a strategy that runs on
                 a real broker account, and every position is tagged so it can be traced back to the
                 investment that funded it. Profit and loss are read from broker deals — commission
                 and swap included — rather than derived from a model of what should have happened.
@@ -139,7 +139,7 @@ export default function AboutPage() {
       <Section
         width="wide"
         eyebrow="Boundaries"
-        title="What Autopipsz is, and what it is not"
+        title="What Baltimore Capital is, and what it is not"
         description="Stated explicitly, because the difference matters before you fund an account."
       >
         <div className="grid gap-5 lg:grid-cols-2">

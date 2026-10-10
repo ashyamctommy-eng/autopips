@@ -155,7 +155,7 @@ const isoDobSchema = z
     if (ageInYears(dob) < KYC_MIN_AGE_YEARS) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `You must be at least ${KYC_MIN_AGE_YEARS} years old to open an Autopipsz account.`,
+        message: `You must be at least ${KYC_MIN_AGE_YEARS} years old to open an Baltimore Capital account.`,
       });
     }
   });

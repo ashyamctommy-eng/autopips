@@ -15,7 +15,7 @@ import { RegisterForm } from '@/components/auth/register-form';
 export const metadata: Metadata = {
   title: 'Open an account',
   description:
-    'Open an Autopipsz account: email, password and country. Identity verification, deposits and capital allocation follow after you sign in.',
+    'Open an Baltimore Capital account: email, password and country. Identity verification, deposits and capital allocation follow after you sign in.',
 };
 
 export default function RegisterPage() {

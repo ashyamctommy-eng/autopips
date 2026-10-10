@@ -25,7 +25,7 @@ import { Transparency } from '@/components/public/transparency';
 export const metadata: Metadata = {
   title: 'Automated trading infrastructure on Deriv',
   description:
-    'Autopipsz mirrors operator-run strategies from a master Deriv account into client-funded investments over Deriv\u2019s WebSocket API, with crypto settlement through NOWPayments. Targets are indicative and non-guaranteed; capital is at risk.',
+    'Baltimore Capital mirrors operator-run strategies from a master Deriv account into client-funded investments over Deriv\u2019s WebSocket API, with crypto settlement through NOWPayments. Targets are indicative and non-guaranteed; capital is at risk.',
   alternates: { canonical: '/' },
 };
 

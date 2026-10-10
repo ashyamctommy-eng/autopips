@@ -20,7 +20,7 @@ import { CONTACT_LINES } from '@/components/public/site-footer';
 export const metadata: Metadata = {
   title: 'Contact',
   description:
-    'Contact Autopipsz support, security and compliance. Send a message through the form or use the role mailboxes; every message is recorded and reviewed.',
+    'Contact Baltimore Capital support, security and compliance. Send a message through the form or use the role mailboxes; every message is recorded and reviewed.',
   alternates: { canonical: '/contact' },
 };
 

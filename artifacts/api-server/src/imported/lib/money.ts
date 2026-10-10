@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 
 /**
- * Money maths for Autopipsz.
+ * Money maths for Baltimore Capital.
  *
  * All balances, P/L and fee values move as Decimal, never as IEEE-754 floats.
  * Floats cannot represent 0.1 exactly; at scale that shows up as off-by-a-cent

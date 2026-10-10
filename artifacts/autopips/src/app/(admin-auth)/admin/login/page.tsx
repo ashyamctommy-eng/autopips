@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = {
   title: 'Super admin sign-in',
   description:
-    'Restricted console sign-in for Autopipsz platform operators. Administrative actions are recorded in the audit trail.',
+    'Restricted console sign-in for Baltimore Capital platform operators. Administrative actions are recorded in the audit trail.',
   robots: { index: false, follow: false },
 };
 

@@ -12,7 +12,7 @@ import { LegalDocumentPage } from '@/components/public/legal-document';
 export const metadata: Metadata = {
   title: 'Privacy Policy',
   description:
-    'What personal data Autopipsz collects, why, how identity documents are stored, who it is shared with, how long it is kept and your rights.',
+    'What personal data Baltimore Capital collects, why, how identity documents are stored, who it is shared with, how long it is kept and your rights.',
   alternates: { canonical: '/privacy' },
 };
 

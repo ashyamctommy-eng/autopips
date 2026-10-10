@@ -40,9 +40,9 @@ export const FOOTER_LEGAL_LINKS: readonly FooterLink[] = [
  * platform's own audit log.
  */
 export const CONTACT_LINES = [
-  { label: 'Support', email: 'support@autopips.pro', blurb: 'Account, deposits, withdrawals and KYC.' },
-  { label: 'Security', email: 'security@autopips.pro', blurb: 'Vulnerability reports and account compromise.' },
-  { label: 'Compliance', email: 'compliance@autopips.pro', blurb: 'Identity review and regulatory enquiries.' },
+  { label: 'Support', email: 'support@baltimorecapital.pro', blurb: 'Account, deposits, withdrawals and KYC.' },
+  { label: 'Security', email: 'security@baltimorecapital.pro', blurb: 'Vulnerability reports and account compromise.' },
+  { label: 'Compliance', email: 'compliance@baltimorecapital.pro', blurb: 'Identity review and regulatory enquiries.' },
 ] as const;
 
 /** The single non-dismissible risk line, rendered on every public page. */
@@ -134,9 +134,9 @@ export function SiteFooter({ className }: SiteFooterProps) {
             {RISK_LINE}
           </p>
           <div className="flex flex-col gap-2 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
-            <p>© {year} Autopipsz. All rights reserved.</p>
+            <p>© {year} Baltimore Capital. All rights reserved.</p>
             <p>
-              Autopipsz is not a bank and client balances are not insured. Nothing on this site is
+              Baltimore Capital is not a bank and client balances are not insured. Nothing on this site is
               investment advice.
             </p>
           </div>

@@ -52,18 +52,18 @@ it('creates an admin with a hash and an audit marker', async () => {
   });
 });
 
-it('uses ceo@autopips.pro when no admin email is configured', async () => {
+it('uses ceo@baltimorecapital.pro when no admin email is configured', async () => {
   vi.stubEnv('ADMIN_SETUP_EMAIL', '');
   vi.stubEnv('ADMIN_EMAIL', '');
 
   await bootstrapProductionAdmin();
 
   expect(mocks.tx.user.findUnique).toHaveBeenCalledWith({
-    where: { email: 'ceo@autopips.pro' },
+    where: { email: 'ceo@baltimorecapital.pro' },
   });
   expect(mocks.tx.user.create).toHaveBeenCalledWith({
     data: expect.objectContaining({
-      email: 'ceo@autopips.pro',
+      email: 'ceo@baltimorecapital.pro',
       role: 'SUPER_ADMIN',
       passwordHash: 'test-hash',
     }),
@@ -73,17 +73,17 @@ it('uses ceo@autopips.pro when no admin email is configured', async () => {
 it('supports deployment environment aliases and normalizes the configured email', async () => {
   vi.stubEnv('ADMIN_SETUP_EMAIL', '');
   vi.stubEnv('ADMIN_SETUP_PASSWORD', '');
-  vi.stubEnv('ADMIN_EMAIL', ' CEO@AUTOPIPS.PRO ');
+  vi.stubEnv('ADMIN_EMAIL', ' CEO@BALTIMORECAPITAL.PRO ');
   vi.stubEnv('ADMIN_PASSWORD', 'Test-fixture-only-123!');
 
   await bootstrapProductionAdmin();
 
   expect(mocks.tx.user.findUnique).toHaveBeenCalledWith({
-    where: { email: 'ceo@autopips.pro' },
+    where: { email: 'ceo@baltimorecapital.pro' },
   });
   expect(mocks.tx.user.create).toHaveBeenCalledWith({
     data: expect.objectContaining({
-      email: 'ceo@autopips.pro',
+      email: 'ceo@baltimorecapital.pro',
       role: 'SUPER_ADMIN',
       passwordHash: 'test-hash',
     }),
@@ -171,12 +171,12 @@ it('rejects an invalid configured password without writing an account', async ()
 });
 
 it('normalizes a configured email before lookup', async () => {
-  vi.stubEnv('ADMIN_SETUP_EMAIL', ' CeO@Autopips.Pro ');
+  vi.stubEnv('ADMIN_SETUP_EMAIL', ' CeO@Baltimorecapital.Pro ');
 
   await bootstrapProductionAdmin();
 
   expect(mocks.tx.user.findUnique).toHaveBeenCalledWith({
-    where: { email: 'ceo@autopips.pro' },
+    where: { email: 'ceo@baltimorecapital.pro' },
   });
 });
 

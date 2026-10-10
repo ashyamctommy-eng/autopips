@@ -3,7 +3,7 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /** Stable id for the logo gradient — one definition, reused by every instance. */
-const GRADIENT_ID = 'autopipsz-brand-gradient';
+const GRADIENT_ID = 'baltimorecapital-brand-gradient';
 
 const SIZE_GLYPH: Record<NonNullable<BrandMarkProps['size']>, string> = {
   sm: 'size-6',
@@ -28,7 +28,7 @@ export interface BrandMarkProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 /**
- * The Autopipsz wordmark. Pure inline SVG + text, no external asset, so it is
+ * The Baltimore Capital wordmark. Pure inline SVG + text, no external asset, so it is
  * safe in any bundle and renders identically on the server.
  */
 export function BrandMark({
@@ -43,7 +43,7 @@ export function BrandMark({
       <svg
         viewBox="0 0 32 32"
         role="img"
-        aria-label="Autopipsz"
+        aria-label="Baltimore Capital"
         className={cn('shrink-0', SIZE_GLYPH[size])}
       >
         <defs>
@@ -77,7 +77,7 @@ export function BrandMark({
             wordmarkClassName,
           )}
         >
-          Auto<span className="text-brand-400">pips</span>z
+          Baltimore <span className="text-brand-400">Capital</span>
         </span>
       ) : null}
     </span>

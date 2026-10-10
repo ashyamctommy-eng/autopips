@@ -22,7 +22,7 @@ import { safeNextPath } from '@/components/auth/next-path';
 export const metadata: Metadata = {
   title: 'Sign in',
   description:
-    'Sign in to your Autopipsz account. Sessions are held in httpOnly cookies; two-factor authentication is supported.',
+    'Sign in to your Baltimore Capital account. Sessions are held in httpOnly cookies; two-factor authentication is supported.',
 };
 
 export interface LoginPageProps {

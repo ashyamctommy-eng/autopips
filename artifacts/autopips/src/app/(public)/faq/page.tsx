@@ -94,7 +94,7 @@ const FAQ_ITEMS: readonly FaqItem[] = [
           deployed in an active strategy is not withdrawable until it is released.
         </p>
         <p>
-          Payouts are broadcast through NOWPayments and an operator reviews each one. Autopipsz
+          Payouts are broadcast through NOWPayments and an operator reviews each one. Baltimore Capital
           charges no withdrawal fee today: the fee is recorded as 0.00 on the request so a later fee
           schedule cannot appear retroactive. Network costs set by the blockchain and the payout
           provider still apply and are outside our control. On-chain settlement is not instant, and
@@ -137,7 +137,7 @@ const FAQ_ITEMS: readonly FaqItem[] = [
           may lose money instead. {TARGET_RETURN_DISCLAIMER}
         </p>
         <p>
-          There is no fixed daily, weekly or monthly payout anywhere on Autopipsz, and no product
+          There is no fixed daily, weekly or monthly payout anywhere on Baltimore Capital, and no product
           here promises the return of your capital. Past performance is not indicative of future
           results.
         </p>
@@ -178,7 +178,7 @@ const FAQ_ITEMS: readonly FaqItem[] = [
     answer: (
       <>
         <p>
-          Autopipsz does not hold your funds in a bank account of its own and does not claim a
+          Baltimore Capital does not hold your funds in a bank account of its own and does not claim a
           segregated-custody arrangement. Strategy capital executes on a Deriv account held with
           a broker, and that account is subject to the broker&rsquo;s own terms, including how client
           money is held and what happens if the broker fails.
@@ -319,7 +319,7 @@ const FAQ_ITEMS: readonly FaqItem[] = [
       <>
         <p>
           Orders are submitted to Deriv accounts through Deriv&rsquo;s WebSocket API, which connects
-          to the broker&rsquo;s own trade servers. Autopipsz is not a broker, is not a venue, and
+          to the broker&rsquo;s own trade servers. Baltimore Capital is not a broker, is not a venue, and
           does not hold a matching engine; the broker executes, and the broker&rsquo;s deal reports
           are the source of every P/L figure shown in your account.
         </p>

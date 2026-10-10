@@ -45,7 +45,7 @@ import {
  * Payments service (business directive #6).
  *
  * Deposits and withdrawals are the only two places money enters or leaves
- * Autopipsz, so every rule here is deliberately conservative:
+ * Baltimore Capital, so every rule here is deliberately conservative:
  *
  *   - A deposit row is written ONLY after the provider returned a real payment
  *     id + address. If the provider call fails we persist nothing.
@@ -673,7 +673,7 @@ export async function createDeposit(input: CreateDepositInput): Promise<DepositD
       payCurrency: currency,
       orderId: depositId,
       ipnCallbackUrl,
-      description: `Autopipsz deposit ${depositId}`,
+      description: `Baltimore Capital deposit ${depositId}`,
     });
   } catch (err) {
     // Payment provider failure: nothing is persisted. The client may retry; a

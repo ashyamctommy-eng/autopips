@@ -324,12 +324,12 @@ function withinRateLimit(socket: TradingSocket): boolean {
 function resolveCorsOrigins(options: TradingSocketServerOptions): string[] {
   if (options.corsOrigins && options.corsOrigins.length > 0) return options.corsOrigins;
   if (process.env.NODE_ENV === 'production') {
-    return [process.env.NEXT_PUBLIC_APP_URL ?? 'https://autopips.pro'];
+    return [process.env.NEXT_PUBLIC_APP_URL ?? 'https://baltimorecapital.pro'];
   }
   return [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
-    process.env.NEXT_PUBLIC_APP_URL ?? 'https://autopips.pro',
+    process.env.NEXT_PUBLIC_APP_URL ?? 'https://baltimorecapital.pro',
   ];
 }
 

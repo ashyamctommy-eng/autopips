@@ -12,7 +12,7 @@ import { LegalDocumentPage } from '@/components/public/legal-document';
 export const metadata: Metadata = {
   title: 'Terms of Service',
   description:
-    'The terms governing use of the Autopipsz managed trading platform: eligibility, managed trading, deposits and withdrawals, identity verification, fees, liability and changes.',
+    'The terms governing use of the Baltimore Capital managed trading platform: eligibility, managed trading, deposits and withdrawals, identity verification, fees, liability and changes.',
   alternates: { canonical: '/terms' },
 };
 

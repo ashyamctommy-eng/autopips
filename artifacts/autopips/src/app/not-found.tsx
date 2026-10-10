@@ -13,7 +13,7 @@ export default function NotFound() {
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold text-base-100">Page not found</h1>
         <p className="max-w-md text-sm text-muted">
-          That route does not exist on autopips.pro. If you followed a link from inside
+          That route does not exist on baltimorecapital.pro. If you followed a link from inside
           the platform, the resource may have been moved.
         </p>
       </div>

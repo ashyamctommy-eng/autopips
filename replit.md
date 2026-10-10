@@ -1,4 +1,4 @@
-# Autopipsz
+# Baltimore Capital
 
 An imported managed-trading platform with public information, client accounts,
 identity verification, trading workspaces, settlements, and a staff console.
@@ -38,7 +38,7 @@ The user requires external payments and broker account execution disabled in
 internal mode even when credentials are supplied. Public market data is separate:
 use Twelve Data for supported history and Deriv's public feed where needed.
 `REDIS_URL` is a non-secret configuration set to `redis://127.0.0.1:6379`.
-The `Autopipsz Local Redis` workflow runs the Nix-provided Redis server on
+The `Baltimore Capital Local Redis` workflow runs the Nix-provided Redis server on
 loopback only, with append-only persistence under the gitignored `.cache/`
 directory. Published startup uses a separate supervised script: the API starts
 Redis, and the worker waits for Redis readiness. Use Reserved VM rather than

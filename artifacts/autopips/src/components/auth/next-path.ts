@@ -8,7 +8,7 @@
  * signing in. That value is attacker-controllable: a link to
  * `/login?next=https://evil.example` (or `//evil.example`) must never turn the
  * sign-in page into an open redirect that launders a phishing hop through
- * autopips.pro.
+ * the platform's own domain.
  *
  * The rule is therefore allow-list, not deny-list:
  *   1. the raw value must begin with exactly one `/`;
@@ -28,7 +28,7 @@
 export const DEFAULT_POST_LOGIN_PATH = '/dashboard';
 
 /** Resolving base for validation. `.invalid` is reserved and never routable. */
-const VALIDATION_BASE = 'http://autopipsz.invalid';
+const VALIDATION_BASE = 'http://baltimorecapital.invalid';
 
 /** Signing in and being sent back to the sign-in form is not a useful hop. */
 const AUTH_PATHS = new Set(['/login', '/register']);

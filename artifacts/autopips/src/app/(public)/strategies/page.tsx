@@ -25,7 +25,7 @@ import { StrategyMetrics } from '@/components/public/strategy-metrics';
 export const metadata: Metadata = {
   title: 'Strategies',
   description:
-    'How Autopipsz executes strategies: master-to-client lot allocation, the nine pre-trade risk checks, high-water-mark performance fees and the limits of what the platform claims.',
+    'How Baltimore Capital executes strategies: master-to-client lot allocation, the nine pre-trade risk checks, high-water-mark performance fees and the limits of what the platform claims.',
   alternates: { canonical: '/strategies' },
 };
 
@@ -93,7 +93,7 @@ export default async function StrategiesPage() {
           breadcrumb={[{ label: 'Home', href: '/' }, { label: 'Strategies' }]}
           eyebrow="Strategies"
           title="How the strategies are executed"
-          description="Autopipsz runs operator-configured strategies on a master Deriv account and mirrors the resulting positions into client-funded investments. This page documents the arithmetic, the safety checks and the fee model."
+          description="Baltimore Capital runs operator-configured strategies on a master Deriv account and mirrors the resulting positions into client-funded investments. This page documents the arithmetic, the safety checks and the fee model."
         />
       </div>
 

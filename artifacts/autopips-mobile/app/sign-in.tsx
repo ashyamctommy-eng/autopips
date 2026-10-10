@@ -31,10 +31,10 @@ export default function SignIn() {
   }
   return <KeyboardAwareScrollViewCompat style={{ backgroundColor: c.background }} bottomOffset={30} keyboardShouldPersistTaps="handled"
     contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 26, paddingTop: (Platform.OS === 'web' ? 67 : insets.top) + 32, paddingBottom: Math.max(insets.bottom, 34), gap: 24 }}>
-    <View style={styles.logo}><Feather name="trending-up" size={30} color={c.primary} /><Text style={[styles.brand, { color: c.foreground }]}>AUTOPIPSZ</Text></View>
+    <View style={styles.logo}><Feather name="trending-up" size={30} color={c.primary} /><Text style={[styles.brand, { color: c.foreground }]}>BALTIMORE CAPITAL</Text></View>
     <View style={{ marginTop: 32, gap: 12 }}><Text style={[styles.kicker, { color: c.primary }]}>YOUR ACCOUNT. AT A GLANCE.</Text>
       <Text style={[styles.title, { color: c.foreground }]}>{challenge ? 'Verify it’s you.' : 'Stay connected.\nStay informed.'}</Text>
-      <Text style={[styles.body, { color: c.mutedForeground }]}>{challenge ? 'Enter the code from your authenticator app. Each challenge can only be used once.' : 'Check your balance, positions and account activity with your existing Autopipsz account.'}</Text></View>
+      <Text style={[styles.body, { color: c.mutedForeground }]}>{challenge ? 'Enter the code from your authenticator app. Each challenge can only be used once.' : 'Check your balance, positions and account activity with your existing Baltimore Capital account.'}</Text></View>
     <View style={{ gap: 12 }}>
       {challenge ? <><Text style={{ color: c.mutedForeground }}>Authentication code</Text><TextInput testID="two-factor-code" accessibilityLabel="Authentication code" value={code} onChangeText={setCode} keyboardType="number-pad" textContentType="oneTimeCode" maxLength={6} style={input} /></> : <>
         <Text style={{ color: c.mutedForeground }}>Email address</Text><TextInput testID="email" accessibilityLabel="Email address" value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="username" placeholder="you@example.com" placeholderTextColor={c.mutedForeground} style={input} />
@@ -46,7 +46,7 @@ export default function SignIn() {
       </Pressable>
       {challenge && <Pressable onPress={() => { setChallenge(null); setCode(''); setError(null); }} style={{ padding: 12 }}><Text style={{ color: c.primary }}>Back to sign in</Text></Pressable>}
     </View>
-    <View style={[styles.notice, { borderColor: c.border }]}><Feather name="shield" size={18} color={c.primary} /><Text style={[styles.body, { color: c.mutedForeground, flex: 1 }]}>Read-only access. Your funds and trading controls stay on the Autopipsz platform.</Text></View>
+    <View style={[styles.notice, { borderColor: c.border }]}><Feather name="shield" size={18} color={c.primary} /><Text style={[styles.body, { color: c.mutedForeground, flex: 1 }]}>Read-only access. Your funds and trading controls stay on the Baltimore Capital platform.</Text></View>
   </KeyboardAwareScrollViewCompat>;
 }
 const styles = StyleSheet.create({

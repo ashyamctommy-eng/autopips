@@ -2,7 +2,7 @@ import animate from 'tailwindcss-animate';
 import type { Config } from 'tailwindcss';
 
 /**
- * Autopipsz design system.
+ * Baltimore Capital design system.
  *
  * Dark-by-default fintech: #0B0E14 base, cyan / emerald accents — the public
  * site and the client trading workspace. The admin console runs a light

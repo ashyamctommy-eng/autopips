@@ -19,10 +19,10 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Autopipsz Local Redis"
+args = "Baltimore Capital Local Redis"
 
 [[workflows.workflow]]
-name = "Autopipsz Local Redis"
+name = "Baltimore Capital Local Redis"
 author = "agent"
 
 [[workflows.workflow.tasks]]
@@ -53,7 +53,7 @@ DERIV_APP_ID = "1089"
 MARKET_DATA_PROVIDER = "twelve"
 
 [userenv.production]
-ADMIN_SETUP_EMAIL = "ceo@autopips.pro"
+ADMIN_SETUP_EMAIL = "ceo@baltimorecapital.pro"
 VITE_API_BASE_URL = "https://autopips.onrender.com"
 
 [[ports]]

@@ -1,5 +1,5 @@
 /**
- * Autopipsz realtime runtime — standalone entrypoint.
+ * Baltimore Capital realtime runtime — standalone entrypoint.
  *
  *   npm run dev:ws    (tsx watch)
  *   npm run start:ws  (tsx)

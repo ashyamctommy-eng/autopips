@@ -64,7 +64,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <header className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-4 px-4 py-6 sm:px-6 lg:px-8">
           <Link
             href="/"
-            aria-label="Autopipsz home"
+            aria-label="Baltimore Capital home"
             className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70"
           >
             <BrandMark size="md" />
@@ -99,7 +99,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
               ))}
             </ul>
             <p className="mt-4 border-t border-line pt-4 text-xs leading-relaxed text-muted">
-              Autopipsz is not a bank and client balances are not insured. Trading involves
+              Baltimore Capital is not a bank and client balances are not insured. Trading involves
               substantial risk of loss. Read the{' '}
               <Link
                 href="/risk"

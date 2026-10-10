@@ -68,7 +68,7 @@ export function SiteHeader({ className }: SiteHeaderProps) {
         <Link
           href="/"
           className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70"
-          aria-label="Autopipsz home"
+          aria-label="Baltimore Capital home"
         >
           <BrandMark size="md" />
         </Link>

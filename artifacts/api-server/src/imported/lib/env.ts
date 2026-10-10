@@ -22,8 +22,8 @@ const booleanish = z
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  NEXT_PUBLIC_APP_URL: z.string().url().default('https://autopips.pro'),
-  NEXT_PUBLIC_APP_NAME: z.string().default('Autopipsz'),
+  NEXT_PUBLIC_APP_URL: z.string().url().default('https://baltimorecapital.pro'),
+  NEXT_PUBLIC_APP_NAME: z.string().default('Baltimore Capital'),
 
   // Socket / bot runtime
   WS_PORT: z.coerce.number().int().positive().default(4001),
@@ -36,11 +36,11 @@ const schema = z.object({
 
   // Auth
   JWT_SECRET: z.string().min(32),
-  JWT_ISSUER: z.string().default('autopips.pro'),
-  JWT_AUDIENCE: z.string().default('autopips-pro-clients'),
+  JWT_ISSUER: z.string().default('baltimorecapital.pro'),
+  JWT_AUDIENCE: z.string().default('baltimorecapital-pro-clients'),
   ACCESS_TOKEN_TTL: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL: z.coerce.number().int().positive().default(2_592_000),
-  TOTP_ISSUER: z.string().default('Autopipsz'),
+  TOTP_ISSUER: z.string().default('Baltimore Capital'),
 
   // Credential encryption at rest
   CREDENTIAL_ENCRYPTION_KEY: z.string().min(32),

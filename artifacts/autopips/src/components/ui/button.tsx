@@ -5,7 +5,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 /**
- * Autopipsz button.
+ * Baltimore Capital button.
  *
  * `default` and `secondary` are the two dark surfaces; `primary` is the cyan
  * call-to-action (reserve it — one per view); `success`/`destructive` are for

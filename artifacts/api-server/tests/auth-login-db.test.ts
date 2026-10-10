@@ -66,7 +66,7 @@ it('normalizes the email and verifies the Argon2 hash stored in the database', a
   const passwordHash = await hashPassword(FIXTURE_PASSWORD);
   mocks.findUnique.mockResolvedValue({
     id: 'admin-fixture',
-    email: 'ceo@autopips.pro',
+    email: 'ceo@baltimorecapital.pro',
     passwordHash,
     role: 'SUPER_ADMIN',
     is2FAEnabled: false,
@@ -77,7 +77,7 @@ it('normalizes the email and verifies the Argon2 hash stored in the database', a
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        email: ' CEO@Autopips.Pro ',
+        email: ' CEO@Baltimorecapital.Pro ',
         password: FIXTURE_PASSWORD,
       }),
     }),
@@ -85,14 +85,14 @@ it('normalizes the email and verifies the Argon2 hash stored in the database', a
 
   expect(response.status).toBe(200);
   expect(mocks.findUnique).toHaveBeenCalledWith({
-    where: { email: 'ceo@autopips.pro' },
+    where: { email: 'ceo@baltimorecapital.pro' },
   });
   expect(mocks.issueSession).toHaveBeenCalled();
   expect(mocks.setAuthCookies).toHaveBeenCalled();
   await expect(response.json()).resolves.toMatchObject({
     ok: true,
     data: {
-      user: { id: 'admin-fixture', email: 'ceo@autopips.pro', role: 'SUPER_ADMIN' },
+      user: { id: 'admin-fixture', email: 'ceo@baltimorecapital.pro', role: 'SUPER_ADMIN' },
       requires2FA: false,
     },
   });
@@ -102,7 +102,7 @@ it('does not accept an environment password when the stored database hash does n
   vi.stubEnv('ADMIN_PASSWORD', 'Environment-fixture-456!');
   mocks.findUnique.mockResolvedValue({
     id: 'admin-fixture',
-    email: 'ceo@autopips.pro',
+    email: 'ceo@baltimorecapital.pro',
     passwordHash: await hashPassword(FIXTURE_PASSWORD),
     role: 'SUPER_ADMIN',
     is2FAEnabled: false,
@@ -113,7 +113,7 @@ it('does not accept an environment password when the stored database hash does n
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        email: 'ceo@autopips.pro',
+        email: 'ceo@baltimorecapital.pro',
         password: 'Wrong-fixture-789!',
       }),
     }),

@@ -74,7 +74,7 @@ const COLUMNS: readonly Column[] = [
         key: 'execution',
         body: (
           <>
-            Autopipsz is not a venue and does not run a matching engine. Orders are submitted to
+            Baltimore Capital is not a venue and does not run a matching engine. Orders are submitted to
             a <span className="text-base-100">Deriv</span> account over Deriv&rsquo;s WebSocket API,
             which talks to the broker&rsquo;s own trade server. Fills and settlements come back as
             <span className="text-base-100">broker-reported contracts</span> — the only source of

@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /*
- * AUTOPIPSZ DESIGN TOKENS
+ * BALTIMORE CAPITAL DESIGN TOKENS
  * =======================
  * tailwind.config.ts maps these variables onto utilities (`bg-base-850`,
  * `text-muted`, `border-line`, …), so the palette can be swapped per surface

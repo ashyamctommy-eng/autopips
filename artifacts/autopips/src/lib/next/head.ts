@@ -1,7 +1,7 @@
 import type { Metadata } from './types';
 
-const DEFAULT_TITLE = 'Autopipsz — Automated Trading Infrastructure';
-const TEMPLATE = '%s · Autopipsz';
+const DEFAULT_TITLE = 'Baltimore Capital — Automated Trading Infrastructure';
+const TEMPLATE = '%s · Baltimore Capital';
 
 function setMeta(name: string, content: string | null) {
   let el = document.head.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);

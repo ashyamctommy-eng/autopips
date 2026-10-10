@@ -76,7 +76,7 @@ export function LoginForm({ nextPath }: LoginFormProps) {
         footer={
           <p className="text-xs leading-relaxed">
             Codes change every {TOTP_PERIOD_SECONDS} seconds, so a code from the previous screen may
-            already be stale. Lost your authenticator? Email support@autopips.pro — a factor reset is
+            already be stale. Lost your authenticator? Email support@baltimorecapital.pro — a factor reset is
             recorded in the audit trail.
           </p>
         }
@@ -168,7 +168,7 @@ export function LoginForm({ nextPath }: LoginFormProps) {
             .
           </p>
           <p>
-            Forgotten your password? There is no self-service reset — email support@autopips.pro
+            Forgotten your password? There is no self-service reset — email support@baltimorecapital.pro
             from the address on the account.
           </p>
         </div>

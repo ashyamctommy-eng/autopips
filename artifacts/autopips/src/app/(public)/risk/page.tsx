@@ -25,7 +25,7 @@ import { Card, CardContent } from '@/components/ui/card';
 export const metadata: Metadata = {
   title: 'Risk disclosure',
   description:
-    'Full risk disclosure for Autopipsz: capital at risk, leverage, targets as objectives, counterparty and broker risk, crypto settlement risk, regulatory status, fees, liquidity and technology risk.',
+    'Full risk disclosure for Baltimore Capital: capital at risk, leverage, targets as objectives, counterparty and broker risk, crypto settlement risk, regulatory status, fees, liquidity and technology risk.',
   alternates: { canonical: '/risk' },
 };
 
@@ -47,7 +47,7 @@ const RISKS: readonly RiskSection[] = [
           allocate money you cannot afford to lose. Returns are variable and no outcome is assured.
         </p>
         <p>
-          The capital you allocate is at risk from the moment it is deployed to a strategy. Autopipsz
+          The capital you allocate is at risk from the moment it is deployed to a strategy. Baltimore Capital
           does not compensate losses, does not refund allocations that perform badly, and does not
           operate any scheme that would return your capital independently of trading results.
         </p>
@@ -105,7 +105,7 @@ const RISKS: readonly RiskSection[] = [
         </p>
         <p>{TARGET_RETURN_DISCLAIMER}</p>
         <p>
-          Autopipsz does not offer fixed daily, weekly or monthly profit, does not offer any form of
+          Baltimore Capital does not offer fixed daily, weekly or monthly profit, does not offer any form of
           guaranteed return, and does not offer capital protection on any plan.
         </p>
       </>
@@ -117,7 +117,7 @@ const RISKS: readonly RiskSection[] = [
     body: (
       <>
         <p>
-          Autopipsz is not a broker, a bank or a venue. Orders are placed on third-party broker
+          Baltimore Capital is not a broker, a bank or a venue. Orders are placed on third-party broker
           accounts through Deriv&rsquo;s WebSocket API, and those accounts are
           subject to the broker&rsquo;s terms. If the broker defaults, becomes insolvent, withdraws
           from a jurisdiction, changes its margin requirements or restricts trading, your capital
@@ -161,11 +161,11 @@ const RISKS: readonly RiskSection[] = [
         <p>
           Nothing on this website or in the client area constitutes investment advice, a personal
           recommendation, a solicitation or an offer to buy or sell any financial instrument.
-          Autopipsz does not assess your financial situation, objectives or risk tolerance, and does
+          Baltimore Capital does not assess your financial situation, objectives or risk tolerance, and does
           not provide tax or legal advice. Decisions you take are your own.
         </p>
         <p>
-          Autopipsz does not claim on this website any licence, registration, authorisation or
+          Baltimore Capital does not claim on this website any licence, registration, authorisation or
           supervisory status in any jurisdiction. Whether managed trading of this kind may lawfully
           be offered to you — and whether any particular entity may lawfully offer it — depends on
           your country of residence and the applicable local rules. That must be confirmed with the
@@ -227,7 +227,7 @@ const RISKS: readonly RiskSection[] = [
           Automated systems fail. Connectivity between the platform, Deriv&rsquo;s API and the broker can
           be interrupted; a strategy can be delayed, skipped or rejected; a scheduled process can
           stop; a deployment can introduce a defect. Order placement and closure depend on
-          third-party infrastructure that Autopipsz does not control.
+          third-party infrastructure that Baltimore Capital does not control.
         </p>
         <p>
           Risk controls on this platform are applied at order time and are fail-closed, but no control
@@ -244,13 +244,13 @@ const RISKS: readonly RiskSection[] = [
     body: (
       <>
         <p>
-          Balances on Autopipsz are not bank deposits, are not insured by any deposit-protection or
+          Balances on Baltimore Capital are not bank deposits, are not insured by any deposit-protection or
           investor-compensation scheme, and are not protected by any guarantee fund. There is no
           government-backed protection if the operator, the broker or the payment provider fails.
         </p>
         <p>
           Client entitlement is tracked as an accounting position in the platform&rsquo;s ledger; it
-          is not a legal trust and does not make Autopipsz a custodian. Segregation of client funds
+          is not a legal trust and does not make Baltimore Capital a custodian. Segregation of client funds
           in the legal sense is not offered.
         </p>
       </>

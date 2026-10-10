@@ -97,7 +97,7 @@ export function LegalDocumentPage({
           <Link href="/terms" className="text-brand-300 underline-offset-4 hover:underline">
             Terms of service
           </Link>
-          . Questions: compliance@autopips.pro.
+          . Questions: compliance@baltimorecapital.pro.
         </p>
       </Section>
     </>

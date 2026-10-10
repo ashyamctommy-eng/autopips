@@ -10,7 +10,7 @@ import { SETTING_DEFINITIONS } from '@/server/modules/settings/settings.service'
  *   1. paragraph splitting matches what the admin textarea promises (a blank line
  *      separates paragraphs), so an operator edit renders as intended;
  *   2. the built-in default actually states the internal-execution facts — a
- *      disclosure that quietly omitted "Autopipsz is your counterparty" would be
+ *      disclosure that quietly omitted "Baltimore Capital is your counterparty" would be
  *      the exact failure this exists to prevent.
  */
 

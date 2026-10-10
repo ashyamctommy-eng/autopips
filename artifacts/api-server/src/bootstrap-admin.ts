@@ -6,7 +6,7 @@ import {
   verifyPassword,
 } from './imported/server/modules/auth/password.service';
 
-const DEFAULT_ADMIN_EMAIL = 'ceo@autopips.pro';
+const DEFAULT_ADMIN_EMAIL = 'ceo@baltimorecapital.pro';
 
 // Production-only, environment-configured bootstrap. This is not a public
 // password-reset endpoint; credentials are supplied by deployment secrets.
