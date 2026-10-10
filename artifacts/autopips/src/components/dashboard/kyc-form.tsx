@@ -49,6 +49,12 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf
 const ACCEPT_ATTRIBUTE = ALLOWED_TYPES.join(',');
 /** Mirror of KYC_MAX_DOCUMENT_BYTES. */
 const MAX_BYTES = 10 * 1024 * 1024;
+/**
+ * Hard ceiling on a submission request, so the button can never spin forever.
+ * Multi-megabyte ID photos over a slow mobile uplink are the reason this is
+ * generous; anything past it is reported as a timeout rather than a hang.
+ */
+const UPLOAD_TIMEOUT_MS = 120_000;
 const MIN_AGE_YEARS = 18;
 
 const ID_TYPES = [
@@ -247,6 +253,8 @@ export function KycForm({ initial }: KycFormProps) {
 
     setSubmitting(true);
     setServerMessage(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
     try {
       const form = new FormData();
       form.append('idFront', files.idFront);
@@ -257,6 +265,7 @@ export function KycForm({ initial }: KycFormProps) {
         body: form,
         credentials: 'include',
         headers: { accept: 'application/json' },
+        signal: controller.signal,
       });
       const uploadBody: unknown = await uploadResponse.json();
       const uploadData =
@@ -315,11 +324,15 @@ export function KycForm({ initial }: KycFormProps) {
       setFiles({ idFront: null, idBack: null });
       setIdNumber('');
       router.refresh();
-    } catch {
-      const message = 'The submission could not be sent. Check your connection and try again.';
+    } catch (caught) {
+      const timedOut = caught instanceof DOMException && caught.name === 'AbortError';
+      const message = timedOut
+        ? 'The upload timed out before the server answered. Check your connection and try again — nothing was submitted.'
+        : 'The submission could not be sent. Check your connection and try again.';
       setServerMessage(message);
       toast({ title: 'Submission failed', description: message, variant: 'danger' });
     } finally {
+      window.clearTimeout(timeout);
       setSubmitting(false);
     }
   };

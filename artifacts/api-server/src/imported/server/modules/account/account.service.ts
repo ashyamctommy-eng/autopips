@@ -181,9 +181,9 @@ export async function listInvestments(userId: string): Promise<InvestmentDTO[]> 
 export async function createInvestment(args: CreateInvestmentArgs): Promise<InvestmentDTO> {
   const { user, planId, amountUsd, ip, adminOnBehalf } = args;
 
-  if (!adminOnBehalf) {
-    assertVerifiedClient(user);
-  } else {
+  // KYC is enforced on WITHDRAWALS only, so deploying capital no longer requires
+  // an approved identity check. The operator path keeps its own REJECTED rule.
+  if (adminOnBehalf) {
     /*
      * An operator is deploying this client's funds. The client's own KYC gate is
      * replaced by the operator's judgement PLUS two hard rules: a REJECTED client

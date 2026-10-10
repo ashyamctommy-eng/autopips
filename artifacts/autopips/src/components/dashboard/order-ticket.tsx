@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 import { useRouter } from '@/lib/next/navigation';
-import Link from '@/lib/next/link';
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -67,8 +66,10 @@ export interface OrderTicketProps {
   symbol: string | null;
   /** Live quote for that instrument, or null before the first tick. */
   quote: QuoteView | null;
-  /** KYC must be APPROVED — the API refuses the order otherwise. */
-  kycApproved: boolean;
+  /**
+   * The order ticket no longer requires an approved identity check: KYC is
+   * enforced on withdrawals only. Trading is available from a signed-in session.
+   */
   /** Ledger withdrawable cash, or null when it could not be read. */
   availableUsd: number | null;
 }
@@ -90,7 +91,7 @@ function openedEntryPrice(body: unknown): number | null {
   return typeof price === 'number' && Number.isFinite(price) ? price : null;
 }
 
-export function OrderTicket({ symbol, quote, kycApproved, availableUsd }: OrderTicketProps) {
+export function OrderTicket({ symbol, quote, availableUsd }: OrderTicketProps) {
   const router = useRouter();
 
   const [side, setSide] = React.useState<TicketSide>('BUY');
@@ -117,7 +118,7 @@ export function OrderTicket({ symbol, quote, kycApproved, availableUsd }: OrderT
   const valid = isTicketValid(errors);
   const notional = exposureNotional(stakeUsd, multiplier);
 
-  const ready = kycApproved && symbol !== null && referencePrice !== null;
+  const ready = symbol !== null && referencePrice !== null;
 
   /** BUY and SELL are the action buttons; each validates for its own side. */
   const choose = (next: TicketSide): void => {
@@ -207,19 +208,6 @@ export function OrderTicket({ symbol, quote, kycApproved, availableUsd }: OrderT
             </span>
           </div>
         </div>
-
-        {!kycApproved ? (
-          <Alert variant="warn">
-            <AlertTitle>Identity check required</AlertTitle>
-            <AlertDescription>
-              Opening a position commits real money, so it needs an approved identity check.{' '}
-              <Link href="/dashboard/kyc" className="underline">
-                Complete KYC
-              </Link>
-              .
-            </AlertDescription>
-          </Alert>
-        ) : null}
 
         {opened ? (
           <Alert variant="success">
@@ -356,7 +344,7 @@ export function OrderTicket({ symbol, quote, kycApproved, availableUsd }: OrderT
             BUY
           </Button>
         </div>
-        {!ready && kycApproved ? (
+        {!ready ? (
           <p className="text-xs text-muted">
             {symbol === null
               ? 'Select an instrument to trade.'

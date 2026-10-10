@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { ApiError, clientIp, handler, ok, readJson } from '@/lib/http';
 import { rateLimit } from '@/lib/rate-limit';
-import { requireSessionUser, requireVerifiedClient } from '@/server/modules/auth/session';
+import { requireSessionUser } from '@/server/modules/auth/session';
 import {
   listPositions,
   openPosition,
@@ -56,8 +56,9 @@ export const GET = handler(async (request: Request) => {
 });
 
 export const POST = handler(async (request: Request) => {
-  // Verified identity: opening a position commits real money from the wallet.
-  const user = await requireVerifiedClient();
+  // Signed-in session only. KYC is enforced on WITHDRAWALS, not on trading: an
+  // unverified client may open and close positions on the internal book.
+  const user = await requireSessionUser();
   const ip = clientIp(request);
 
   const limited = await rateLimit(`position:user:${user.id}`, 20, 600);

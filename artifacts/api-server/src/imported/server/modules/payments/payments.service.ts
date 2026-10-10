@@ -652,7 +652,7 @@ export interface CreateDepositInput {
 export async function createDeposit(input: CreateDepositInput): Promise<DepositDTO> {
   const { user, amountUsd, cryptoCurrency, ip } = input;
 
-  assertVerifiedClient(user);
+  // KYC is enforced on WITHDRAWALS only; a client may fund an account without it.
   const amount = assertUsdAmount(amountUsd, {
     min: DEPOSIT_MIN_USD,
     max: DEPOSIT_MAX_USD,

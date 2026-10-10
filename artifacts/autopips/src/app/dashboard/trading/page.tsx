@@ -1,6 +1,4 @@
-import { isStaffRole } from '@/lib/roles';
 import Link from '@/lib/next/link';
-
 import { BotActivityFeed } from '@/components/dashboard/bot-activity-feed';
 import { InternalPositions } from '@/components/dashboard/internal-positions';
 import { OpenPositions } from '@/components/dashboard/open-positions';
@@ -117,12 +115,8 @@ export default async function DashboardTradingPage({
     status: investment.status,
   }));
 
-  // Opening a position commits real money, so the API requires an APPROVED identity
-  // check. Telling the ticket now is better than letting the user fill the form and
-  // be refused; admins and trading managers are exempt, exactly as
-  // `requireVerifiedClient` exempts them.
-  const kycApproved =
-    isStaffRole(user.role) || user.kycStatus === 'APPROVED';
+  // KYC is no longer required to trade (withdrawals only), so the ticket is
+  // usable from a signed-in session. The identity status stays on the dashboard.
 
   return (
     <Section width="wide" className="flex flex-col gap-6">
@@ -159,7 +153,6 @@ export default async function DashboardTradingPage({
         investmentId={activeInvestment?.id ?? null}
         initialPositions={openPositions}
         initialSymbol={initialSymbol}
-        kycApproved={kycApproved}
         availableUsd={wallet.availableUsd}
       />
 

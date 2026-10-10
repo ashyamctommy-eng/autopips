@@ -101,8 +101,10 @@ export interface TradingPanelProps {
    * public feed did not list it, because the caller navigated here for it.
    */
   initialSymbol?: string | null;
-  /** KYC must be APPROVED for the order ticket to be usable; the API refuses otherwise. */
-  kycApproved: boolean;
+  /**
+   * The order ticket no longer requires an approved identity check — KYC is
+   * enforced on withdrawals only.
+   */
   /** Ledger withdrawable cash — the ceiling the ticket's stake is reserved from. */
   availableUsd: number | null;
   /**
@@ -227,7 +229,6 @@ export function TradingPanel({
   investmentId,
   initialPositions,
   initialSymbol = null,
-  kycApproved,
   availableUsd,
 }: TradingPanelProps) {
   const [roomId, setRoomId] = React.useState<string | null>(investmentId);
@@ -546,7 +547,6 @@ export function TradingPanel({
         <OrderTicket
           symbol={symbol}
           quote={{ bid: tick?.bid ?? null, ask: tick?.ask ?? null, mid }}
-          kycApproved={kycApproved}
           availableUsd={availableUsd}
         />
 

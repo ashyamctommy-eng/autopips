@@ -250,7 +250,6 @@ export default async function DashboardWalletPage() {
             <code className="mt-3 break-words rounded-lg border border-line bg-base-900/60 p-3 font-mono text-[0.7rem] leading-relaxed text-muted">
               {overview.formula}
             </code>
-            <p className="mt-2 text-xs italic leading-relaxed text-muted">{overview.disclaimer}</p>
           </CardContent>
         </Card>
 

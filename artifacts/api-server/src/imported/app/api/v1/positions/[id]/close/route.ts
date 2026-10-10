@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { ApiError, clientIp, handler, ok } from '@/lib/http';
 import { rateLimit } from '@/lib/rate-limit';
-import { requireVerifiedClient } from '@/server/modules/auth/session';
+import { requireSessionUser } from '@/server/modules/auth/session';
 import {
   closePosition,
   isInternalExecutionEnabled,
@@ -28,7 +28,8 @@ const paramsSchema = z.object({ id: z.string().uuid() });
  * whichever transition lands first wins).
  */
 export const POST = handler(async (request: Request, context: { params: { id: string } }) => {
-  const user = await requireVerifiedClient();
+  // Signed-in session only — KYC gates withdrawals, not closing a position.
+  const user = await requireSessionUser();
   const ip = clientIp(request);
   const { id } = paramsSchema.parse(context.params);
 

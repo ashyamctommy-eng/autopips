@@ -3,7 +3,7 @@ import { ArrowDownToLine, ArrowUpFromLine, Layers, Wallet } from 'lucide-react';
 
 import { ActivityFeed } from '@/components/shared/activity-feed';
 import { MetricTile } from '@/components/shared/metric-tile';
-import { NonGuaranteedNote, TargetRange } from '@/components/shared/disclaimer';
+import { TargetRange } from '@/components/shared/disclaimer';
 import { PageHeader } from '@/components/shared/page-header';
 import { RiskBadge } from '@/components/shared/risk-badge';
 import { Section } from '@/components/shared/section';
@@ -265,11 +265,6 @@ export default async function DashboardOverviewPage() {
               <code className="break-words font-mono text-[0.7rem] leading-relaxed text-muted">
                 {overview.formula}
               </code>
-            </div>
-
-            <div className="mt-3 flex flex-col gap-1">
-              <NonGuaranteedNote variant="footnote" />
-              <p className="text-xs italic leading-relaxed text-muted">{overview.disclaimer}</p>
             </div>
           </CardContent>
         </Card>
