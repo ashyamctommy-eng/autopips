@@ -1,3 +1,7 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { serverEnv } from '@/lib/env';
 import { ApiError } from '@/lib/http';
 import {
@@ -356,16 +360,68 @@ async function derivCandles(
  * function the authorised path uses, so the field-name change on Deriv's side
  * (`underlying_symbol`) cannot make one path see instruments and the other none.
  */
-export async function listPublicSymbols(): Promise<InstrumentInfo[]> {
-  const socket = await connection();
-  const response = await socket.request<{ active_symbols?: unknown }>(
-    { active_symbols: 'brief' },
-    'public active_symbols',
-  );
+const INSTRUMENTS_TTL_MS = 10 * 60 * 1000;
+let instrumentsCache: { at: number; value: InstrumentInfo[] } | null = null;
 
-  return mapDerivActiveSymbols(response.active_symbols).sort((a, b) =>
-    a.symbol.localeCompare(b.symbol),
-  );
+/**
+ * The catalog is ALSO written to a small file so a process restart during a
+ * Deriv rate-limit window still has instruments to list, instead of blanking the
+ * Markets tab until the quota clears. Best effort: any I/O error is ignored.
+ */
+const INSTRUMENTS_CACHE_FILE = join(tmpdir(), 'bbcap-deriv-instruments.json');
+
+async function readCachedCatalog(): Promise<InstrumentInfo[] | null> {
+  try {
+    const parsed = JSON.parse(await readFile(INSTRUMENTS_CACHE_FILE, 'utf8')) as {
+      value?: InstrumentInfo[];
+    };
+    return Array.isArray(parsed.value) && parsed.value.length > 0 ? parsed.value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCachedCatalog(value: InstrumentInfo[]): Promise<void> {
+  try {
+    await writeFile(INSTRUMENTS_CACHE_FILE, JSON.stringify({ at: Date.now(), value }));
+  } catch {
+    /* best effort */
+  }
+}
+
+export async function listPublicSymbols(): Promise<InstrumentInfo[]> {
+  const now = Date.now();
+  if (instrumentsCache && now - instrumentsCache.at < INSTRUMENTS_TTL_MS) {
+    return instrumentsCache.value;
+  }
+
+  try {
+    const socket = await connection();
+    const response = await socket.request<{ active_symbols?: unknown }>(
+      { active_symbols: 'brief' },
+      'public active_symbols',
+    );
+    const value = mapDerivActiveSymbols(response.active_symbols).sort((a, b) =>
+      a.symbol.localeCompare(b.symbol),
+    );
+    // Only cache a non-empty catalog: an empty reply must not replace a good one.
+    if (value.length > 0) {
+      instrumentsCache = { at: now, value };
+      void writeCachedCatalog(value);
+    }
+    return value;
+  } catch (error) {
+    // In-memory first, then the last catalog on disk; only then give up.
+    const fallback = instrumentsCache?.value ?? (await readCachedCatalog());
+    if (fallback) {
+      instrumentsCache = { at: now, value: fallback };
+      console.warn(
+        `[public-market] active_symbols failed (${error instanceof Error ? error.message : error}); serving the cached ${fallback.length}-instrument catalog.`,
+      );
+      return fallback;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -389,13 +445,13 @@ export async function subscribePublicTicks(
     await ensurePublicTickSubscription(symbol);
   } catch (error) {
     if (tickListeners.has(symbol)) throw error;
-    if (isMarketClosedError(error)) {
-      // A CLOSED MARKET IS NOT A FAILURE. Deriv refuses tick subscriptions for
-      // instruments outside their trading hours (e.g. forex at the weekend,
-      // `MarketIsClosed`). The old code tore the demand down and reported "not
-      // streaming", so the symbol only recovered on a client reload. Keep the
-      // listeners registered and retry on a timer instead: the feed starts by
-      // itself when the market opens and the client just shows "awaiting tick".
+    if (isRetryableSubscriptionError(error)) {
+      // A CLOSED MARKET OR A RATE LIMIT IS NOT A FAILURE.
+      // Deriv refuses tick subscriptions outside trading hours (`MarketIsClosed`)
+      // and, under load from a shared app_id, answers `RateLimit` for a while.
+      // Both are transient: keep the listeners registered and retry on a timer so
+      // the feed starts by itself once the market opens or the limit clears,
+      // instead of the client sitting on "not streaming" until it reloads.
       schedulePublicTickReconnect(symbol, 60_000);
     } else {
       listeners.delete(onQuote);
@@ -433,14 +489,13 @@ export async function subscribePublicTicks(
 }
 
 /**
- * Deriv answers a tick subscription for an instrument outside its trading hours
- * with `MarketIsClosed` (and the market's reopen time). That is a scheduled
- * pause, not an outage, so it is handled by retaining demand and retrying rather
- * than by failing the stream.
+ * True when a tick-subscription failure is TRANSIENT and worth retrying on a
+ * timer: the venue is outside its trading hours (`MarketIsClosed`) or Deriv is
+ * throttling the caller (`RateLimit`). Anything else is fatal for this attempt.
  */
-function isMarketClosedError(error: unknown): boolean {
+function isRetryableSubscriptionError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '');
-  return /MarketIsClosed|market is (presently )?closed/i.test(message);
+  return /MarketIsClosed|market is (presently )?closed|ratelimit|rate limit/i.test(message);
 }
 
 /**
