@@ -187,15 +187,17 @@ export function mapDerivActiveSymbols(payload: unknown): InstrumentInfo[] {
         ? raw.pip
         : 0;
 
+    const exchangeIsOpen = raw.exchange_is_open === 1 || raw.exchange_is_open === true;
     instruments.push({
       symbol,
       displayName,
       market: typeof raw.market === 'string' ? raw.market : 'unknown',
       submarket: typeof raw.submarket === 'string' ? raw.submarket : 'unknown',
       pipSize,
+      exchangeIsOpen,
       // Tradable = the venue is open AND the instrument is not suspended. The
       // previous `||` made a suspended instrument on an open venue look tradable.
-      isTradable: (raw.exchange_is_open === 1 || raw.exchange_is_open === true) &&
+      isTradable: exchangeIsOpen &&
         raw.is_trading_suspended !== 1 && raw.is_trading_suspended !== true,
     });
   }

@@ -82,10 +82,17 @@ export default async function DashboardTradingPage({
   // The broker's instrument list, read from its public feed. A failure here is
   // NOT fatal and never invented: the chart falls back to traded instruments.
   let availableInstruments: string[] = [];
+  let closedSymbols: string[] = [];
   try {
-    availableInstruments = (await listPublicSymbols())
+    const feedInstruments = await listPublicSymbols();
+    availableInstruments = feedInstruments
       .map((instrument) => instrument.symbol)
       .sort((a, b) => a.localeCompare(b));
+    // Venues outside their trading hours (e.g. forex at the weekend) still serve
+    // history but push no live ticks. The panel says so instead of looking stuck.
+    closedSymbols = feedInstruments
+      .filter((instrument) => instrument.exchangeIsOpen === false)
+      .map((instrument) => instrument.symbol);
   } catch (err) {
     console.warn(
       `[dashboard/trading] instrument list unavailable: ${err instanceof Error ? err.message : err}`,
@@ -148,6 +155,7 @@ export default async function DashboardTradingPage({
         investments={panelInvestments}
         instruments={instruments}
         availableInstruments={availableInstruments}
+        closedSymbols={closedSymbols}
         investmentId={activeInvestment?.id ?? null}
         initialPositions={openPositions}
         initialSymbol={initialSymbol}

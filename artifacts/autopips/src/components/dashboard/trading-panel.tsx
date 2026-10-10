@@ -87,6 +87,12 @@ export interface TradingPanelProps {
    * instead of sitting empty behind a disabled selector.
    */
   availableInstruments?: string[];
+  /**
+   * Symbols whose venue is closed right now (weekend / outside trading hours),
+   * from the feed's `exchange_is_open`. Used to explain a chart that has history
+   * but no moving live ticks.
+   */
+  closedSymbols?: string[];
   /** Investment whose realtime room this panel subscribes to (may be null). */
   investmentId: string | null;
   /**
@@ -217,6 +223,7 @@ export function TradingPanel({
   investments,
   instruments,
   availableInstruments = [],
+  closedSymbols = [],
   investmentId,
   initialPositions,
   initialSymbol = null,
@@ -393,6 +400,12 @@ export function TradingPanel({
                 Candles come from the Market Feed. An empty series is shown as
                 empty — never filled in, interpolated or approximated.
               </p>
+              {symbol && closedSymbols.includes(symbol) ? (
+                <p className="mt-1 text-xs font-medium leading-relaxed text-warn-400">
+                  Market closed — {symbol} is outside its trading hours. History is shown below;
+                  live ticks resume when the session reopens.
+                </p>
+              ) : null}
             </div>
             <div className="flex items-center gap-2">
               {/* The bot's event channel: bot:activity, position deltas,

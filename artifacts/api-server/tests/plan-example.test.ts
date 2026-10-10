@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   PLAN_EXAMPLE,
   PLAN_FIELD_GUIDE,
+  PLAN_PRESETS,
   planInputSchema,
   planUpdateSchema,
 } from '@/server/modules/admin/plan-validation';
@@ -126,6 +127,24 @@ describe('the environment contract', () => {
         else process.env[key] = value;
       }
       vi.resetModules();
+    }
+  });
+
+  it('exposes four presets, each a valid create payload', () => {
+    expect(PLAN_PRESETS).toHaveLength(4);
+    for (const preset of PLAN_PRESETS) {
+      const parsed = planInputSchema.safeParse(preset.plan);
+      if (!parsed.success) {
+        throw new Error(
+          `Preset "${preset.id}" is invalid: ${JSON.stringify(parsed.error.issues, null, 2)}`,
+        );
+      }
+      // No key silently stripped, and the cross-field rules hold.
+      expect(parsed.data).toEqual(preset.plan);
+      expect(preset.plan.maxInvestment).toBeGreaterThan(preset.plan.minInvestment);
+      expect(preset.plan.targetReturnMax).toBeGreaterThanOrEqual(preset.plan.targetReturnMin);
+      expect(preset.plan.maxDrawdown).toBeGreaterThan(0);
+      expect(Number.isInteger(preset.plan.durationDays)).toBe(true);
     }
   });
 });

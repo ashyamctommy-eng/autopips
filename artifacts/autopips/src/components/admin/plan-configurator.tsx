@@ -45,8 +45,10 @@ import type { TradingPlanDTO } from '@/types/api';
 import {
   PLAN_EXAMPLE,
   PLAN_FIELD_GUIDE,
+  PLAN_PRESETS,
   planInputSchema,
   planUpdateSchema,
+  type PlanInput,
 } from '@/lib/shared/plan-validation';
 
 const RISK_LABEL: Record<RiskLevel, string> = {
@@ -109,23 +111,27 @@ function formFromPlan(plan: TradingPlanDTO): PlanFormState {
 }
 
 /** `''` becomes NaN, which the shared zod schema rejects as "must be a number". */
-/** The illustrative plan, as form strings (every numeric input is controlled text). */
-function formFromExample(): PlanFormState {
+/** Turn any valid plan (an example or a preset) into control text. */
+function formFromPlanInput(plan: PlanInput): PlanFormState {
   return {
-    name: PLAN_EXAMPLE.name,
-    description: PLAN_EXAMPLE.description,
-    minInvestment: String(PLAN_EXAMPLE.minInvestment),
-    maxInvestment: String(PLAN_EXAMPLE.maxInvestment),
-    durationDays: String(PLAN_EXAMPLE.durationDays),
-    targetReturnMin: String(PLAN_EXAMPLE.targetReturnMin),
-    targetReturnMax: String(PLAN_EXAMPLE.targetReturnMax),
-    riskLevel: PLAN_EXAMPLE.riskLevel,
-    performanceFee: String(PLAN_EXAMPLE.performanceFee),
-    managementFee: String(PLAN_EXAMPLE.managementFee),
-    maxDrawdown: String(PLAN_EXAMPLE.maxDrawdown),
-    isActive: PLAN_EXAMPLE.isActive,
+    name: plan.name,
+    description: plan.description,
+    minInvestment: String(plan.minInvestment),
+    maxInvestment: String(plan.maxInvestment),
+    durationDays: String(plan.durationDays),
+    targetReturnMin: String(plan.targetReturnMin),
+    targetReturnMax: String(plan.targetReturnMax),
+    riskLevel: plan.riskLevel,
+    performanceFee: String(plan.performanceFee),
+    managementFee: String(plan.managementFee),
+    maxDrawdown: String(plan.maxDrawdown),
+    isActive: plan.isActive,
   };
 }
+
+const formFromExample = () => formFromPlanInput(PLAN_EXAMPLE);
+void formFromExample;
+
 
 function toNumber(value: string): number {
   const trimmed = value.trim();
@@ -174,7 +180,7 @@ function FieldError({ errors, field }: { errors: FieldErrors; field: string }) {
  * example against `planInputSchema` so it cannot drift. The button fills the form
  * with it, which is the quickest honest answer to "what shape do you want?".
  */
-function ExampleFormatPanel({ onUse }: { onUse: () => void }) {
+function ExampleFormatPanel({ onUse }: { onUse: (plan: PlanInput) => void }) {
   const [showFields, setShowFields] = React.useState(false);
 
   return (
@@ -182,28 +188,43 @@ function ExampleFormatPanel({ onUse }: { onUse: () => void }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <FileJson aria-hidden className="size-4 text-brand-400" />
-          <span className="text-sm font-medium text-base-100">Example format</span>
+          <span className="text-sm font-medium text-base-100">Presets &amp; format</span>
           <Badge variant="outline">illustrative values</Badge>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setShowFields((value) => !value)}
-          >
-            {showFields ? 'Hide field rules' : 'Show field rules'}
-          </Button>
-          <Button type="button" size="sm" variant="secondary" onClick={onUse}>
-            Use this example
-          </Button>
-        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setShowFields((value) => !value)}
+        >
+          {showFields ? 'Hide field rules' : 'Show field rules'}
+        </Button>
       </div>
 
       <p className="mt-2 text-xs text-muted">
-        The exact payload the API accepts. Amounts are USD; returns, fees and drawdown are
-        percentages. Target returns are an indicative range, not a promise of performance.
+        Start from one of four preset shapes and edit any field. Amounts are USD; returns, fees and
+        drawdown are percentages. Target returns are an indicative range, not a promise of
+        performance.
       </p>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {PLAN_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            onClick={() => onUse(preset.plan)}
+            className="flex flex-col items-start gap-0.5 rounded-md border border-line bg-base-900 p-3 text-left transition-colors hover:border-brand/40 hover:bg-base-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+          >
+            <span className="text-sm font-medium text-base-100">{preset.label}</span>
+            <span className="text-xs leading-relaxed text-muted">{preset.summary}</span>
+            <span className="mt-1 font-mono text-[0.68rem] text-muted">
+              {preset.plan.riskLevel} · {preset.plan.minInvestment}–{preset.plan.maxInvestment} USD ·{' '}
+              {preset.plan.targetReturnMin}–{preset.plan.targetReturnMax}% · drawdown{' '}
+              {preset.plan.maxDrawdown}%
+            </span>
+          </button>
+        ))}
+      </div>
 
       {showFields ? (
         <ul className="mt-3 flex flex-col gap-1.5">
@@ -218,9 +239,12 @@ function ExampleFormatPanel({ onUse }: { onUse: () => void }) {
         </ul>
       ) : null}
 
-      <pre className="mt-3 max-h-56 overflow-auto rounded-md border border-line bg-base-900 p-3 font-mono text-xs leading-relaxed text-base-100">
-        {JSON.stringify(PLAN_EXAMPLE, null, 2)}
-      </pre>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs text-muted">Show the raw JSON example</summary>
+        <pre className="mt-2 max-h-56 overflow-auto rounded-md border border-line bg-base-900 p-3 font-mono text-xs leading-relaxed text-base-100">
+          {JSON.stringify(PLAN_EXAMPLE, null, 2)}
+        </pre>
+      </details>
     </div>
   );
 }
@@ -558,8 +582,8 @@ export function PlanConfigurator({ initialPlans, canManage }: PlanConfiguratorPr
 
           {!editing ? (
             <ExampleFormatPanel
-              onUse={() => {
-                setForm(formFromExample());
+              onUse={(plan) => {
+                setForm(formFromPlanInput(plan));
                 setErrors({});
                 setFormError(null);
               }}

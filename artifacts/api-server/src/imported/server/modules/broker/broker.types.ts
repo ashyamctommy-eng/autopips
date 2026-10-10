@@ -125,6 +125,14 @@ export interface InstrumentInfo {
   submarket: string;
   /** Smallest price increment the instrument quotes in (Deriv: `pip`). */
   pipSize: number;
+  /**
+   * The venue's own session state (Deriv `exchange_is_open`). FALSE at the
+   * weekend or outside the instrument's trading hours, TRUE while the session is
+   * live. Distinct from `isTradable`, which is also false for a suspended
+   * instrument — this is what lets the UI say "market closed" honestly instead
+   * of guessing from a missing tick.
+   */
+  exchangeIsOpen: boolean;
   isTradable: boolean;
 }
 

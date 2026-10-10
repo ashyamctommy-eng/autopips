@@ -190,3 +190,105 @@ export const PLAN_FIELD_GUIDE: ReadonlyArray<{ field: keyof PlanInput; rule: str
   },
   { field: 'isActive', rule: 'Optional, defaults to true. false keeps the plan hidden.' },
 ];
+
+/**
+ * A named starting point for the create form.
+ *
+ * Four complete, valid shapes covering the risk/duration spectrum, so an operator
+ * who has never written a plan can pick one, read how it is built, and adjust it
+ * rather than stare at an empty form. They are EXAMPLES, not recommendations or
+ * forecasts: every target return is an indicative range and is rendered with the
+ * non-guarantee caveat. Each is asserted against `planInputSchema` by
+ * `tests/plan-example.test.ts`, so none can drift from the contract.
+ */
+export interface PlanPreset {
+  id: string;
+  /** Short label for the preset button. */
+  label: string;
+  /** One line on who the shape is for. */
+  summary: string;
+  plan: PlanInput;
+}
+
+export const PLAN_PRESETS: readonly PlanPreset[] = [
+  {
+    id: 'conservative-income',
+    label: 'Conservative Income · 90d',
+    summary: 'Low risk — capital preservation, small size, tight drawdown stop.',
+    plan: {
+      name: 'Conservative Income 90',
+      description:
+        'Capital-preservation mandate over a 90-day cycle. Positions are sized small relative to deployed capital, entries need both trend and volatility confirmation, and the engine stops trading at the drawdown limit. Target returns are an indicative range, never a guarantee.',
+      minInvestment: 500,
+      maxInvestment: 50_000,
+      durationDays: 90,
+      targetReturnMin: 3,
+      targetReturnMax: 7,
+      riskLevel: 'LOW',
+      performanceFee: 10,
+      managementFee: 1,
+      maxDrawdown: 12,
+      isActive: true,
+    },
+  },
+  {
+    id: 'balanced-momentum',
+    label: 'Balanced Momentum · 30d',
+    summary: 'Mid risk, 30-day cycle — the balanced default shape.',
+    plan: {
+      name: 'Balanced Momentum 30',
+      description:
+        'Balanced 30-day cycle: positions are sized from a fixed risk budget per trade, entries need trend confirmation, and every position carries a verified stop. Target returns are an indicative range, never a guarantee.',
+      minInvestment: 100,
+      maxInvestment: 25_000,
+      durationDays: 30,
+      targetReturnMin: 4,
+      targetReturnMax: 12,
+      riskLevel: 'MEDIUM',
+      performanceFee: 20,
+      managementFee: 2,
+      maxDrawdown: 25,
+      isActive: true,
+    },
+  },
+  {
+    id: 'growth-trend',
+    label: 'Growth Trend · 60d',
+    summary: 'Mid risk, longer cycle, wider drawdown budget for trend following.',
+    plan: {
+      name: 'Growth Trend 60',
+      description:
+        'Higher-conviction trend following over a 60-day cycle. Larger position sizing with a wider per-trade risk budget and a wider drawdown stop; entries are filtered to established trends. Target returns are an indicative range, never a guarantee.',
+      minInvestment: 250,
+      maxInvestment: 100_000,
+      durationDays: 60,
+      targetReturnMin: 8,
+      targetReturnMax: 20,
+      riskLevel: 'MEDIUM',
+      performanceFee: 25,
+      managementFee: 2.5,
+      maxDrawdown: 30,
+      isActive: true,
+    },
+  },
+  {
+    id: 'aggressive-alpha',
+    label: 'Aggressive Alpha · 14d',
+    summary: 'High risk, short cycle, large swings — risk-tolerant capital only.',
+    plan: {
+      name: 'Aggressive Alpha 14',
+      description:
+        'High-risk, short 14-day cycle for risk-tolerant capital. Full risk budget per trade and a wide drawdown stop; expect large swings and meaningful loss potential. Target returns are an indicative range, never a guarantee.',
+      minInvestment: 1_000,
+      maxInvestment: 250_000,
+      durationDays: 14,
+      targetReturnMin: 12,
+      targetReturnMax: 35,
+      riskLevel: 'HIGH',
+      performanceFee: 30,
+      managementFee: 3,
+      maxDrawdown: 40,
+      isActive: true,
+    },
+  },
+];

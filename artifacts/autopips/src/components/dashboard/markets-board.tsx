@@ -185,11 +185,14 @@ const MarketRow = React.memo(function MarketRow({
   onToggle,
 }: MarketRowProps) {
   const quote = describeTick(tick, decimalsForPipSize(instrument.pipSize));
-  const detail = quote.side
-    ? QUOTE_LABEL[quote.side]
-    : watched
-      ? 'awaiting tick'
-      : 'not streaming';
+  const marketClosed = instrument.exchangeIsOpen === false;
+  const detail = marketClosed
+    ? 'market closed'
+    : quote.side
+      ? QUOTE_LABEL[quote.side]
+      : watched
+        ? 'awaiting tick'
+        : 'not streaming';
 
   return (
     <li className="border-b border-line/60 last:border-b-0">
@@ -203,7 +206,9 @@ const MarketRow = React.memo(function MarketRow({
               <span className="truncate font-mono text-sm font-medium text-base-100">
                 {instrument.symbol}
               </span>
-              {instrument.isTradable === true ? (
+              {instrument.exchangeIsOpen === false ? (
+                <Badge variant="warn">Market closed</Badge>
+              ) : instrument.isTradable === true ? (
                 <Badge variant="success">Tradable</Badge>
               ) : (
                 <Badge variant="warn">Not tradable</Badge>
@@ -223,7 +228,7 @@ const MarketRow = React.memo(function MarketRow({
 
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <span className="tabular-nums text-sm font-medium text-base-100">{quote.text}</span>
-            <span className="text-[0.65rem] uppercase tracking-wide text-muted">{detail}</span>
+            <span className={cn('text-[0.65rem] uppercase tracking-wide text-muted', marketClosed && 'text-warn-400')}>{detail}</span>
           </div>
         </Link>
 
