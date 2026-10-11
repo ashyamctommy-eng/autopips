@@ -471,6 +471,28 @@ export async function runInternalStrategyCycle(
       if (!signal) continue;
       result.signals += 1;
 
+      /*
+       * Record EVERY fired signal — not only the ones that become a position.
+       * Without this row an operator sees a quiet execution list and cannot tell
+       * "the rule never fired" from "it fired and a gate or the sizer refused it".
+       * One row per signal, so the signal log reads as events, not fractions.
+       */
+      await recordAuditSafe({
+        action: AUDIT.BOT_SIGNAL_TRIGGERED,
+        details: {
+          phase: 'internal_strategy_cycle',
+          strategyId,
+          symbol,
+          direction: signal.direction,
+          signalId: signal.signalId,
+          reason: signal.reason,
+          entryPrice,
+          stopLoss: signal.stopLoss ?? null,
+          takeProfit: signal.takeProfit ?? null,
+          source: 'BOT_INTERNAL',
+        },
+      });
+
       // Platform gate: kill switch, symbol allow-list, daily loss limit. Checked
       // BEFORE any position is opened.
       const gate = await checkTradingAllowed(symbol);

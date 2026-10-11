@@ -163,10 +163,11 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     envName: 'MARKET_INSTRUMENTS',
     label: 'Offered instruments (platform catalog)',
     description:
-      'Comma-separated platform symbols the deployment offers and charts. Only list instruments that have a price source (a Twelve Data mapping such as frxXAUUSD→XAU/USD, or a synthetic the oracle can price). Case-sensitive.',
+      'Comma-separated platform symbols the deployment offers and charts. Only list instruments that have a price source — a Twelve Data mapping such as frxXAUUSD→XAU/USD, a synthetic the oracle can price, or the biquote fallback feed (which carries the oil instruments below). Case-sensitive.',
     kind: 'symbols',
-    defaultValue: 'frxEURUSD,frxGBPUSD,frxUSDJPY,frxXAUUSD,cryBTCUSD,cryETHUSD',
-    inputHint: 'e.g. frxEURUSD,frxXAUUSD,cryBTCUSD',
+    defaultValue:
+      'frxEURUSD,frxGBPUSD,frxUSDJPY,frxXAUUSD,cryBTCUSD,cryETHUSD,comWTIUSD,comBRENTUSD',
+    inputHint: 'e.g. frxEURUSD,frxXAUUSD,cryBTCUSD,comWTIUSD',
   },
 
   // ── payout controls ────────────────────────────────────────────────────────

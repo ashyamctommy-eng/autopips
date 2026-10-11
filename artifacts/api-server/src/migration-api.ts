@@ -27,7 +27,7 @@ const readMethods: Record<string, readonly string[]> = {
   'server/modules/positions/position.service': ['listPositions', 'getWallet'],
   'server/modules/payments/payments.service': ['listDeposits', 'listWithdrawals', 'listSupportedCurrencies', 'adminListDeposits', 'adminListWithdrawals'],
   'server/modules/kyc/kyc.service': ['getMyKyc', 'listKycQueue'],
-  'server/modules/market/public-market.service': ['listPublicSymbols'],
+  'server/modules/market/public-market.service': ['listPublicSymbols', 'listMarketInstruments'],
   'server/modules/settings/settings.service': ['listAdminSettings', 'publicContactLines'],
   'app/admin/_lib/admin-data': ['countPendingWithdrawals', 'attachWithdrawalEmails'],
   'server/modules/legal/disclosure': ['isInternalExecutionMode', 'internalExecutionNotice'],

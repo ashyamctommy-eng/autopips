@@ -88,9 +88,12 @@ export const TWELVE_DATA_SYMBOLS: Readonly<Record<string, string>> = {
  *   configuration for. This is the deliberate, small list that is seeded, charted
  *   and tradeable. Operators override it in Admin → Settings (`market.instruments`).
  *
- * Every entry MUST have a price source — a Twelve Data mapping above, or a
- * synthetic the oracle can price. An instrument with no feed would be offered to
- * clients and then fail to open.
+ * Every entry MUST have a price source. Today that is a Twelve Data mapping, a
+ * synthetic the oracle can price, OR the biquote fallback feed
+ * (`MARKET_FALLBACK_PROVIDER=biquote`), which is what carries the two oil
+ * instruments below — Twelve Data prices them only on a paid plan, but their LIVE
+ * ticks come from biquote. Note the asymmetry that follows: oil has live prices
+ * and can be traded, while its candle HISTORY still needs the Twelve upgrade.
  */
 export const DEFAULT_PLATFORM_INSTRUMENTS: readonly string[] = [
   'frxEURUSD',
@@ -99,6 +102,10 @@ export const DEFAULT_PLATFORM_INSTRUMENTS: readonly string[] = [
   'frxXAUUSD',
   'cryBTCUSD',
   'cryETHUSD',
+  // Spot oil: live ticks via biquote (USOIL/UKOIL); history is plan-gated at the
+  // vendor. Seeded so the Markets page's SPOT OIL tab is not permanently empty.
+  'comWTIUSD',
+  'comBRENTUSD',
 ];
 
 /**

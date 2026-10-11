@@ -32,6 +32,26 @@ interface RecentExecution {
   strategyId: string | null;
 }
 
+/** A fired signal, or the gate/sizing refusal that explains a fired signal producing nothing. */
+interface RecentSignal {
+  id: string;
+  action: string;
+  createdAt: string;
+  strategyId: string | null;
+  symbol: string | null;
+  direction: string | null;
+  reason: string | null;
+  investmentId: string | null;
+}
+
+/** Audit action -> what it means for the operator. */
+function signalLabel(action: string): { text: string; tone: 'good' | 'warn' | 'muted' } {
+  if (action === 'BOT_SIGNAL_TRIGGERED') return { text: 'signal fired', tone: 'good' };
+  if (action === 'RISK_KILL_SWITCH') return { text: 'gated', tone: 'warn' };
+  if (action === 'STAKE_ALLOCATED') return { text: 'not sized', tone: 'warn' };
+  return { text: action.toLowerCase().replace(/_/g, ' '), tone: 'muted' };
+}
+
 interface BotStatusPayload {
   runtime?: {
     workerTrading?: boolean;
@@ -44,6 +64,8 @@ interface BotStatusPayload {
   } | null;
   recentExecutions?: RecentExecution[];
   recentExecutionsError?: string | null;
+  recentSignals?: RecentSignal[];
+  recentSignalsError?: string | null;
 }
 
 const POLL_MS = 15_000;
@@ -88,6 +110,7 @@ export function BotExecutions() {
 
   const heartbeat = data?.runtime?.heartbeat ?? null;
   const executions = data?.recentExecutions ?? [];
+  const signals = data?.recentSignals ?? [];
 
   const columns: DataTableColumn<RecentExecution>[] = [
     {
@@ -135,6 +158,50 @@ export function BotExecutions() {
       key: 'openedAt',
       header: 'Opened',
       cell: (row) => <span className="text-xs text-muted">{formatTime(row.openedAt)}</span>,
+    },
+  ];
+
+  const signalColumns: DataTableColumn<RecentSignal>[] = [
+    {
+      key: 'action',
+      header: 'Event',
+      cell: (row) => {
+        const label = signalLabel(row.action);
+        return (
+          <Badge variant={label.tone === 'good' ? 'success' : label.tone === 'warn' ? 'warn' : 'outline'}>
+            {label.text}
+          </Badge>
+        );
+      },
+    },
+    {
+      key: 'symbol',
+      header: 'Instrument',
+      cell: (row) => (
+        <div className="flex flex-col">
+          <span className="font-medium text-base-100">{row.symbol ?? '—'}</span>
+          <span className="text-[0.68rem] text-muted">{row.strategyId ?? 'engine'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'direction',
+      header: 'Side',
+      cell: (row) => <span className="text-xs">{row.direction ?? '—'}</span>,
+    },
+    {
+      key: 'reason',
+      header: 'Why',
+      cell: (row) => (
+        <span className="text-xs text-muted" title={row.reason ?? ''}>
+          {row.reason ?? '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: 'When',
+      cell: (row) => <span className="text-xs text-muted">{formatTime(row.createdAt)}</span>,
     },
   ];
 
@@ -204,6 +271,30 @@ export function BotExecutions() {
             />
           }
         />
+
+        <div className="flex flex-col gap-2 border-t border-line/60 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-base-100">Signal log</h3>
+            <span className="text-xs text-muted">
+              Newest first · every fired signal, plus gate and sizing refusals
+            </span>
+          </div>
+          {data?.recentSignalsError ? (
+            <p className="text-xs text-warn-600">Signal log unavailable: {data.recentSignalsError}</p>
+          ) : null}
+          <DataTable
+            columns={signalColumns}
+            rows={signals}
+            getRowKey={(row) => row.id}
+            emptyState={
+              <EmptyState
+                size="sm"
+                title="No signals recorded yet"
+                description="The engine records a row the moment a rule fires — even when no position follows. An empty log means no setup has triggered, not that tracking is off."
+              />
+            }
+          />
+        </div>
       </CardContent>
     </Card>
   );

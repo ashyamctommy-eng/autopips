@@ -36,6 +36,7 @@ import type { Quote } from '@/server/modules/broker/broker.types';
  */
 
 const DEFAULT_HUB_URL = 'wss://biquote.io/hubs/tick';
+const DEFAULT_REST_BASE = 'https://biquote.io/api';
 const RECORD_SEPARATOR = '\x1e';
 const DEFAULT_MAX_AGE_SECONDS = 120;
 const RECONNECT_DELAY_MS = 5_000;
@@ -326,4 +327,43 @@ export function biquoteStatus(): { connected: boolean; symbols: number; listener
   let count = 0;
   for (const set of listeners.values()) count += set.size;
   return { connected: ready, symbols: wanted.size, listeners: count };
+}
+
+function restBase(): string {
+  return ((process.env.BIQUOTE_REST_BASE ?? '').trim() || DEFAULT_REST_BASE).replace(/\/$/, '');
+}
+
+/**
+ * Session state (`marketState`) for the instruments this feed carries.
+ *
+ * Used for instruments the DERIV catalogue does not list (oil, the stock CFDs):
+ * biquote is their price source, so its own view of whether the market is open is
+ * the honest authority — better than assuming, and better than a fabricated
+ * session flag. Never throws: an unreachable feed yields `{}` and the caller
+ * decides the default.
+ */
+export async function biquoteMarketStates(
+  brokerSymbols: readonly string[],
+): Promise<Record<string, boolean>> {
+  const mapping = brokerSymbols
+    .map((symbol) => ({ symbol, vendor: biquoteSymbol(symbol) }))
+    .filter((entry): entry is { symbol: string; vendor: string } => entry.vendor !== null);
+  if (mapping.length === 0) return {};
+
+  const query = mapping.map((entry) => `symbols=${encodeURIComponent(entry.vendor)}`).join('&');
+  try {
+    const response = await fetch(`${restBase()}/latest?${query}`, {
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!response.ok) return {};
+    const body = (await response.json()) as Record<string, { marketState?: unknown } | undefined>;
+    const states: Record<string, boolean> = {};
+    for (const entry of mapping) {
+      const state = body[entry.vendor]?.marketState;
+      if (typeof state === 'string') states[entry.symbol] = state === 'open';
+    }
+    return states;
+  } catch {
+    return {};
+  }
 }

@@ -7,13 +7,13 @@ import { Search, Star } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { FlagIcon } from '@/components/shared/flag-icon';
 import { useTradingSocket } from '@/hooks/use-trading-socket';
 import { MAX_MARKET_ROOMS_PER_SOCKET } from '@/lib/contracts';
 import {
   MARKET_CATEGORIES,
   assetGlyph,
   describeInstrument,
-  flagFor,
   type MarketCategoryId,
   type MarketIcon,
   type MarketVisual,
@@ -75,12 +75,8 @@ function MarketIconView({ icon }: { icon: MarketIcon }) {
   if (icon.kind === 'flags') {
     return (
       <span className="flex shrink-0 items-center" aria-hidden>
-        <span className="z-10 grid size-7 place-items-center rounded-full border border-line bg-base-800 text-[0.9rem] leading-none">
-          {flagFor(icon.base) ?? icon.base.slice(0, 1)}
-        </span>
-        <span className="-ml-2 grid size-7 place-items-center rounded-full border border-line bg-base-800 text-[0.9rem] leading-none">
-          {flagFor(icon.quote) ?? icon.quote.slice(0, 1)}
-        </span>
+        <FlagIcon code={icon.base} size={28} className="relative z-10" />
+        <FlagIcon code={icon.quote} size={28} className="-ml-2" />
       </span>
     );
   }

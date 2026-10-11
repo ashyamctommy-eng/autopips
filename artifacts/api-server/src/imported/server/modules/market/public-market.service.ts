@@ -14,9 +14,12 @@ import {
   mapDerivCandles,
 } from '@/server/modules/broker/deriv.adapter';
 import {
+  PLATFORM_INSTRUMENT_LABELS,
+  curatedPlatformInstruments,
   getTwelveDataCandles,
   providerForSymbol,
 } from '@/server/modules/market/twelve-data.service';
+import { biquoteMarketStates } from '@/server/modules/market/biquote.service';
 import { markPriceFromQuote } from '@/server/modules/market/quote-fanout';
 import type { Candle, InstrumentInfo, Quote } from '@/server/modules/broker/broker.types';
 
@@ -422,6 +425,42 @@ export async function listPublicSymbols(): Promise<InstrumentInfo[]> {
     }
     throw error;
   }
+}
+
+/**
+ * The instrument list the MARKETS page shows: the Deriv catalogue plus the
+ * platform's own curated instruments that Deriv does not carry.
+ *
+ * WHY A SEPARATE FUNCTION. `listPublicSymbols()` answers "what does the broker
+ * list", which is what the admin symbol picker wants. The markets page needs
+ * "what can this platform quote", and those differ: oil (`comWTIUSD`,
+ * `comBRENTUSD`) and the stock CFDs are fed by biquote, so they are absent from
+ * Deriv's catalogue and would leave their tab empty.
+ *
+ * SESSION STATE for the extras comes from biquote (their price source), never
+ * from a guess: a market it reports as closed renders dimmed, exactly like a
+ * closed Deriv market. If biquote cannot be reached the extra is treated as open,
+ * which shows an honest dash rather than dimming a market that may be live.
+ */
+export async function listMarketInstruments(): Promise<InstrumentInfo[]> {
+  const base = await listPublicSymbols();
+  const present = new Set(base.map((instrument) => instrument.symbol));
+  const extras = curatedPlatformInstruments().filter((symbol) => !present.has(symbol));
+  if (extras.length === 0) return base;
+
+  const states = await biquoteMarketStates(extras);
+  return [
+    ...base,
+    ...extras.map((symbol) => ({
+      symbol,
+      displayName: PLATFORM_INSTRUMENT_LABELS[symbol] ?? symbol,
+      market: 'commodities',
+      submarket: 'metals',
+      pipSize: 0.01,
+      exchangeIsOpen: states[symbol] ?? true,
+      isTradable: true,
+    })),
+  ];
 }
 
 /**

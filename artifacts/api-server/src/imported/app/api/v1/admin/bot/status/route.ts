@@ -164,7 +164,41 @@ export const GET = handler(async () => {
     console.warn('[admin/bot/status] recent executions unavailable:', recentExecutionsError);
   }
 
-  return ok({ killSwitch: state, runtime: runtimeReport, symbols, symbolsError, recentExecutions, recentExecutionsError });
+  // THE SIGNAL LOG. Fired signals plus the gate/sizing refusals around them, from
+  // the audit trail — the console's answer to "is the engine even seeing setups?".
+  let recentSignals: RecentSignal[] = [];
+  let recentSignalsError: string | null = null;
+  try {
+    const signalRows = await prisma.auditLog.findMany({
+      where: {
+        action: { in: ['BOT_SIGNAL_TRIGGERED', 'RISK_KILL_SWITCH', 'STAKE_ALLOCATED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+      select: { id: true, action: true, details: true, createdAt: true },
+    });
+    const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+    recentSignals = signalRows.map((row) => {
+      const details = (row.details ?? {}) as Record<string, unknown>;
+      return {
+        id: row.id,
+        action: row.action,
+        createdAt: row.createdAt.toISOString(),
+        strategyId: text(details.strategyId),
+        symbol: text(details.symbol),
+        direction: text(details.direction),
+        reason:
+          text(details.reason) ?? text(details.code) ?? text(details.skipReason) ?? null,
+        investmentId: text(details.investmentId),
+      };
+    });
+  } catch (err) {
+    recentSignalsError =
+      err instanceof Error ? err.message : 'The signal log could not be read.';
+    console.warn('[admin/bot/status] recent signals unavailable:', recentSignalsError);
+  }
+
+  return ok({ killSwitch: state, runtime: runtimeReport, symbols, symbolsError, recentExecutions, recentExecutionsError, recentSignals, recentSignalsError });
 });
 
 /**
@@ -186,4 +220,20 @@ interface RecentExecution {
   status: string;
   openedAt: string;
   strategyId: string | null;
+}
+
+/**
+ * One entry in the SIGNAL log: a fired signal, or a gate/sizing refusal that
+ * explains why a fired signal produced nothing. Read out of the audit trail, so
+ * this is the durable record rather than an in-memory counter.
+ */
+interface RecentSignal {
+  id: string;
+  action: string;
+  createdAt: string;
+  strategyId: string | null;
+  symbol: string | null;
+  direction: string | null;
+  reason: string | null;
+  investmentId: string | null;
 }

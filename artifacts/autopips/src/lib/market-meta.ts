@@ -190,6 +190,29 @@ export function describeInstrument(instrument: InstrumentInfo): MarketVisual {
   const market = instrument.market ?? '';
   const submarket = instrument.submarket ?? '';
 
+  // ── spot oil FIRST ───────────────────────────────────────────────────────────
+  // These are `commodities` instruments, so the metals branch below would claim
+  // them on the feed's market alone. Oil is identified by its own symbol, which is
+  // specific, so it is decided first.
+  if (/^(com)?(WTIUSD|USOIL)$/i.test(upper)) {
+    return {
+      category: 'oil',
+      ticker: 'WTI/USD',
+      subtitle: 'Crude Oil WTI',
+      icon: { kind: 'asset', asset: 'OIL' },
+      search: 'wti oil crude',
+    };
+  }
+  if (/^(com)?(BRENTUSD|UKOIL)$/i.test(upper)) {
+    return {
+      category: 'oil',
+      ticker: 'BRENT/USD',
+      subtitle: 'Crude Oil Brent',
+      icon: { kind: 'asset', asset: 'BRENT' },
+      search: 'brent oil crude',
+    };
+  }
+
   // ── metals: the feed files gold/silver under commodities/metals ──────────────
   const metalMatch = /^(XAU|XAG|XPD|XPT)([A-Z]{3})$/.exec(bare(symbol));
   if (metalMatch || market === 'commodities') {
@@ -212,26 +235,6 @@ export function describeInstrument(instrument: InstrumentInfo): MarketVisual {
       subtitle: display || 'Commodity',
       icon: { kind: 'asset', asset: 'XAU' },
       search: `${symbol} ${display}`.toLowerCase(),
-    };
-  }
-
-  // ── spot oil: comWTIUSD / comBRENTUSD (or USOIL / UKOIL) ─────────────────────
-  if (/^(comWTIUSD|WTIUSD|USOIL)$/i.test(upper)) {
-    return {
-      category: 'oil',
-      ticker: 'WTI/USD',
-      subtitle: 'Crude Oil WTI',
-      icon: { kind: 'asset', asset: 'OIL' },
-      search: 'wti oil crude',
-    };
-  }
-  if (/^(comBRENTUSD|BRENTUSD|UKOIL)$/i.test(upper)) {
-    return {
-      category: 'oil',
-      ticker: 'BRENT/USD',
-      subtitle: 'Crude Oil Brent',
-      icon: { kind: 'asset', asset: 'BRENT' },
-      search: 'brent oil crude',
     };
   }
 

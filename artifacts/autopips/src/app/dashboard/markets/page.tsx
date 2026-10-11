@@ -7,7 +7,7 @@ import { Section } from '@/components/shared/section';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { requireSessionUser } from '@/lib/services/session';
-import { listPublicSymbols } from '@/lib/services/public-market.service';
+import { listMarketInstruments } from '@/lib/services/public-market.service';
 import type { InstrumentInfo } from '@/types/broker.types';
 
 /**
@@ -32,7 +32,10 @@ export default async function DashboardMarketsPage() {
   let instruments: InstrumentInfo[] = [];
   let feedAvailable = true;
   try {
-    instruments = await listPublicSymbols();
+    // The markets list is the broker catalogue PLUS the platform's own curated
+    // instruments (oil, and any vendor-only symbol), so no tab is empty simply
+    // because the broker does not list what the platform can quote.
+    instruments = await listMarketInstruments();
   } catch (err) {
     feedAvailable = false;
     console.warn(
