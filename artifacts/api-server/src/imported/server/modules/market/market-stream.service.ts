@@ -8,7 +8,8 @@ import {
 } from '@/server/modules/broker/broker.registry';
 import type { BrokerAdapter } from '@/server/modules/broker/broker.types';
 import { publishMarketQuote } from '@/server/modules/market/quote-fanout';
-import { subscribePublicTicks } from './public-market.service';
+import { lastPublicQuote, subscribePublicTicks } from './public-market.service';
+import { biquoteFallbackEnabled, biquotePilotForce, biquoteSymbol, subscribeBiquoteTicks } from './biquote.service';
 
 /**
  * MARKET DATA DEMAND MANAGER — the bridge between "a client is watching a
@@ -81,10 +82,42 @@ async function resolveStreamingConnection(): Promise<BrokerConnection | null> {
 async function startStream(symbol: string, listeners: number): Promise<boolean> {
   try {
     if ((process.env.EXECUTION_MODE ?? 'internal') === 'internal') {
-      const subscription = await subscribePublicTicks(symbol, quote => {
-        void publishMarketQuote(quote).catch(() => console.warn('[market-stream] quote publication failed'));
+      /*
+       * The SECOND source (pilot) is opened FIRST on purpose. biquote serves
+       * instruments Deriv does not carry at all (`cryLTCUSD`, `comWTIUSD`, the
+       * stock CFDs) — and for those the Deriv subscription below THROWS, which
+       * must not stop the fallback from starting. Deriv stays authoritative
+       * wherever it can quote the symbol; the fallback fills only the gaps.
+       */
+      const fallback =
+        biquoteFallbackEnabled() && biquoteSymbol(symbol)
+          ? subscribeBiquoteTicks(symbol, quote => {
+              if (!biquotePilotForce() && lastPublicQuote(symbol)) return; // Deriv is supplying this symbol
+              void publishMarketQuote(quote).catch(() =>
+                console.warn('[market-stream] fallback quote publication failed'),
+              );
+            })
+          : null;
+
+      let primary: { unsubscribe: () => Promise<void> } | null = null;
+      try {
+        primary = await subscribePublicTicks(symbol, quote => {
+          void publishMarketQuote(quote).catch(() => console.warn('[market-stream] quote publication failed'));
+        });
+      } catch (err) {
+        if (!fallback) throw err; // no other source — report the failure honestly
+        console.warn(
+          `[market-stream] Deriv cannot stream ${symbol}; the biquote fallback is now its only source (${err instanceof Error ? err.message : err}).`,
+        );
+      }
+
+      publicStreams.set(symbol, {
+        listeners,
+        unsubscribe: async () => {
+          fallback?.unsubscribe();
+          if (primary) await primary.unsubscribe();
+        },
       });
-      publicStreams.set(symbol, { listeners, unsubscribe: subscription.unsubscribe });
       return true;
     }
     const connection = await resolveStreamingConnection();

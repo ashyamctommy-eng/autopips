@@ -116,6 +116,24 @@ const schema = z.object({
   TWELVE_DATA_API_KEY: z.string().min(1).optional().or(z.literal('')),
   TWELVE_DATA_API_BASE: z.string().url().default('https://api.twelvedata.com'),
 
+  /**
+   * Optional SECOND live-tick source (pilot). Empty (default) = Deriv only.
+   *
+   * `biquote` subscribes to biquote.io and publishes a symbol ONLY while Deriv
+   * is not currently quoting it, so Deriv stays authoritative and the fallback
+   * covers rate-limits and the markets Deriv is weakest at. It has no mapping
+   * for the Deriv synthetics, so those are never affected. Live ticks only —
+   * candle history is still governed by MARKET_DATA_PROVIDER.
+   */
+  MARKET_FALLBACK_PROVIDER: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.enum(['biquote']).optional(),
+  ),
+  /** biquote SignalR hub (override for a mirror or local proxy). */
+  BIQUOTE_HUB_URL: z.string().default('wss://biquote.io/hubs/tick'),
+  /** Drop a biquote tick whose own timestamp is older than this many seconds. */
+  BIQUOTE_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(120),
+
   // Execution venue
   /**
    * Where a client trade is executed.
