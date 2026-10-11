@@ -40,6 +40,21 @@ const schema = z.object({
   JWT_AUDIENCE: z.string().default('baltimorecapital-pro-clients'),
   ACCESS_TOKEN_TTL: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL: z.coerce.number().int().positive().default(2_592_000),
+
+  /**
+   * Cookie `Domain` for the session cookies.
+   *
+   * EMPTY (the default) keeps the cookies host-only, which is what a single-host
+   * deployment wants: `webtrader.…` would then need its own separate login.
+   * Setting this to `.baltimorecapital.pro` shares ONE session across the apex
+   * and every subdomain, which is what makes the standalone WebTrader work
+   * without a second sign-in.
+   *
+   * WIDTH MATTERS: a parent-domain cookie is sent to every subdomain, so a
+   * compromised sibling host could have it replayed. It stays httpOnly, so no
+   * script can read it. Leave it empty unless subdomains genuinely share a login.
+   */
+  AUTH_COOKIE_DOMAIN: z.string().default(''),
   TOTP_ISSUER: z.string().default('Baltimore Capital'),
 
   // Credential encryption at rest

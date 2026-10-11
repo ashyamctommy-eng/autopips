@@ -5,6 +5,7 @@ import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
   authCookieOptions,
+  clearLegacyHostOnlyAuthCookies,
   verifyAccessToken,
   isSessionRevoked,
 } from './token.service';
@@ -126,4 +127,7 @@ export function clearAuthCookies(): void {
   for (const name of [ACCESS_COOKIE, REFRESH_COOKIE]) {
     store.set(name, '', authCookieOptions(0));
   }
+  // A logout must also clear the pre-AUTH_COOKIE_DOMAIN host-only copies, or a
+  // "logged out" browser still holds a valid session for this host.
+  clearLegacyHostOnlyAuthCookies();
 }

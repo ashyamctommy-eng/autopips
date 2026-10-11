@@ -9,6 +9,7 @@ import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
   authCookieOptions,
+  clearLegacyHostOnlyAuthCookies,
   generateRefreshToken,
   signAccessToken,
 } from '@/server/modules/auth/token.service';
@@ -167,6 +168,10 @@ export function setAuthCookies(session: IssuedSession): void {
   const store = cookies();
   store.set(ACCESS_COOKIE, session.accessToken, authCookieOptions(env.ACCESS_TOKEN_TTL));
   store.set(REFRESH_COOKIE, session.refreshCookieValue, authCookieOptions(env.REFRESH_TOKEN_TTL));
+  // Drop any host-only copy left over from before AUTH_COOKIE_DOMAIN was set:
+  // the browser would otherwise send BOTH cookies under the same name and the
+  // stale one can win, rotating a refresh token out from under the session.
+  clearLegacyHostOnlyAuthCookies();
 }
 
 /**

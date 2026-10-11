@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { serverEnv } from '@/lib/env';
+import { cookies } from '@/lib/request-context';
 import { redis, rkey } from '@/lib/redis';
 import { randomUUID, createHash } from 'node:crypto';
 import type { Role } from '@prisma/client';
@@ -100,12 +101,46 @@ export async function isSessionRevoked(sessionId: string): Promise<boolean> {
 
 /** Cookie options for browser sessions; cross-site cookies need None + Secure. */
 export function authCookieOptions(maxAgeSeconds: number) {
-  const production = serverEnv().NODE_ENV === 'production';
+  const env = serverEnv();
+  const production = env.NODE_ENV === 'production';
+  const domain = env.AUTH_COOKIE_DOMAIN.trim();
   return {
     httpOnly: true,
     secure: production,
     sameSite: production ? ('none' as const) : ('lax' as const),
     path: '/',
     maxAge: maxAgeSeconds,
+    // Omitted entirely when unset, so the cookie stays host-only. Passing
+    // `domain: undefined` to res.cookie would be equivalent, but omitting the
+    // key keeps that intent explicit.
+    ...(domain ? { domain } : {}),
   };
+}
+
+/**
+ * Expire the LEGACY host-only copies of the session cookies.
+ *
+ * Turning on `AUTH_COOKIE_DOMAIN` does not replace an existing host-only cookie:
+ * the browser stores the domain-scoped one ALONGSIDE it, and then sends both on
+ * every request to the apex. They share a name, so the server reads whichever the
+ * browser listed first — and the stale refresh token can be rotated out from
+ * under it, logging the user out for no reason.
+ *
+ * Emitting a deleted host-only cookie (no `Domain`) clears it for that host
+ * specifically, leaving only the domain-scoped pair. Safe to call on every login:
+ * once the legacy cookie is gone this is a no-op.
+ */
+export function clearLegacyHostOnlyAuthCookies(): void {
+  if (!serverEnv().AUTH_COOKIE_DOMAIN.trim()) return;
+  const store = cookies();
+  const expired = {
+    httpOnly: true,
+    secure: serverEnv().NODE_ENV === 'production',
+    sameSite: serverEnv().NODE_ENV === 'production' ? ('none' as const) : ('lax' as const),
+    path: '/',
+    maxAge: 0,
+  };
+  for (const name of [ACCESS_COOKIE, REFRESH_COOKIE]) {
+    store.set(name, '', expired);
+  }
 }
