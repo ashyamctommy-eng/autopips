@@ -104,6 +104,83 @@ export function bucketStartSeconds(timeSeconds: number, intervalSeconds: number)
 }
 
 /**
+ * The instant a weekly / monthly bucket starts, in unix seconds (UTC).
+ *
+ * Weeks start on Monday (ISO-8601) and months on the 1st, so the same input
+ * always folds into the same bars no matter when it is computed. Deriving the
+ * start rather than reusing the first bar's own timestamp keeps the x-axis
+ * honest: a week that begins on a Wednesday because the venue was shut on
+ * Monday still draws at Monday.
+ */
+function aggregateBucketStart(timeSeconds: number, period: 'week' | 'month'): number {
+  const date = new Date(timeSeconds * 1000);
+  if (period === 'month') {
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / 1000;
+  }
+  const mondayOffset = (date.getUTCDay() + 6) % 7;
+  return (
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - mondayOffset) / 1000
+  );
+}
+
+/**
+ * Aggregate a daily series into weekly or monthly candles.
+ *
+ * WHY THIS EXISTS: the feed's history stops at 1d, but traders expect W1 and MN1
+ * on the ribbon. Rather than ship two buttons that always fail, W1/MN1 are built
+ * HERE from the daily bars the venue actually reported:
+ *
+ *   open  = the bucket's first daily open
+ *   close = the bucket's last daily close
+ *   high  = the highest daily high in the bucket
+ *   low   = the lowest daily low in the bucket
+ *   volume = summed, and only when the source bars carried it
+ *
+ * No bar is invented: every aggregate is a pure function of real D1 candles, and
+ * an incomplete trailing bucket simply mirrors the days that closed so far. The
+ * input is never mutated, and the output is sorted ascending by time.
+ */
+export function aggregateCandles(candles: Candle[], period: 'week' | 'month'): Candle[] {
+  if (candles.length === 0) return [];
+  const sorted = [...candles].sort((a, b) => a.time - b.time);
+
+  const out: Candle[] = [];
+  let current: Candle | null = null;
+  let bucketStart = 0;
+  let volume = 0;
+
+  const flush = () => {
+    if (!current) return;
+    out.push(volume > 0 ? { ...current, volume } : { ...current });
+  };
+
+  for (const candle of sorted) {
+    const start = aggregateBucketStart(candle.time, period);
+    if (current === null || start !== bucketStart) {
+      flush();
+      current = {
+        time: start,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+      };
+      bucketStart = start;
+      volume = 0;
+    } else {
+      current.high = Math.max(current.high, candle.high);
+      current.low = Math.min(current.low, candle.low);
+      current.close = candle.close;
+    }
+    if (typeof candle.volume === 'number' && Number.isFinite(candle.volume)) {
+      volume += candle.volume;
+    }
+  }
+  flush();
+  return out;
+}
+
+/**
  * Fold one tick into the series.
  *
  * Returns the SAME array reference when the tick changed nothing, so a caller

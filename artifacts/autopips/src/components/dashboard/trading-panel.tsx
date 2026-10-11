@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { RefreshCw, Wifi } from 'lucide-react';
+import { ArrowLeft, PanelRightClose, PanelRightOpen, RefreshCw, Wifi, X } from 'lucide-react';
 
 import {
   CandlestickChart,
@@ -29,9 +29,10 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { useTradingSocket, type TradingSocketStatus } from '@/hooks/use-trading-socket';
 import { applyPositionUpdate, tickMid } from '@/lib/socket-client';
-import { mergeTickIntoSeries } from '@/lib/candle-aggregator';
+import { aggregateCandles, mergeTickIntoSeries } from '@/lib/candle-aggregator';
 import { formatUsd } from '@/lib/money';
-import { relativeTime } from '@/lib/utils';
+import { cn, relativeTime } from '@/lib/utils';
+import Link from '@/lib/next/link';
 import type { Candle } from '@/types/broker.types';
 import type { InvestmentStatusValue, PositionDTO } from '@/types/api';
 import { apiFetch } from '@/lib/session-refresh';
@@ -50,6 +51,34 @@ import { apiFetch } from '@/lib/session-refresh';
  */
 
 const CANDLE_LIMIT = 300;
+/** The candles route accepts up to 1000; aggregated timeframes ask for the lot. */
+const CANDLE_LIMIT_MAX = 1000;
+/** Pixels reserved for the RSI/MACD sub-pane when an oscillator is enabled. */
+const INDICATOR_PANE_HEIGHT = 132;
+
+/**
+ * Track an element's pixel height so a chart can fill whatever box it is given.
+ * Returns `[ref, height]`; height is 0 until the first measurement lands.
+ */
+function useElementHeight<T extends HTMLElement>() {
+  const ref = React.useRef<T | null>(null);
+  const [height, setHeight] = React.useState(0);
+
+  React.useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    setHeight(Math.round(element.getBoundingClientRect().height));
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.height;
+      if (typeof next === 'number') setHeight(Math.round(next));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, height] as const;
+}
 
 export interface TradingPanelInvestment {
   id: string;
@@ -114,6 +143,14 @@ export interface TradingPanelProps {
    * stop is drawn where the broker says it is now.
    */
   initialPositions: PositionDTO[];
+  /**
+   * Full-screen WebTrader layout.
+   *
+   * The chart fills the viewport, the control ribbon is a slim header and the
+   * order ticket becomes an overlay drawer that NEVER resizes the chart. Off by
+   * default, so the dashboard panel's behaviour is untouched.
+   */
+  fullscreen?: boolean;
 }
 
 /**
@@ -231,6 +268,7 @@ export function TradingPanel({
   initialPositions,
   initialSymbol = null,
   availableUsd,
+  fullscreen = false,
 }: TradingPanelProps) {
   const [roomId, setRoomId] = React.useState<string | null>(investmentId);
   const instrumentOptions = React.useMemo(() => {
@@ -245,11 +283,22 @@ export function TradingPanel({
     () => initialSymbol ?? defaultInstrument(instruments, availableInstruments),
   );
   const [timeframe, setTimeframe] = React.useState<string>('1h');
+  /**
+   * The feed has no W1/MN1 granularity — its history stops at D1 — so those two
+   * request DAILY bars and are folded up client-side (see `aggregateCandles`).
+   * Everything else is fetched as-is.
+   */
+  const aggregatePeriod: 'week' | 'month' | null =
+    timeframe === '1w' ? 'week' : timeframe === '1M' ? 'month' : null;
+  const fetchTimeframe = aggregatePeriod ? '1d' : timeframe;
   /** Indicators drawn on the chart; computed from the same candles it plots. */
   const [indicators, setIndicators] = React.useState<IndicatorId[]>([]);
   const [drawingTool, setDrawingTool] = React.useState<DrawingToolId>('cursor');
   /** Side handed to the ticket by the toolbar's SELL/BUY buttons. */
   const [orderRequest, setOrderRequest] = React.useState<{ side: 'BUY' | 'SELL'; at: number } | null>(null);
+  /** Full-screen only: the ticket drawer, and the box the chart fills. */
+  const [ticketOpen, setTicketOpen] = React.useState(true);
+  const [chartBoxRef, chartBoxHeight] = useElementHeight<HTMLDivElement>();
 
   // Follow a later deep link (client-side navigation to another `?symbol=`) while
   // leaving an in-page selection alone when the prop is unchanged.
@@ -282,8 +331,9 @@ export function TradingPanel({
       try {
         const params = new URLSearchParams({
           symbol,
-          timeframe,
-          limit: String(CANDLE_LIMIT),
+          timeframe: fetchTimeframe,
+          // Aggregated timeframes need more daily bars to fill the same window.
+          limit: String(aggregatePeriod ? CANDLE_LIMIT_MAX : CANDLE_LIMIT),
         });
         const response = await apiFetch(`/api/v1/market/candles?${params.toString()}`, {
           credentials: 'include',
@@ -313,7 +363,7 @@ export function TradingPanel({
         setIsLoading(false);
       }
     },
-    [symbol, timeframe],
+    [symbol, fetchTimeframe, aggregatePeriod],
   );
 
   /* Fetch whenever the instrument or timeframe changes; abort the stale request. */
@@ -340,11 +390,14 @@ export function TradingPanel({
    * carries nothing usable, so a duplicate quote costs no render.
    */
   const liveCandles = React.useMemo(() => {
-    if (!symbol) return candles;
-    const latest = ticks[symbol];
-    if (!latest) return candles;
-    return mergeTickIntoSeries(candles, latest, timeframe);
-  }, [candles, ticks, symbol, timeframe]);
+    const base =
+      symbol && ticks[symbol]
+        ? mergeTickIntoSeries(candles, ticks[symbol], fetchTimeframe)
+        : candles;
+    // The live tick folds into the DAILY bar first and the aggregates are then
+    // rebuilt, so a moving price also updates this week's / this month's bar.
+    return aggregatePeriod ? aggregateCandles(base, aggregatePeriod) : base;
+  }, [candles, ticks, symbol, fetchTimeframe, aggregatePeriod]);
 
   /*
    * Indicators are computed from the SAME candles the chart is drawing (including
@@ -405,6 +458,213 @@ export function TradingPanel({
     source === 'unavailable'
       ? 'The Market Feed could not be reached just now — no candles are being shown rather than a filled-in guess.'
       : 'The Market Feed returned no candles for this instrument in the selected window.';
+
+  /*
+   * FULL-SCREEN WEBTRADER.
+   *
+   * The dashboard layout below is untouched by this branch. Here the control
+   * ribbon is a slim header over a chart that fills the viewport, and the order
+   * ticket is an OVERLAY DRAWER rather than a grid column — so opening or closing
+   * it never resizes the canvas. The chart's pixel height is measured from its
+   * own container (`useElementHeight`) instead of being a fixed number, which is
+   * what makes it track the viewport on a phone as the URL bar comes and goes.
+   */
+  if (fullscreen) {
+    const paneHeight = indicatorSeries.pane.length > 0 ? INDICATOR_PANE_HEIGHT : 0;
+    const chartHeight = Math.max(200, chartBoxHeight - paneHeight);
+    const paneTitle = [
+      indicators.includes('rsi') ? 'RSI 14' : null,
+      indicators.includes('macd') ? 'MACD 12/26/9' : null,
+    ]
+      .filter(Boolean)
+      .join(' \u00b7 ');
+
+    return (
+      <div className="fixed inset-0 z-40 flex h-[100dvh] w-full flex-col overflow-hidden bg-base-950 text-base-100">
+        {/*
+          Control ribbon. Horizontally scrollable on narrow screens, so a long
+          instrument name can never push the page wider than the viewport.
+        */}
+        <header className="flex shrink-0 items-center gap-2 border-b border-base-800 bg-base-900 px-2 py-1.5">
+          <Link
+            href="/dashboard/trading"
+            aria-label="Back to the trading dashboard"
+            className="shrink-0 rounded p-1.5 text-muted transition-colors hover:bg-base-800 hover:text-base-100"
+          >
+            <ArrowLeft aria-hidden className="size-4" />
+          </Link>
+          <div className="min-w-0 flex-1 overflow-x-auto">
+            <ChartToolbar
+              instruments={instrumentOptions}
+              symbol={symbol}
+              onSymbolChange={(value) => setSymbol(value)}
+              timeframe={timeframe}
+              onTimeframeChange={(value) => setTimeframe(value)}
+              indicators={indicators}
+              onToggleIndicator={(id) =>
+                setIndicators((prev) =>
+                  prev.includes(id) ? prev.filter((entry) => entry !== id) : [...prev, id],
+                )
+              }
+              drawingTool={drawingTool}
+              onDrawingToolChange={(tool) => setDrawingTool(tool)}
+              onOrderSide={(side) => {
+                // Selecting a side also reveals the ticket, so the click always
+                // lands somewhere visible. It still does NOT place an order.
+                setOrderRequest({ side, at: Date.now() });
+                setTicketOpen(true);
+              }}
+              disabled={!symbol}
+            />
+          </div>
+          <Button
+            type="button"
+            variant={ticketOpen ? 'secondary' : 'default'}
+            size="sm"
+            className="shrink-0"
+            onClick={() => setTicketOpen((open) => !open)}
+            aria-expanded={ticketOpen}
+            aria-controls="webtrader-ticket"
+            data-testid="webtrader-ticket-toggle"
+          >
+            {ticketOpen ? <PanelRightClose aria-hidden /> : <PanelRightOpen aria-hidden />}
+            <span className="hidden sm:inline">Ticket</span>
+          </Button>
+        </header>
+
+        {/* The canvas box. `min-h-0` lets a flex child actually shrink so the
+            chart can be the thing that absorbs the leftover height. */}
+        <div ref={chartBoxRef} className="relative min-h-0 flex-1">
+          {error ? (
+            <div className="absolute left-2 top-2 z-10 max-w-md">
+              <Alert variant="warn">
+                <AlertTitle>Chart data unavailable</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            </div>
+          ) : null}
+
+          <CandlestickChart
+            candles={liveCandles}
+            priceLines={priceLines}
+            overlays={indicatorSeries.overlays}
+            crosshairMode={drawingTool === 'crosshair' ? 'magnet' : 'normal'}
+            symbol={symbol ?? undefined}
+            timeframe={timeframe}
+            isLoading={isLoading}
+            emptyMessage={emptyMessage}
+            height={chartHeight}
+          />
+
+          {paneHeight > 0 ? (
+            <IndicatorPane
+              lines={indicatorSeries.pane}
+              title={paneTitle}
+              height={paneHeight}
+            />
+          ) : null}
+
+          {/* Overlay drawer: absolutely positioned over the canvas, so toggling it
+              never changes the chart's width. */}
+          <aside
+            id="webtrader-ticket"
+            aria-label="Order ticket"
+            aria-hidden={!ticketOpen}
+            className={cn(
+              'absolute inset-y-0 right-0 z-20 w-[330px] max-w-[92vw] overflow-y-auto border-l border-base-800 bg-base-950/95 p-3 shadow-2xl backdrop-blur transition-transform duration-200',
+              ticketOpen ? 'translate-x-0' : 'pointer-events-none translate-x-full',
+            )}
+          >
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <span className="text-sm font-medium">Order ticket</span>
+              <button
+                type="button"
+                onClick={() => setTicketOpen(false)}
+                aria-label="Close the order ticket"
+                className="rounded p-1 text-muted transition-colors hover:bg-base-800 hover:text-base-100"
+              >
+                <X aria-hidden className="size-4" />
+              </button>
+            </div>
+
+            <div className="mb-3 flex flex-col gap-1.5">
+              <Label htmlFor="webtrader-investment">Investment room</Label>
+              <Select
+                value={roomId ?? undefined}
+                onValueChange={(value) => setRoomId(value)}
+                disabled={investments.length === 0}
+              >
+                <SelectTrigger id="webtrader-investment">
+                  <SelectValue placeholder={investments.length === 0 ? 'No investment' : 'Select'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {investments.map((investment) => (
+                    <SelectItem key={investment.id} value={investment.id}>
+                      {investment.planName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <OrderTicket
+              symbol={symbol}
+              quote={{ bid: tick?.bid ?? null, ask: tick?.ask ?? null, mid }}
+              availableUsd={availableUsd}
+              orderRequest={orderRequest}
+            />
+          </aside>
+        </div>
+
+        {/*
+          Slim status strip — a readout, not navigation. The global header,
+          sidebar and mobile tab bar are all absent on this route.
+        */}
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-base-800 bg-base-900 px-3 py-1 text-[11px] text-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <LiveDot state={dotState(status)} />
+            <span>{status}</span>
+            {brokerState ? <StatusBadge status={brokerState} kind="broker" /> : null}
+          </span>
+          <span className="inline-flex items-center gap-2 tabular-nums">
+            {mid !== null ? (
+              <>
+                <span className="text-base-100">
+                  {symbol} {priceFormatter.format(mid)}
+                </span>
+                {typeof tick?.bid === 'number' && typeof tick?.ask === 'number' ? (
+                  <span className="hidden sm:inline">
+                    {priceFormatter.format(tick.bid)} / {priceFormatter.format(tick.ask)}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span>No live quote for {symbol ?? 'this instrument'} yet.</span>
+            )}
+            {aggregatePeriod ? (
+              <span className="hidden md:inline text-muted/70">
+                {timeframe === '1w' ? 'W1' : 'MN1'} built from daily candles
+              </span>
+            ) : null}
+            {symbol && closedSymbols.includes(symbol) ? (
+              <span className="text-warn-400">Market closed</span>
+            ) : null}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 shrink-0 px-2 text-[11px]"
+            onClick={() => void loadCandles()}
+            disabled={isLoading || !symbol}
+          >
+            {isLoading ? <Spinner size="sm" label="Refreshing" /> : <RefreshCw aria-hidden className="size-3" />}
+            Refresh
+          </Button>
+        </footer>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-4 lg:grid-cols-3">

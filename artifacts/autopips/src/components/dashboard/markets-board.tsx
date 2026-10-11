@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useLocation } from 'wouter';
 import Link from '@/lib/next/link';
 import { Fuel, Gem, Search, Star } from 'lucide-react';
 
@@ -179,6 +180,20 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
   const [active, setActive] = React.useState<MarketCategoryId>('favorites');
   const [query, setQuery] = React.useState('');
   const [favorites, setFavorites] = React.useState<string[]>([]);
+  /**
+   * Every row opens the standalone WebTrader for that instrument.
+   *
+   * The whole row is the target (touch screens have no hover, so a link buried in
+   * one cell is a poor tap target), while the ticker keeps a real anchor so the
+   * row is still reachable by keyboard and "open in new tab".
+   */
+  const [, navigate] = useLocation();
+  const openWebTrader = React.useCallback(
+    (symbol: string) => {
+      navigate(`/webtrader?symbol=${encodeURIComponent(symbol)}`);
+    },
+    [navigate],
+  );
 
   React.useEffect(() => {
     let loaded: string[] = [];
@@ -409,8 +424,9 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
                       data-testid={`market-row-${instrument.symbol}`}
                       data-closed={closed ? 'true' : 'false'}
                       data-has-tick={tick ? 'true' : 'false'}
+                      onClick={() => openWebTrader(instrument.symbol)}
                       className={cn(
-                        'border-b border-line/50 transition-colors last:border-0 hover:bg-base-800/40',
+                        'cursor-pointer border-b border-line/50 transition-colors last:border-0 hover:bg-base-800/40',
                         closed && 'opacity-[0.45]',
                       )}
                     >
@@ -419,7 +435,7 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
                           <MarketIconView icon={visual.icon} />
                           <div className="flex min-w-0 flex-col">
                             <Link
-                              href={`/dashboard/trading?symbol=${encodeURIComponent(instrument.symbol)}`}
+                              href={`/webtrader?symbol=${encodeURIComponent(instrument.symbol)}`}
                               className="truncate text-sm font-bold uppercase tracking-tight text-base-100 hover:text-brand-300"
                             >
                               {visual.ticker}
@@ -448,7 +464,11 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
                       <td className="px-2 py-2.5 text-center">
                         <button
                           type="button"
-                          onClick={() => toggleFavorite(instrument.symbol)}
+                          onClick={(event) => {
+                            // Favouriting must not also navigate away from the board.
+                            event.stopPropagation();
+                            toggleFavorite(instrument.symbol);
+                          }}
                           aria-label={
                             isFavorite
                               ? `Remove ${visual.ticker} from favourites`

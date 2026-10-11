@@ -103,6 +103,19 @@ const GROUPS: Record<string, Group> = {
       '/dashboard/withdrawals': () => import('@/app/dashboard/withdrawals/page'),
     },
   },
+  /**
+   * Standalone WebTrader. Its layout renders NO app shell — no top bar, sidebar
+   * or mobile tab bar — so the terminal can own the whole viewport. Kept out of
+   * the `dashboard` group precisely so it cannot inherit that chrome.
+   */
+  web: {
+    layout: () => import('@/app/webtrader/layout'),
+    loading: <DashboardLoading />,
+    error: RootError,
+    pages: {
+      '/webtrader': () => import('@/app/webtrader/page'),
+    },
+  },
 };
 
 function findRoute(path: string): { name: string; group: Group; loader: Loader } | null {

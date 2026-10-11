@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { serverEnv } from '@/lib/env';
+import { serverEnv, paymentsEnabled } from '@/lib/env';
 import { getSetting } from '@/server/modules/settings/settings.service';
 import { ApiError } from '@/lib/http';
 import { redis, rkey } from '@/lib/redis';
@@ -260,8 +260,22 @@ interface RequestInput {
 }
 
 async function requestJson(input: RequestInput): Promise<unknown> {
-  if (serverEnv().EXECUTION_MODE === 'internal') {
-    throw ApiError.serviceUnavailable('External payments are disabled in internal execution mode.');
+  /*
+   * Payments are gated on PAYMENTS_MODE, NOT on EXECUTION_MODE.
+   *
+   * Execution mode says where a TRADE is booked (the platform's internal book vs
+   * a broker); it has no business deciding whether a client can deposit. Gating
+   * on it meant every client on the internal book got "External payments are
+   * disabled in internal execution mode." and never received a payment address.
+   *
+   * This is the ONLY place the payments kill switch is applied for outbound
+   * calls. When it is on but no API key is configured, apiKey() raises the
+   * honest "NOWPayments is not configured" error — we never invent an address.
+   */
+  if (!paymentsEnabled()) {
+    throw ApiError.serviceUnavailable(
+      'External payments are disabled by configuration (PAYMENTS_MODE=disabled).',
+    );
   }
   const attempts = input.retryOnNetworkError ? 2 : 1;
   let lastFailure: NetworkFailure | null = null;

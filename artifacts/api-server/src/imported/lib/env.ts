@@ -56,6 +56,25 @@ const schema = z.object({
   NOWPAYMENTS_PAYOUT_CURRENCY: z.string().default('usdttrc20'),
   NOWPAYMENTS_ALLOWED_CURRENCIES: z.string().default('usdttrc20,usdterc20,btc,eth,ltc,trx,bnb'),
 
+  /**
+   * Whether the platform may talk to the payment provider at all.
+   *
+   * Deliberately INDEPENDENT of EXECUTION_MODE. Execution mode says where a
+   * TRADE is booked — the platform's own internal book vs a broker — which has
+   * nothing to do with whether a client can fund their account. Conflating the
+   * two meant that choosing internal execution (the whole point of the internal
+   * book) silently killed crypto deposits with "External payments are disabled
+   * in internal execution mode."
+   *
+   * `live` (default) allows provider calls; `disabled` is the operator's kill
+   * switch. It is NOT a mock mode: with no API key configured, a deposit fails
+   * with the honest "not configured" error instead of inventing an address.
+   */
+  PAYMENTS_MODE: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.enum(['live', 'external', 'disabled']).default('live'),
+  ),
+
   // Deriv (broker + market data). See src/server/modules/broker/deriv.adapter.ts
   DERIV_APP_ID: z.string().default(''),
   /**
@@ -172,6 +191,16 @@ const schema = z.object({
 });
 
 export type ServerEnv = z.infer<typeof schema>;
+
+/**
+ * True when the platform may call the payment provider.
+ *
+ * NOTE this is deliberately not `EXECUTION_MODE`: a brokerless (internal) book
+ * still takes deposits. See the `PAYMENTS_MODE` doc comment.
+ */
+export function paymentsEnabled(): boolean {
+  return serverEnv().PAYMENTS_MODE !== 'disabled';
+}
 
 let cached: ServerEnv | null = null;
 

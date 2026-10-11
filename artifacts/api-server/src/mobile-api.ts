@@ -6,7 +6,7 @@ import { requireSessionUser } from './imported/server/modules/auth/session';
 import { getAccountSnapshot } from './imported/server/accounting/ledger';
 import { listActivity, listPositions as brokerPositions } from './imported/server/modules/account/account.service';
 import { listPositions } from './imported/server/modules/positions/position.service';
-import { serverEnv } from './imported/lib/env';
+import { serverEnv, paymentsEnabled } from './imported/lib/env';
 import { POST as login } from './imported/app/api/v1/auth/login/route';
 import { POST as challenge } from './imported/app/api/v1/auth/2fa/challenge/route';
 import { POST as refresh } from './imported/app/api/v1/auth/refresh/route';
@@ -93,8 +93,9 @@ router.get('/api/mobile/account', async (req, res) => {
         positions: rows, nextCursor: internal ? positions.nextCursor : null,
         activity: activity.map(({ id, message, severity, createdAt }) => ({ id, message, severity, createdAt })),
         executionMode: mode,
-        payments: mode === 'internal' ? 'External payments disabled in internal execution mode.'
-          : 'Payments are not available in this read-only companion. Check provider availability on the website.',
+        payments: paymentsEnabled()
+          ? 'Payments are not available in this read-only companion. Create a deposit on the website.'
+          : 'External payments are disabled by configuration (PAYMENTS_MODE=disabled).',
         market: 'Live quotes are unavailable in this companion. Prices and P/L below are stored records, not a live market feed.',
         updatedAt: new Date().toISOString(),
       });

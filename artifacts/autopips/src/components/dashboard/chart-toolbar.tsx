@@ -50,8 +50,10 @@ export const TIMEFRAME_OPTIONS = [
   { id: '1h', label: 'H1' },
   { id: '4h', label: 'H4' },
   { id: '1d', label: 'D1' },
-  { id: '1w', label: 'W1', unavailable: true },
-  { id: '1M', label: 'MN1', unavailable: true },
+  // W1/MN1 have no feed granularity of their own (history stops at 1d), so they
+  // are derived from the daily series in `aggregateCandles` rather than fetched.
+  { id: '1w', label: 'W1' },
+  { id: '1M', label: 'MN1' },
 ] as const;
 
 const INDICATOR_OPTIONS: readonly { id: IndicatorId; label: string }[] = [
@@ -224,10 +226,9 @@ export function ChartToolbar({
                 <li key={option.id}>
                   <button
                     type="button"
-                    disabled={'unavailable' in option && option.unavailable}
                     title={
-                      'unavailable' in option && option.unavailable
-                        ? 'Not served by the market feed (history stops at D1)'
+                      option.id === '1w' || option.id === '1M'
+                        ? 'Aggregated from the feed\u2019s daily candles'
                         : undefined
                     }
                     onClick={() => {
@@ -237,7 +238,6 @@ export function ChartToolbar({
                     className={cn(
                       'w-full rounded px-2 py-1.5 text-xs font-medium transition-colors',
                       option.id === timeframe ? 'bg-brand/15 text-brand-300' : 'text-base-100 hover:bg-base-800',
-                      'unavailable' in option && option.unavailable && 'cursor-not-allowed text-muted opacity-50 hover:bg-transparent',
                     )}
                   >
                     {option.label}

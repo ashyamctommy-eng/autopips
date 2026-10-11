@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { serverEnv } from '@/lib/env';
+import { serverEnv, paymentsEnabled } from '@/lib/env';
 import { getSetting } from '@/server/modules/settings/settings.service';
 import { ApiError } from '@/lib/http';
 import { D, type Decimal } from '@/lib/money';
@@ -117,7 +117,9 @@ export function verifyIpnSignature(input: VerifyIpnSignatureInput): IpnVerificat
   const secret = getSetting('nowpayments.ipn_secret') || serverEnv().NOWPAYMENTS_IPN_SECRET;
   // An empty HMAC secret must NEVER be accepted as a valid payment signature.
   if (!secret.trim()) return { valid: false, reason: 'PROVIDER_NOT_CONFIGURED' };
-  if (serverEnv().EXECUTION_MODE === 'internal') return { valid: false, reason: 'EXTERNAL_PAYMENTS_DISABLED' };
+  // Same kill switch as the outbound client, and for the same reason: a deposit
+  // callback must still be accepted when the platform books trades internally.
+  if (!paymentsEnabled()) return { valid: false, reason: 'EXTERNAL_PAYMENTS_DISABLED' };
   const computed = crypto
     .createHmac('sha512', secret)
     .update(canonicalizeForSignature(parsed), 'utf8')
