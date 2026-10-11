@@ -216,6 +216,12 @@ model Investment {
   /// ACTIVE/PAUSED, so the client's principal was locked forever.
   closedAt      DateTime?
   trades        TradeRecord[]
+  /// Positions the internal bot engine opened against THIS investment's
+  /// deployed capital. Their capital/P&L is represented by the Investment's own
+  /// columns (`capitalUsd`, `realizedPnL`, `unrealizedPnL`), so the ledger MUST
+  /// exclude investment-linked positions from its position aggregates or it
+  /// would count the same money twice — see `accounting/ledger.ts`.
+  positions     Position[]
   createdAt     DateTime         @default(now())
 
   @@index([userId])
@@ -530,6 +536,20 @@ model Position {
   id           String         @id @default(uuid())
   userId       String
   user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Set when this position was opened by the bot engine against an
+  /// `Investment` (option (b): internal execution on the platform's own book).
+  /// NULL for a position a client opened directly with their idle cash.
+  ///
+  /// MONEY CONTRACT: an investment-linked position is a breakdown of the
+  /// investment's deployed capital, NOT a second pile. `ledger.ts` therefore
+  /// EXCLUDES linked positions from its position aggregates — the Investment row
+  /// already carries that capital and P&L (`recomputeInvestmentFromPositions`
+  /// keeps the two in step). Counting both would double the client's deployed
+  /// capital and P/L.
+  investmentId String?
+  investment   Investment?    @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+  /// Strategy that produced this position, when the engine opened it.
+  strategyId   String?
   /// Platform symbol, e.g. `frxXAUUSD` or `cryBTCUSD`.
   symbol       String
   side         PositionSide
@@ -558,4 +578,8 @@ model Position {
   @@index([userId, status])
   @@index([symbol, status])
   @@index([status])
+  /// The engine's idempotency lookup: "does this investment already have an
+  /// OPEN position for this (symbol, strategyId)?" and the roll-up scan both
+  /// filter on the linked rows.
+  @@index([investmentId, status])
 }

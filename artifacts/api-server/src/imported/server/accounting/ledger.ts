@@ -209,11 +209,24 @@ export async function getAccountSnapshot(
     // Internal positions: OPEN stakes are deployed capital, OPEN pnl is
     // unrealized; CLOSED pnl is realized. `@/lib/money` sums come back as
     // Decimal, so the components stay exact.
+    //
+    // The OPEN row EXCLUDES investment-linked positions (`investmentId: null`). A
+    // position the bot opened against an Investment is a breakdown of that
+    // investment's deployed capital: its stake is ALREADY counted by the
+    // Investment's `capitalUsd`, and its pnl by `Investment.unrealizedPnL` (kept in
+    // step by `investment-execution.service.recomputeInvestmentFromPositions`).
+    // Summing it here too would double-count that money.
     db.position.aggregate({
-      where: { userId, status: { in: [...OPEN_POSITION_STATUSES] } },
+      where: { userId, status: { in: [...OPEN_POSITION_STATUSES] }, investmentId: null },
       _sum: { stake: true, pnl: true },
       _count: { _all: true },
     }),
+    // CLOSED pnl is realized for BOTH books. The ledger's realized term below
+    // reads position pnl directly and deliberately does NOT read
+    // `Investment.realizedPnL`, so a linked position's realised result MUST stay
+    // here. Excluding it would make equity FALL when a winning bot position
+    // closed: the open pnl would leave `Investment.unrealizedPnL` and never
+    // arrive in the realised sum.
     db.position.aggregate({
       where: { userId, status: { in: [...CLOSED_POSITION_STATUSES] } },
       _sum: { pnl: true },
@@ -321,8 +334,12 @@ export async function getPlatformLedger(): Promise<PlatformLedger> {
     }),
     // Same position terms as the per-user path, so the platform total cannot
     // drift from the sum of the client views (the D3/D4 failure class).
+    //
+    // OPEN excludes linked positions (their stake/pnl are carried by the
+    // Investment); CLOSED includes them, because the realized term reads position
+    // pnl directly — see the matching note in `getAccountSnapshot`.
     prisma.position.aggregate({
-      where: { status: { in: [...OPEN_POSITION_STATUSES] } },
+      where: { status: { in: [...OPEN_POSITION_STATUSES] }, investmentId: null },
       _sum: { stake: true, pnl: true },
       _count: { _all: true },
     }),

@@ -58,7 +58,15 @@ export interface StrategyConfig {
 }
 
 export interface EvaluateStrategyInput {
-  adapter: BrokerAdapter;
+  /**
+   * Only candle history is required to evaluate the rule. Typing it as a Pick
+   * (rather than the full `BrokerAdapter`) lets the INTERNAL execution path pass
+   * a minimal shim backed by the public market feed
+   * (`{ getHistoricalCandles: (s,tf,n) => getPublicCandles(s,tf,n) }`) with no
+   * broker connection at all. Broker callers still pass a full adapter, which
+   * satisfies this and supplies `accountId` for the resulting signal.
+   */
+  adapter: Pick<BrokerAdapter, 'getHistoricalCandles'>;
   symbol: string;
   timeframe: string;
   config: StrategyConfig;
@@ -253,7 +261,10 @@ export async function evaluateStrategy(input: EvaluateStrategyInput): Promise<Tr
     ...(takeProfit !== undefined ? { takeProfit } : {}),
     reason,
     strategy: config.strategy,
-    brokerAccountId: adapter.accountId,
+    // A full broker adapter reports its account id; the internal shim has none,
+    // and the internal path never hands the signal to the broker executor, so
+    // an empty string is the honest "not a broker signal" marker.
+    brokerAccountId: (adapter as { accountId?: string }).accountId ?? '',
     // The bar that produced the signal — deterministic, not wall-clock time.
     createdAt: new Date(bar.time * 1000),
   };

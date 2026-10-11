@@ -13,6 +13,7 @@ import {
   positionExitTrigger,
   type PositionSideValue,
 } from './position.math';
+import { recomputeInvestmentFromPositions } from './investment-execution.service';
 
 /**
  * INTERNAL POSITION ENGINE (`EXECUTION_MODE=internal`).
@@ -363,6 +364,11 @@ export async function markPositionPrice(symbol: string, price: number): Promise<
   let marked = 0;
   let closed = 0;
 
+  // Distinct investments whose linked positions were touched this tick. Their
+  // P/L columns are rolled up AFTER the loop (a fresh aggregate per investment),
+  // never inside it — one write per investment instead of one per position.
+  const touchedInvestments = new Set<string>();
+
   for (const row of open) {
     try {
       const trigger = positionExitTrigger({
@@ -400,6 +406,10 @@ export async function markPositionPrice(symbol: string, price: number): Promise<
 
       if (count !== 1) continue;
 
+      // A mark or a close on an investment-linked position changes that
+      // investment's own P/L; remember it for the post-loop roll-up.
+      if (row.investmentId !== null) touchedInvestments.add(row.investmentId);
+
       if (trigger === null) {
         marked += 1;
       } else {
@@ -421,6 +431,21 @@ export async function markPositionPrice(symbol: string, price: number): Promise<
     } catch (err) {
       console.error(
         `[positions] could not mark ${row.id}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  // Roll each touched investment's P/L up from its linked positions (the ledger
+  // reads the Investment columns, not the positions). Best-effort: a roll-up
+  // failure must not stall the tick feed for every other client; the next mark
+  // recomputes the same aggregate.
+  for (const investmentId of touchedInvestments) {
+    try {
+      await recomputeInvestmentFromPositions(investmentId);
+    } catch (err) {
+      console.error(
+        `[positions] could not roll up investment ${investmentId}:`,
         err instanceof Error ? err.message : err,
       );
     }

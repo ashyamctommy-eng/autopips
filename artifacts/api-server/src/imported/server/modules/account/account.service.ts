@@ -1,5 +1,5 @@
 import type { AuditAction } from '@/server/modules/audit/audit.service';
-import type { Investment, Prisma, TradeRecord, TradingPlan } from '@prisma/client';
+import type { Investment, Position, Prisma, TradeRecord, TradingPlan } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
@@ -13,6 +13,9 @@ import type {
   AccountOverview,
   ActivityEventDTO,
   InvestmentDTO,
+  InvestmentDetailDTO,
+  InvestmentPositionDTO,
+  InvestmentStatusValue,
   PositionDTO,
   SessionUser,
   TradingPlanDTO,
@@ -163,6 +166,137 @@ export async function listInvestments(userId: string): Promise<InvestmentDTO[]> 
     orderBy: { createdAt: 'desc' },
   });
   return investments.map(toInvestmentDTO);
+}
+
+/* ─────────────────────── investment detail (client) ───────────────────────── */
+
+/** Prisma `Position` → the client-facing drill-down DTO. Decimals only cross here. */
+function toInvestmentPositionDTO(row: Position): InvestmentPositionDTO {
+  return {
+    id: row.id,
+    symbol: row.symbol,
+    side: row.side,
+    stake: row.stake.toNumber(),
+    entryPrice: row.entryPrice.toNumber(),
+    currentPrice: row.currentPrice.toNumber(),
+    exitPrice: row.closePrice === null ? null : row.closePrice.toNumber(),
+    stopLoss: row.stopLoss === null ? null : row.stopLoss.toNumber(),
+    takeProfit: row.takeProfit === null ? null : row.takeProfit.toNumber(),
+    pnl: row.pnl.toNumber(),
+    status: row.status,
+    strategyId: row.strategyId,
+    openedAt: row.openedAt.toISOString(),
+    closedAt: row.closedAt === null ? null : row.closedAt.toISOString(),
+  };
+}
+
+/**
+ * One investment the CALLER owns, plus the book of positions the internal engine
+ * opened against it.
+ *
+ * Scoped by `userId` in the query itself, so a client can never read a position
+ * or P/L that is not theirs (404 otherwise). `yieldPct` is derived, not stored:
+ * `(realizedPnL + unrealizedPnL) / capitalUsd × 100`, and is `null` (not zero)
+ * when there is no capital to measure against.
+ */
+export async function getInvestmentForUser(
+  userId: string,
+  investmentId: string,
+): Promise<InvestmentDetailDTO> {
+  const investment = await prisma.investment.findFirst({
+    where: { id: investmentId, userId },
+    include: { plan: true },
+  });
+  if (!investment) throw ApiError.notFound('Investment not found.');
+
+  const positions = await prisma.position.findMany({
+    where: { investmentId },
+    orderBy: { openedAt: 'desc' },
+  });
+
+  const dto = toInvestmentDTO(investment);
+  const capital = D(investment.capitalUsd);
+  const pnl = D(dto.realizedPnL).plus(D(dto.unrealizedPnL));
+  const yieldPct = capital.isZero()
+    ? null
+    : Math.round(pnl.div(capital).times(100).toNumber() * 100) / 100;
+
+  return { ...dto, positions: positions.map(toInvestmentPositionDTO), yieldPct };
+}
+
+/* ─────────────────── investment pause / resume (client) ──────────────────── */
+
+const TERMINAL_INVESTMENT_STATUSES: readonly InvestmentStatusValue[] = [
+  'MATURED',
+  'CANCELLED',
+  'CLOSED',
+];
+
+export interface SetInvestmentActiveStateResult {
+  investment: InvestmentDTO;
+  previousStatus: InvestmentStatusValue;
+  status: InvestmentStatusValue;
+}
+
+/**
+ * Pause or resume the caller's own investment.
+ *
+ * The investment status IS the per-investment bot switch: `PAUSED` stops the
+ * engine opening NEW positions for it while its open positions keep being marked
+ * and closed by the tick engine. Terminal rows (MATURED/CLOSED/CANCELLED) can
+ * never be re-opened — a settled investment is final.
+ */
+export async function setInvestmentActiveState(input: {
+  userId: string;
+  investmentId: string;
+  target: 'ACTIVE' | 'PAUSED';
+  ip: string | null;
+}): Promise<SetInvestmentActiveStateResult> {
+  const existing = await prisma.investment.findFirst({
+    where: { id: input.investmentId, userId: input.userId },
+    select: { id: true, status: true },
+  });
+  if (!existing) throw ApiError.notFound('Investment not found.');
+  if (TERMINAL_INVESTMENT_STATUSES.includes(existing.status)) {
+    throw ApiError.conflict(
+      `Investment ${existing.id} is already ${existing.status}; a settled investment cannot be paused or resumed.`,
+    );
+  }
+
+  // Compare-and-swap over the two live statuses: a concurrent maturity or close
+  // wins, and the loser is told to reload rather than silently overwriting it.
+  const { count } = await prisma.investment.updateMany({
+    where: { id: input.investmentId, userId: input.userId, status: { in: ['ACTIVE', 'PAUSED'] } },
+    data: { status: input.target },
+  });
+  if (count !== 1) {
+    throw ApiError.conflict(
+      'That investment changed state while you were updating it. Reload and check its current status.',
+    );
+  }
+
+  await recordAudit({
+    action: input.target === 'PAUSED' ? AUDIT.INVESTMENT_PAUSED : AUDIT.INVESTMENT_ACTIVATED,
+    userId: input.userId,
+    ipAddress: input.ip,
+    details: {
+      investmentId: existing.id,
+      previousStatus: existing.status,
+      status: input.target,
+      source: 'client_pause_resume',
+    },
+  });
+
+  const updated = await prisma.investment.findUniqueOrThrow({
+    where: { id: existing.id },
+    include: { plan: true },
+  });
+
+  return {
+    investment: toInvestmentDTO(updated),
+    previousStatus: existing.status,
+    status: input.target,
+  };
 }
 
 /**

@@ -1,4 +1,5 @@
 import { handler, ok } from '@/lib/http';
+import { prisma } from '@/lib/prisma';
 import { redis } from '@/lib/redis';
 import { requireAdmin } from '@/server/modules/auth/session';
 import { getBotControlState } from '@/server/modules/bot/bot-control.service';
@@ -125,5 +126,64 @@ export const GET = handler(async () => {
     console.warn('[admin/bot/status] instrument list unavailable:', symbolsError);
   }
 
-  return ok({ killSwitch: state, runtime: runtimeReport, symbols, symbolsError });
+  // The latest engine bookings. Investment-linked only (`investmentId != null`),
+  // so a client-opened position never appears here.
+  let recentExecutions: RecentExecution[] = [];
+  let recentExecutionsError: string | null = null;
+  try {
+    const rows = await prisma.position.findMany({
+      where: { investmentId: { not: null } },
+      orderBy: { openedAt: 'desc' },
+      take: 10,
+      select: {
+        investmentId: true,
+        symbol: true,
+        side: true,
+        stake: true,
+        pnl: true,
+        status: true,
+        openedAt: true,
+        strategyId: true,
+        user: { select: { email: true } },
+      },
+    });
+    recentExecutions = rows.map((row) => ({
+      investmentId: row.investmentId,
+      userEmail: row.user.email,
+      symbol: row.symbol,
+      side: row.side,
+      stake: row.stake.toNumber(),
+      pnl: row.pnl.toNumber(),
+      status: row.status,
+      openedAt: row.openedAt.toISOString(),
+      strategyId: row.strategyId,
+    }));
+  } catch (err) {
+    recentExecutionsError =
+      err instanceof Error ? err.message : 'The recent executions could not be read.';
+    console.warn('[admin/bot/status] recent executions unavailable:', recentExecutionsError);
+  }
+
+  return ok({ killSwitch: state, runtime: runtimeReport, symbols, symbolsError, recentExecutions, recentExecutionsError });
 });
+
+/**
+ * The latest investment-linked positions the internal engine booked, so the Bot
+ * Control panel can show WHAT the engine is doing rather than only that it is
+ * alive. `investmentId` is present on every row by construction (the filter
+ * excludes client-opened positions).
+ *
+ * Read defensively: an unreadable table must not take the kill switch (the whole
+ * point of this screen) down with it.
+ */
+interface RecentExecution {
+  investmentId: string | null;
+  userEmail: string | null;
+  symbol: string;
+  side: string;
+  stake: number;
+  pnl: number;
+  status: string;
+  openedAt: string;
+  strategyId: string | null;
+}

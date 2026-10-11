@@ -57,6 +57,7 @@ import { runSyncCycle } from '../broker/broker.sync';
 import { publishActivity } from '@/server/ws/event-bus';
 import { executeSignal } from './order.manager';
 import { evaluateStrategy, STRATEGY_RULE } from './strategy.engine';
+import { runInternalStrategyCycle } from '../positions/investment-execution.service';
 import { accrueFees, AUDIT_FEE_ACCRUAL_FAILED } from './fee.accrual';
 import type { TradeSignal } from './bot.types';
 import { getTelemetryAnalyticsSnapshot } from '../telemetry/telemetry.analytics';
@@ -382,8 +383,37 @@ async function runCycle(): Promise<void> {
       return;
     }
 
-    const connections = await prisma.brokerConnection.findMany({ where: { status: 'CONNECTED' } });
     const enabled = Object.entries(strategies).filter(([, config]) => config.enabled);
+
+    if ((process.env.EXECUTION_MODE ?? 'internal') === 'internal') {
+      // INTERNAL execution (the default): the platform is the counterparty and
+      // trades its OWN book against deployed client investments. There is no
+      // broker connection to iterate, so the broker loop below is skipped
+      // ENTIRELY — no `BrokerConnection` query, no adapter, no external order.
+      // `runInternalStrategyCycle` sizes each active investment and opens one
+      // position per (investment, symbol, strategy), idempotently.
+      for (const [strategyId, config] of enabled) {
+        try {
+          const summary = await runInternalStrategyCycle(strategyId, config);
+          tradesExecuted += summary.opened;
+          if (summary.errors > 0) {
+            console.error(
+              `[bot.runtime] internal strategy ${strategyId} finished with ${summary.errors} error(s).`,
+            );
+          }
+        } catch (err) {
+          // `runInternalStrategyCycle` never throws, but a defensive catch keeps
+          // a future regression from killing the whole runtime loop.
+          const message = err instanceof Error ? err.message : String(err);
+          state.lastCycleError = message;
+          console.error(`[bot.runtime] internal strategy ${strategyId} failed:`, message);
+        }
+      }
+      state.lastCycleAt = new Date().toISOString();
+      return;
+    }
+
+    const connections = await prisma.brokerConnection.findMany({ where: { status: 'CONNECTED' } });
     const riskManagementEnabled = serverEnv().BROKER_RISK_MANAGEMENT_ENABLED;
 
     for (const [strategyId, config] of enabled) {

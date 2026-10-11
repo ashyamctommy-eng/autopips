@@ -296,6 +296,44 @@ export interface InternalPositionDTO {
 }
 
 /**
+ * One platform-book position that belongs to an INVESTMENT's deployed capital
+ * (option (b): the bot engine trades the platform's own book).
+ *
+ * It is a DRILL-DOWN of the investment, not a second money source: the ledger
+ * counts the Investment's own columns, never the linked position, so the two can
+ * never double-count. `stake` is a slice of the investment's `capitalUsd`.
+ */
+export interface InvestmentPositionDTO {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  /** Money at risk on this position, USD — part of the investment's capital. */
+  stake: number;
+  entryPrice: number;
+  currentPrice: number;
+  /** Fill price once CLOSED; null while OPEN. */
+  exitPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  /** Unrealized while OPEN (live mark); frozen once CLOSED. */
+  pnl: number;
+  status: 'OPEN' | 'CLOSED' | 'CANCELLED';
+  strategyId: string | null;
+  openedAt: string;
+  closedAt: string | null;
+}
+
+/**
+ * `/api/v1/account/investments/:id` — the investment plus the book of positions
+ * the engine opened against it.
+ */
+export interface InvestmentDetailDTO extends InvestmentDTO {
+  positions: InvestmentPositionDTO[];
+  /** (realizedPnL + unrealizedPnL) / capitalUsd × 100. Null when capitalUsd = 0. */
+  yieldPct: number | null;
+}
+
+/**
  * A client's wallet, DERIVED from the ledger — there is no `User.balance`
  * column. Every figure here comes from `getAccountSnapshot`, so the wallet can
  * never disagree with the dashboard, the admin projection or the equity formula.

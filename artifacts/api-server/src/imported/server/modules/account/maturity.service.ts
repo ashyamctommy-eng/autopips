@@ -449,6 +449,49 @@ export async function closeInvestmentManually(input: {
   };
 }
 
+/**
+ * CLIENT-initiated close of the caller's OWN investment.
+ *
+ * The same accounting guard as the sweep/operator path, PLUS the internal-book
+ * variant: an OPEN investment-linked `Position` (the bot engine's own book)
+ * blocks closure for exactly the reason an open `TradeRecord` does — its floating
+ * P/L would keep being counted against capital that is no longer deployed once
+ * the investment leaves ACTIVE/PAUSED.
+ *
+ * Capital release goes through `closeInvestmentManually`, so the compare-and-swap,
+ * the claim and the capital-preserving patch cannot drift from the operator path.
+ */
+export async function closeInvestmentForClient(input: {
+  investmentId: string;
+  userId: string;
+  actorEmail: string;
+  ip: string | null;
+}): Promise<ManualCloseResult> {
+  const owned = await prisma.investment.findFirst({
+    where: { id: input.investmentId, userId: input.userId },
+    select: { id: true },
+  });
+  if (!owned) throw ApiError.notFound('Investment not found.');
+
+  const openPositions = await prisma.position.count({
+    where: { investmentId: input.investmentId, status: 'OPEN' },
+  });
+  if (openPositions > 0) {
+    throw ApiError.conflict(
+      `This investment still has ${openPositions} open position${openPositions === 1 ? '' : 's'}. ` +
+        'Let them close (or wait for their stop-loss / take-profit) before closing the investment — closing now would count unrealized P/L against capital that is no longer deployed.',
+    );
+  }
+
+  return closeInvestmentManually({
+    investmentId: input.investmentId,
+    reason: 'Client requested to close the investment.',
+    actorUserId: input.userId,
+    actorEmail: input.actorEmail,
+    ip: input.ip,
+  });
+}
+
 /* -------------------------------------------------------------------------- */
 /* Admin console listing                                                       */
 /* -------------------------------------------------------------------------- */
