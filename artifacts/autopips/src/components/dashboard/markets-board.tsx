@@ -2,464 +2,413 @@
 
 import * as React from 'react';
 import Link from '@/lib/next/link';
-import { Check, Plus, Search, SearchX, X } from 'lucide-react';
+import { Search, Star } from 'lucide-react';
 
-import { LiveDot, type LiveDotState } from '@/components/shared/live-dot';
-import { MONEY_PLACEHOLDER } from '@/components/shared/money';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
-import { useTradingSocket, type TradingSocketStatus } from '@/hooks/use-trading-socket';
+import { useTradingSocket } from '@/hooks/use-trading-socket';
 import { MAX_MARKET_ROOMS_PER_SOCKET } from '@/lib/contracts';
-import { tickMid, type PriceTick } from '@/lib/socket-client';
+import {
+  MARKET_CATEGORIES,
+  assetGlyph,
+  describeInstrument,
+  flagFor,
+  type MarketCategoryId,
+  type MarketIcon,
+  type MarketVisual,
+} from '@/lib/market-meta';
 import { cn } from '@/lib/utils';
 import type { InstrumentInfo } from '@/types/broker.types';
+import type { PriceTick } from '@/lib/socket-client';
 
 /**
- * Markets board (client component).
+ * Markets & quotes board.
  *
- * One socket for the WHOLE page: `useTradingSocket` is called exactly once with
- * a watchlist, because the server caps market rooms per connection at
- * `MAX_MARKET_ROOMS_PER_SOCKET` and a hook (hence a socket) per row would both
- * blow that cap and race the shared connection on unmount. Rows without a live
- * tick show an em dash — never zero, never a guessed quote.
- */
-
-/**
- * How many symbols stream without the client asking.
+ * A quotes TABLE (Instrument · Bid/Ask · Spread) laid out the way a desktop
+ * terminal lays one out: category tabs across the top, one row per instrument
+ * with an icon, a bold ticker and a muted description.
  *
- * Deliberately below the per-connection ceiling: a default screen should not
- * spend the whole room budget before the user touches anything. The cap itself
- * is `MAX_MARKET_ROOMS_PER_SOCKET` and is enforced on every add.
- */
-const DEFAULT_WATCHLIST_SIZE = 9;
-
-/**
- * Liquid instruments used to seed the watchlist when the feed offers them.
- * These are real Deriv symbols (the same set the trading panel falls back to);
- * anything missing from the feed is simply skipped and the defaults are filled
- * from the feed instead.
- */
-const PREFERRED_DEFAULT_SYMBOLS: readonly string[] = [
-  /*
-   * ALWAYS-OPEN INSTRUMENTS FIRST.
-   *
-   * Deriv's synthetic indices quote 24/7; forex, metals and index CFDs do not.
-   * The old list was 4 non-24/7 instruments out of 6, so on a weekend — and
-   * overnight on weekdays — a client opening the board saw a mostly-dead table
-   * ("market closed" / "awaiting tick") with only the two synthetics ticking.
-   * Leading with the synthetic set means a fresh screen shows live prices at any
-   * hour, and the FX/metals rows follow once those markets are open.
-   */
-  'R_10',
-  'R_25',
-  'R_50',
-  'R_75',
-  'R_100',
-  '1HZ100V',
-  'frxXAUUSD',
-  'frxEURUSD',
-  'frxGBPUSD',
-];
-
-/** The default watchlist: preferred instruments first, then the feed, capped. */
-function defaultWatchlist(instruments: InstrumentInfo[]): string[] {
-  const chosen: string[] = [];
-  const present = new Set(instruments.map((instrument) => instrument.symbol));
-
-  for (const symbol of PREFERRED_DEFAULT_SYMBOLS) {
-    if (chosen.length >= DEFAULT_WATCHLIST_SIZE) break;
-    if (present.has(symbol)) chosen.push(symbol);
-  }
-
-  if (chosen.length < DEFAULT_WATCHLIST_SIZE) {
-    // Tradable instruments first, then symbol order, so a seeded list is useful
-    // even when none of the preferred symbols exist on this feed.
-    const rest = [...instruments].sort(
-      (a, b) =>
-        Number(b.isTradable) - Number(a.isTradable) || a.symbol.localeCompare(b.symbol),
-    );
-    for (const instrument of rest) {
-      if (chosen.length >= DEFAULT_WATCHLIST_SIZE) break;
-      if (!chosen.includes(instrument.symbol)) chosen.push(instrument.symbol);
-    }
-  }
-
-  return chosen.slice(0, MAX_MARKET_ROOMS_PER_SOCKET);
-}
-
-/** `synthetic_index` -> `Synthetic index`. */
-function prettifyLabel(value: string): string {
-  const spaced = value.replace(/[_-]+/g, ' ').trim();
-  if (spaced.length === 0) return value;
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
-
-/**
- * Decimal places implied by the instrument's smallest increment.
+ * TWO RULES THE TABLE HONOURS
+ *   1. A price is never invented. No tick yet → an em dash, not a zero, not the
+ *      previous close.
+ *   2. A closed market says so by SHAPE, not by a badge: the row fades and its
+ *      bid/ask/spread become dashes. There is no "tradable / not tradable /
+ *      awaiting tick" label anywhere — the requirement, and quieter besides.
  *
- * `pipSize` is the increment the venue quotes in, so it decides how many digits
- * a price is shown with. An unusable value (0 / absent) falls back to two — a
- * rendering default only; it never changes the number itself.
+ * ONE SOCKET FOR THE WHOLE PAGE. The server caps market rooms per connection at
+ * `MAX_MARKET_ROOMS_PER_SOCKET`, so the board subscribes only to the rows it is
+ * actually showing (up to that cap). Ticks are broadcast namespace-wide, so rows
+ * outside the cap still update if some other client is watching them.
  */
-function decimalsForPipSize(pipSize: number): number {
-  if (!Number.isFinite(pipSize) || pipSize <= 0) return 2;
-  let decimals = 0;
-  let scale = 1;
-  while (decimals < 8 && scale > pipSize) {
-    scale /= 10;
-    decimals += 1;
-  }
-  return decimals;
-}
 
-/** Formatters are cached per digit count; a price renders on every tick. */
-const priceFormatters = new Map<number, Intl.NumberFormat>();
+const FAVORITES_KEY = 'bbcap.market.favorites';
 
-function priceText(value: number, decimals: number): string {
-  let formatter = priceFormatters.get(decimals);
-  if (!formatter) {
-    formatter = new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals,
-    });
-    priceFormatters.set(decimals, formatter);
-  }
-  return formatter.format(value);
-}
-
-/**
- * Which reported value the number is. Naming the side keeps the list honest
- * about a one-sided quote, where the mid is simply the side that arrived.
- */
-type QuoteSide = 'mid' | 'bid' | 'ask' | 'price';
-
-const QUOTE_LABEL: Record<QuoteSide, string> = {
-  mid: 'mid',
-  bid: 'bid',
-  ask: 'ask',
-  price: 'price',
-};
-
-interface QuoteDisplay {
-  /** The number to render, or the em dash when nothing has been reported. */
-  text: string;
-  /** The side the number came from, or null when there is no quote yet. */
-  side: QuoteSide | null;
-}
-
-function describeTick(tick: PriceTick | undefined, decimals: number): QuoteDisplay {
-  if (!tick) return { text: MONEY_PLACEHOLDER, side: null };
-  const mid = tickMid(tick);
-  if (mid === null || !Number.isFinite(mid)) return { text: MONEY_PLACEHOLDER, side: null };
-
-  const hasBid = typeof tick.bid === 'number' && Number.isFinite(tick.bid);
-  const hasAsk = typeof tick.ask === 'number' && Number.isFinite(tick.ask);
-  const side: QuoteSide =
-    hasBid && hasAsk ? 'mid' : hasBid ? 'bid' : hasAsk ? 'ask' : 'price';
-
-  return { text: priceText(mid, decimals), side };
-}
-
-const STATUS_STATE: Record<TradingSocketStatus, LiveDotState> = {
-  idle: 'connecting',
-  connecting: 'connecting',
-  connected: 'connected',
-  reconnecting: 'reconnecting',
-  error: 'error',
-};
-
-const STATUS_LABEL: Record<TradingSocketStatus, string> = {
-  idle: 'Connecting',
-  connecting: 'Connecting',
-  connected: 'Live',
-  reconnecting: 'Reconnecting',
-  error: 'Market Feed error',
-};
-
-interface MarketRowProps {
+interface Row {
   instrument: InstrumentInfo;
-  tick: PriceTick | undefined;
-  watched: boolean;
-  atCap: boolean;
-  onToggle: (symbol: string) => void;
+  visual: MarketVisual;
 }
 
-/**
- * One instrument row. Memoised so a tick on one symbol re-renders only that
- * row, not the whole feed list.
- */
-const MarketRow = React.memo(function MarketRow({
-  instrument,
-  tick,
-  watched,
-  atCap,
-  onToggle,
-}: MarketRowProps) {
-  const quote = describeTick(tick, decimalsForPipSize(instrument.pipSize));
-  const marketClosed = instrument.exchangeIsOpen === false;
-  const detail = marketClosed
-    ? 'market closed'
-    : quote.side
-      ? QUOTE_LABEL[quote.side]
-      : watched
-        ? 'awaiting tick'
-        : 'not streaming';
+/** Decimal places to show a price at, derived from the instrument's own pip size. */
+function decimalsFor(instrument: InstrumentInfo, visual: MarketVisual): number {
+  const pip = instrument.pipSize;
+  let decimals = 2;
+  if (Number.isFinite(pip) && pip > 0) {
+    const text = pip.toString();
+    const dot = text.indexOf('.');
+    decimals = dot === -1 ? Math.max(2, text.length - 1) : text.length - dot - 1;
+  }
+  // FX and metals conventionally quote one digit finer than the pip.
+  if (visual.category === 'forex' || visual.category === 'metals') decimals += 1;
+  return Math.min(8, Math.max(2, decimals));
+}
 
+function formatPrice(value: number, decimals: number): string {
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/** One icon: dual circular flags, an asset glyph, or a market mark. */
+function MarketIconView({ icon }: { icon: MarketIcon }) {
+  if (icon.kind === 'flags') {
+    return (
+      <span className="flex shrink-0 items-center" aria-hidden>
+        <span className="z-10 grid size-7 place-items-center rounded-full border border-line bg-base-800 text-[0.9rem] leading-none">
+          {flagFor(icon.base) ?? icon.base.slice(0, 1)}
+        </span>
+        <span className="-ml-2 grid size-7 place-items-center rounded-full border border-line bg-base-800 text-[0.9rem] leading-none">
+          {flagFor(icon.quote) ?? icon.quote.slice(0, 1)}
+        </span>
+      </span>
+    );
+  }
+  if (icon.kind === 'asset') {
+    const glyph = assetGlyph(icon.asset);
+    return (
+      <span
+        aria-hidden
+        className={cn(
+          'grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold leading-none',
+          glyph.className,
+        )}
+      >
+        {glyph.glyph}
+      </span>
+    );
+  }
   return (
-    <li className="border-b border-line/60 last:border-b-0">
-      <div className="flex items-stretch gap-1">
-        <Link
-          href={`/dashboard/trading?symbol=${encodeURIComponent(instrument.symbol)}`}
-          className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 transition-colors hover:bg-base-800/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40 sm:px-4"
-        >
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="truncate font-mono text-sm font-medium text-base-100">
-                {instrument.symbol}
-              </span>
-              {instrument.exchangeIsOpen === false ? (
-                <Badge variant="warn">Market closed</Badge>
-              ) : instrument.isTradable === true ? (
-                <Badge variant="success">Tradable</Badge>
-              ) : (
-                <Badge variant="warn">Not tradable</Badge>
-              )}
-            </div>
-            <p className="mt-0.5 truncate text-xs text-muted">{instrument.displayName}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[0.68rem] uppercase tracking-wide text-muted">
-              <span>{prettifyLabel(instrument.market)}</span>
-              {instrument.submarket ? (
-                <>
-                  <span aria-hidden>·</span>
-                  <span className="truncate normal-case">{prettifyLabel(instrument.submarket)}</span>
-                </>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="flex shrink-0 flex-col items-end gap-0.5">
-            <span className="tabular-nums text-sm font-medium text-base-100">{quote.text}</span>
-            <span className={cn('text-[0.65rem] uppercase tracking-wide text-muted', marketClosed && 'text-warn-400')}>{detail}</span>
-          </div>
-        </Link>
-
-        <div className="flex items-center pr-2 sm:pr-3">
-          <button
-            type="button"
-            onClick={() => onToggle(instrument.symbol)}
-            disabled={!watched && atCap}
-            aria-pressed={watched}
-            aria-label={
-              watched
-                ? `Remove ${instrument.symbol} from the watchlist`
-                : `Add ${instrument.symbol} to the watchlist`
-            }
-            title={
-              !watched && atCap
-                ? `The watchlist is full at ${MAX_MARKET_ROOMS_PER_SOCKET} symbols`
-                : undefined
-            }
-            className={cn(
-              'inline-flex size-8 items-center justify-center rounded-md border border-line bg-base-800/60 text-muted transition-colors',
-              'hover:border-brand/40 hover:text-base-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
-              'disabled:cursor-not-allowed disabled:opacity-40',
-            )}
-          >
-            {watched ? (
-              <Check aria-hidden className="size-4 text-brand-300" />
-            ) : (
-              <Plus aria-hidden className="size-4" />
-            )}
-          </button>
-        </div>
-      </div>
-    </li>
+    <span
+      aria-hidden
+      className="grid size-7 shrink-0 place-items-center rounded-full bg-base-700/40 text-[0.6rem] font-semibold text-muted"
+    >
+      {icon.label}
+    </span>
   );
-});
+}
+
+function QuoteCell({ tick, decimals }: { tick: PriceTick | undefined; decimals: number }) {
+  const bid = typeof tick?.bid === 'number' ? tick.bid : null;
+  const ask = typeof tick?.ask === 'number' ? tick.ask : null;
+  const single = typeof tick?.quote === 'number' ? tick.quote : null;
+
+  // A single-price instrument reports one number; show it under Bid and leave Ask
+  // as a dash rather than duplicating it.
+  if (bid === null && ask === null && single !== null) {
+    return <span className="font-mono tabular-nums text-base-100">{formatPrice(single, decimals)}</span>;
+  }
+  if (bid === null && ask === null) {
+    return <span className="font-mono tabular-nums text-muted">–</span>;
+  }
+  return (
+    <span className="font-mono tabular-nums text-base-100">
+      {bid === null ? '–' : formatPrice(bid, decimals)}
+      <span className="px-1 text-muted">/</span>
+      {ask === null ? '–' : formatPrice(ask, decimals)}
+    </span>
+  );
+}
+
+function SpreadCell({ tick, decimals }: { tick: PriceTick | undefined; decimals: number }) {
+  const bid = typeof tick?.bid === 'number' ? tick.bid : null;
+  const ask = typeof tick?.ask === 'number' ? tick.ask : null;
+  if (bid === null || ask === null) return <span className="font-mono tabular-nums text-muted">–</span>;
+  const spread = Math.abs(ask - bid);
+  return (
+    <span className="font-mono tabular-nums text-muted">
+      {formatPrice(spread, Math.min(8, decimals + 1))}
+    </span>
+  );
+}
 
 export interface MarketsBoardProps {
-  /** Instruments reported by the broker's public feed, in feed order. */
   instruments: InstrumentInfo[];
 }
 
 export function MarketsBoard({ instruments }: MarketsBoardProps) {
-  const [watchlist, setWatchlist] = React.useState<string[]>(() =>
-    defaultWatchlist(instruments),
-  );
+  const [active, setActive] = React.useState<MarketCategoryId>('favorites');
   const [query, setQuery] = React.useState('');
+  const [favorites, setFavorites] = React.useState<string[]>([]);
 
-  // ONE hook (and one socket) for the page: the watchlist is the only thing that
-  // varies. An empty watchlist keeps the hook mounted but offline.
-  const { status, connected, error, ticks } = useTradingSocket({
-    marketSymbols: watchlist,
-    enabled: watchlist.length > 0,
-  });
+  React.useEffect(() => {
+    let loaded: string[] = [];
+    try {
+      const raw = window.localStorage.getItem(FAVORITES_KEY);
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (Array.isArray(parsed)) loaded = parsed.filter((v): v is string => typeof v === 'string');
+      }
+    } catch {
+      // A corrupt/blocked store must not break the board; favourites simply start empty.
+    }
+    setFavorites(loaded);
+    // Terminal boards open on Favorites; with none saved that is an empty screen,
+    // so open on the first market with instruments instead.
+    if (loaded.length === 0) setActive('forex');
+  }, []);
 
-  const toggleSymbol = React.useCallback((symbol: string) => {
-    setWatchlist((prev) => {
-      if (prev.includes(symbol)) return prev.filter((entry) => entry !== symbol);
-      // The cap is enforced before the room is requested, matching the server's
-      // per-connection limit; extras are refused here rather than by an error.
-      if (prev.length >= MAX_MARKET_ROOMS_PER_SOCKET) return prev;
-      return [...prev, symbol];
+  const toggleFavorite = React.useCallback((symbol: string) => {
+    setFavorites((prev) => {
+      const next = prev.includes(symbol)
+        ? prev.filter((entry) => entry !== symbol)
+        : [...prev, symbol];
+      try {
+        window.localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      } catch {
+        // Persisting is best-effort.
+      }
+      return next;
     });
   }, []);
 
-  const filtered = React.useMemo(() => {
+  const rows = React.useMemo<Row[]>(
+    () => instruments.map((instrument) => ({ instrument, visual: describeInstrument(instrument) })),
+    [instruments],
+  );
+
+  const byCategory = React.useMemo(() => {
+    const map = new Map<MarketCategoryId, Row[]>();
+    for (const category of MARKET_CATEGORIES) map.set(category.id, []);
+    for (const row of rows) map.get(row.visual.category)?.push(row);
+    for (const list of map.values()) list.sort((a, b) => a.visual.ticker.localeCompare(b.visual.ticker));
+    return map;
+  }, [rows]);
+
+  const favoriteSet = React.useMemo(() => new Set(favorites), [favorites]);
+
+  const activeRows = React.useMemo(() => {
+    const base =
+      active === 'favorites'
+        ? rows.filter((row) => favoriteSet.has(row.instrument.symbol))
+        : (byCategory.get(active) ?? []);
     const needle = query.trim().toLowerCase();
-    if (needle.length === 0) return instruments;
-    return instruments.filter(
-      (instrument) =>
-        instrument.symbol.toLowerCase().includes(needle) ||
-        instrument.displayName.toLowerCase().includes(needle) ||
-        instrument.market.toLowerCase().includes(needle) ||
-        instrument.submarket.toLowerCase().includes(needle),
-    );
-  }, [instruments, query]);
+    return needle ? base.filter((row) => row.visual.search.includes(needle)) : base;
+  }, [active, byCategory, favoriteSet, query, rows]);
 
-  const watchedSymbols = React.useMemo(() => new Set(watchlist), [watchlist]);
-  const atCap = watchlist.length >= MAX_MARKET_ROOMS_PER_SOCKET;
-  const streaming = watchlist.length > 0;
+  // Only the rows on screen are requested upstream, up to the per-socket cap.
+  const streamSymbols = React.useMemo(
+    () => activeRows.slice(0, MAX_MARKET_ROOMS_PER_SOCKET).map((row) => row.instrument.symbol),
+    [activeRows],
+  );
+  const { ticks, connected } = useTradingSocket({
+    marketSymbols: streamSymbols,
+    enabled: streamSymbols.length > 0,
+  });
 
-  const liveState: LiveDotState = streaming ? STATUS_STATE[status] : 'paused';
-  const liveLabel = !streaming
-    ? 'No symbols streaming'
-    : connected
-      ? `Live · ${watchlist.length} streaming`
-      : STATUS_LABEL[status];
+  const counts = React.useMemo(() => {
+    const map = new Map<MarketCategoryId, number>();
+    for (const category of MARKET_CATEGORIES) {
+      map.set(
+        category.id,
+        category.id === 'favorites' ? favorites.length : (byCategory.get(category.id) ?? []).length,
+      );
+    }
+    return map;
+  }, [byCategory, favorites.length]);
 
-  if (instruments.length === 0) {
-    return (
-      <div className="rounded-xl border border-line bg-base-850/60">
-        <EmptyState
-          icon={SearchX}
-          title="The Market Feed listed no instruments"
-          description="The Market Feed answered but reported no instruments, so there is nothing to list. The page stays empty until the feed reports them."
-        />
-      </div>
-    );
-  }
+  const capped = activeRows.length > streamSymbols.length;
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader className="flex flex-col gap-2 p-4 pb-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <CardTitle>Live watchlist</CardTitle>
-            <p className="mt-1 text-xs leading-relaxed text-muted">
-              {streaming
-                ? `Streaming ${watchlist.length} of ${MAX_MARKET_ROOMS_PER_SOCKET} possible symbols on this connection.`
-                : `Add instruments from the list below to stream their quotes. One connection carries up to ${MAX_MARKET_ROOMS_PER_SOCKET} symbols.`}
-            </p>
+    <Card className="overflow-hidden">
+      <CardHeader className="flex flex-col gap-4 border-b border-line/70 p-0 pb-0">
+        <div className="flex flex-col gap-3 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <nav aria-label="Market categories" className="-mx-1 flex flex-1 overflow-x-auto">
+              <ul className="flex items-stretch gap-1 px-1" role="tablist">
+                {MARKET_CATEGORIES.map((category) => {
+                  const isActive = category.id === active;
+                  const count = counts.get(category.id) ?? 0;
+                  return (
+                    <li key={category.id} role="presentation">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        onClick={() => setActive(category.id)}
+                        data-testid={`tab-${category.id}`}
+                        className={cn(
+                          'flex items-center gap-1.5 whitespace-nowrap rounded-t-md border-b-2 px-3 py-2 text-[0.7rem] font-semibold uppercase tracking-[0.08em] transition-colors',
+                          isActive
+                            ? 'border-brand-400 text-base-100'
+                            : 'border-transparent text-muted hover:text-base-100',
+                        )}
+                      >
+                        {category.label}
+                        <span className={cn('text-[0.65rem] font-normal', isActive ? 'text-brand-300' : 'text-muted')}>
+                          {count}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
+            <span
+              className={cn(
+                'flex shrink-0 items-center gap-1.5 text-[0.68rem]',
+                connected ? 'text-profit-600' : 'text-muted',
+              )}
+              title={connected ? 'Live quote stream connected' : 'Reconnecting to the quote stream'}
+            >
+              <span className={cn('size-1.5 rounded-full', connected ? 'bg-profit-600' : 'bg-muted')} aria-hidden />
+              {connected ? 'live' : 'offline'}
+            </span>
           </div>
-          <LiveDot state={liveState} label={liveLabel} className="shrink-0" />
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 p-4 pt-0">
-          {streaming ? (
-            <div className="flex flex-wrap gap-2">
-              {watchlist.map((symbol) => (
-                <span
-                  key={symbol}
-                  className="inline-flex items-center gap-1 rounded-full border border-line bg-base-800/70 py-1 pl-3 pr-1"
-                >
-                  <span className="font-mono text-xs text-base-100">{symbol}</span>
-                  <button
-                    type="button"
-                    onClick={() => toggleSymbol(symbol)}
-                    aria-label={`Remove ${symbol} from the watchlist`}
-                    className="inline-flex size-5 items-center justify-center rounded-full text-muted transition-colors hover:bg-base-700 hover:text-base-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-                  >
-                    <X aria-hidden className="size-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              size="sm"
-              title="No symbols streaming"
-              description="Use the add control on any row below to start streaming its quotes."
-            />
-          )}
 
-          {atCap ? (
-            <p className="text-xs leading-relaxed text-warn-400">
-              Watchlist full: {MAX_MARKET_ROOMS_PER_SOCKET} symbols is the limit for one
-              connection. Remove a symbol above before adding another.
-            </p>
-          ) : null}
-
-          {error ? (
-            <p className="text-xs leading-relaxed text-loss-400">Market Feed error: {error}</p>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-col gap-3 rounded-xl border border-line bg-base-850/80 p-4 shadow-card backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex w-full flex-col gap-1 sm:max-w-xs">
-          <label htmlFor="market-search" className="sr-only">
-            Search instruments
-          </label>
-          <div className="relative">
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
-            />
+          <label className="relative block">
+            <span className="sr-only">Search instruments</span>
+            <Search aria-hidden className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" />
             <Input
-              id="market-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search symbol, name or market"
-              autoComplete="off"
-              className="pl-9"
+              placeholder="Search instrument"
+              className="h-9 pl-8"
+              data-testid="input-market-search"
+            />
+          </label>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-0">
+        {activeRows.length === 0 ? (
+          <div className="p-6">
+            <EmptyState
+              size="sm"
+              title={
+                active === 'favorites'
+                  ? 'No favourites yet'
+                  : query
+                    ? 'No instruments match'
+                    : 'No instruments in this market'
+              }
+              description={
+                active === 'favorites'
+                  ? 'Star an instrument to pin it here — favourites survive a reload and are the first rows streamed.'
+                  : query
+                    ? 'Try a different ticker or currency.'
+                    : 'The market feed lists no instruments for this category right now.'
+              }
             />
           </div>
-        </div>
-        <p className="text-xs text-muted">
-          {filtered.length} of {instruments.length} instruments
-        </p>
-      </div>
-
-      <div className="overflow-hidden rounded-xl border border-line bg-base-850/80 shadow-card backdrop-blur-sm">
-        {filtered.length === 0 ? (
-          <EmptyState
-            icon={SearchX}
-            title="No instruments match"
-            description={`Nothing in the feed matches “${query.trim()}”. Clear the search to see the full list.`}
-            action={
-              <button
-                type="button"
-                onClick={() => setQuery('')}
-                className="text-xs text-brand-300 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-              >
-                Clear search
-              </button>
-            }
-          />
         ) : (
-          <>
-            <p className="border-b border-line px-4 py-3 text-xs leading-relaxed text-muted">
-              Live prices are the quote reported by the Market Feed, shown at the precision of each
-              instrument in its own units — never converted to USD. An em dash means no quote has
-              arrived for that symbol yet.
-            </p>
-            <ul>
-              {filtered.map((instrument) => (
-                <MarketRow
-                  key={instrument.symbol}
-                  instrument={instrument}
-                  tick={ticks[instrument.symbol]}
-                  watched={watchedSymbols.has(instrument.symbol)}
-                  atCap={atCap}
-                  onToggle={toggleSymbol}
-                />
-              ))}
-            </ul>
-          </>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] border-collapse text-left">
+              <thead>
+                <tr className="bg-base-900/55 text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-muted">
+                  <th scope="col" className="px-4 py-2.5">
+                    Instrument
+                  </th>
+                  <th scope="col" className="px-4 py-2.5 text-right">
+                    Bid/Ask
+                  </th>
+                  <th scope="col" className="px-4 py-2.5 text-right">
+                    Spread
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeRows.map((row) => {
+                  const { instrument, visual } = row;
+                  const tick = ticks[instrument.symbol];
+                  const decimals = decimalsFor(instrument, visual);
+                  const closed = instrument.exchangeIsOpen === false;
+                  const isFavorite = favoriteSet.has(instrument.symbol);
+                  return (
+                    <tr
+                      key={instrument.symbol}
+                      data-testid={`market-row-${instrument.symbol}`}
+                      data-closed={closed ? 'true' : 'false'}
+                      data-has-tick={tick ? 'true' : 'false'}
+                      // Closed markets fade out entirely — icon, ticker and subtitle
+                      // alike — and their quote cells read as dashes.
+                      className={cn(
+                        'border-b border-line/50 transition-colors last:border-0 hover:bg-base-800/40',
+                        closed && 'opacity-[0.45]',
+                      )}
+                    >
+                      <td className="max-w-0 px-4 py-2.5">
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleFavorite(instrument.symbol)}
+                            aria-label={
+                              isFavorite
+                                ? `Remove ${visual.ticker} from favourites`
+                                : `Add ${visual.ticker} to favourites`
+                            }
+                            aria-pressed={isFavorite}
+                            className="shrink-0 text-muted transition-colors hover:text-brand-300"
+                          >
+                            <Star
+                              aria-hidden
+                              className={cn('size-3.5', isFavorite && 'fill-brand-400 text-brand-400')}
+                            />
+                          </button>
+                          <MarketIconView icon={visual.icon} />
+                          <div className="flex min-w-0 flex-col">
+                            <Link
+                              href={`/dashboard/trading?symbol=${encodeURIComponent(instrument.symbol)}`}
+                              className="truncate text-sm font-bold uppercase tracking-tight text-base-100 hover:text-brand-300"
+                            >
+                              {visual.ticker}
+                            </Link>
+                            <span className="truncate text-[0.7rem] text-muted">{visual.subtitle}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
+                        {closed ? (
+                          <span className="font-mono tabular-nums text-muted">–</span>
+                        ) : (
+                          <QuoteCell tick={tick} decimals={decimals} />
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
+                        {closed ? (
+                          <span className="font-mono tabular-nums text-muted">–</span>
+                        ) : (
+                          <SpreadCell tick={tick} decimals={decimals} />
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
-    </div>
+
+        {capped ? (
+          <p className="border-t border-line/50 px-4 py-3 text-[0.68rem] leading-relaxed text-muted">
+            Streaming the first {streamSymbols.length} instruments of {activeRows.length} on this
+            connection (the per-connection limit is {MAX_MARKET_ROOMS_PER_SOCKET}). Narrow the search
+            to stream a different slice.
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
+
+export default MarketsBoard;
