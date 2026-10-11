@@ -325,6 +325,8 @@ export async function recomputeInvestmentFromPositions(
  * would be a cycle).
  */
 export interface InternalStrategyConfig {
+  /** Entry rule: `ema-rsi` (default) or `rsi-reversion`. */
+  rule?: 'ema-rsi' | 'rsi-reversion';
   timeframe: string;
   masterVolume: number;
   fastPeriod: number;
@@ -454,6 +456,7 @@ export async function runInternalStrategyCycle(
         timeframe: config.timeframe,
         config: {
           strategy: strategyId,
+          rule: config.rule,
           fastPeriod: config.fastPeriod,
           slowPeriod: config.slowPeriod,
           rsiPeriod: config.rsiPeriod,

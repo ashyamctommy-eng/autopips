@@ -81,6 +81,8 @@ const MIN_INTERVAL_SECONDS = 5;
 export interface StrategyRuntimeConfig {
   /** Operator switch. Only `true` entries are evaluated. */
   enabled: boolean;
+  /** Entry rule: `ema-rsi` (trend cross, default) or `rsi-reversion` (turn out of an RSI extreme). */
+  rule?: 'ema-rsi' | 'rsi-reversion';
   timeframe: string;
   symbols: string[];
   /** Master-account lot size for signals from this strategy. */
@@ -110,24 +112,53 @@ export interface StrategyRuntimeConfig {
 export const strategies: Record<string, StrategyRuntimeConfig> = {
   'gold-momentum': {
     enabled: true,
-    timeframe: '15m',
+    rule: 'ema-rsi',
+    // Loosened from 15m/12-26 to 5m/9-21: the trend cross now needs a shorter,
+    // faster confirmation, so it fires far more often than once in a blue moon
+    // while staying a genuine cross (a real change of direction, not noise).
+    timeframe: '5m',
     // The BROKER's symbol, verbatim and case-sensitive: Deriv's gold is
     // `frxXAUUSD`. An MT5-style `XAUUSD` is a symbol this broker does not have,
-    // so the engine fetched nothing and produced no signal.
+    // so the engine fetched nothing and produced no signal. (Internal execution
+    // scans the curated instrument list instead — see investment-execution.)
     symbols: ['frxXAUUSD'],
     // Master lot size. Size it against the master account's equity and the
     // smallest client capital you accept: the client lot is
     // masterVolume × (client capital / master equity), and an allocation that
     // floors below the symbol's minVolume is skipped rather than rounded up.
     masterVolume: 0.1,
-    fastPeriod: 12,
-    slowPeriod: 26,
+    fastPeriod: 9,
+    slowPeriod: 21,
     rsiPeriod: 14,
     rsiOverbought: 70,
     rsiOversold: 30,
     candleCount: 300,
     stopLookback: 10,
-    rewardRisk: 2,
+    rewardRisk: 1.5,
+  },
+  /*
+   * SECOND RULE — RSI reversion.
+   *
+   * A genuinely different strategy, not a looser gold-momentum: it buys the turn
+   * back UP out of oversold and sells the turn back DOWN out of overbought, so it
+   * trades the mean-reverting moves a trend cross misses entirely. It fires much
+   * more often, which is the point. Risk per trade still comes from the stake
+   * allocator and every signal still passes the SAME kill-switch/symbol gate.
+   */
+  'fx-reversion': {
+    enabled: true,
+    rule: 'rsi-reversion',
+    timeframe: '5m',
+    symbols: ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxXAUUSD'],
+    masterVolume: 0.1,
+    fastPeriod: 9,
+    slowPeriod: 21,
+    rsiPeriod: 14,
+    rsiOverbought: 70,
+    rsiOversold: 30,
+    candleCount: 300,
+    stopLookback: 10,
+    rewardRisk: 1.2,
   },
 };
 
@@ -429,6 +460,7 @@ async function runCycle(): Promise<void> {
             timeframe: config.timeframe,
             config: {
               strategy: strategyId,
+              rule: config.rule,
               fastPeriod: config.fastPeriod,
               slowPeriod: config.slowPeriod,
               rsiPeriod: config.rsiPeriod,

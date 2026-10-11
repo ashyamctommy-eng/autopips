@@ -34,9 +34,27 @@ import type { TradeSignal } from './bot.types';
 export const STRATEGY_RULE =
   'BUY/SELL on EMA(fast) crossing EMA(slow) on the last broker candle, confirmed by RSI(period) staying inside [oversold, overbought]; no cross or an RSI outside the bounds yields no signal.';
 
+export type StrategyRule = 'ema-rsi' | 'rsi-reversion';
+
+/** Documented rule text for each rule — surfaced in config/UI and audit details. */
+export const STRATEGY_RULE_TEXTS: Record<StrategyRule, string> = {
+  'ema-rsi':
+    'BUY/SELL on EMA(fast) crossing EMA(slow) on the last candle, confirmed by RSI staying inside [oversold, overbought].',
+  'rsi-reversion':
+    'BUY as RSI crosses back up through oversold, SELL as it crosses back down through overbought — the turn out of an extreme, not a trend cross.',
+};
+
 export interface StrategyConfig {
   /** Strategy identifier, e.g. "gold-momentum". */
   strategy: string;
+  /**
+   * Which entry rule to evaluate. Omitted = `ema-rsi`, so every existing strategy
+   * keeps its behaviour. `rsi-reversion` is a second, independent rule that fires
+   * on the turn out of an RSI extreme — far more often than a trend cross — so a
+   * deployment can run a differently-shaped second strategy instead of only
+   * loosening the first.
+   */
+  rule?: StrategyRule;
   /** EMA fast period (must be >= 2 and < slowPeriod). */
   fastPeriod: number;
   /** EMA slow period. */
@@ -209,10 +227,32 @@ export async function evaluateStrategy(input: EvaluateStrategyInput): Promise<Tr
 
   const crossedUp = fastPrev <= slowPrev && fastNow > slowNow;
   const crossedDown = fastPrev >= slowPrev && fastNow < slowNow;
+  const rsiPrev = momentum[previous];
 
   let direction: 'BUY' | 'SELL' | null = null;
-  if (crossedUp && rsiNow < config.rsiOverbought) direction = 'BUY';
-  else if (crossedDown && rsiNow > config.rsiOversold) direction = 'SELL';
+  let ruleReason: string;
+
+  if ((config.rule ?? 'ema-rsi') === 'rsi-reversion') {
+    /*
+     * RSI REVERSION. A different rule, not a looser version of the first: it
+     * trades the TURN, buying as RSI crosses back up through oversold and selling
+     * as it crosses back down through overbought. It needs the previous bar's RSI
+     * (a cross is a two-point event), so it declines when that is unavailable.
+     */
+    if (rsiPrev === null || !Number.isFinite(rsiPrev)) return null;
+    if (rsiPrev <= config.rsiOversold && rsiNow > config.rsiOversold) direction = 'BUY';
+    else if (rsiPrev >= config.rsiOverbought && rsiNow < config.rsiOverbought) direction = 'SELL';
+    ruleReason =
+      direction === 'BUY'
+        ? `RSI(${config.rsiPeriod}) turned back up out of oversold`
+        : `RSI(${config.rsiPeriod}) turned back down out of overbought`;
+  } else {
+    if (crossedUp && rsiNow < config.rsiOverbought) direction = 'BUY';
+    else if (crossedDown && rsiNow > config.rsiOversold) direction = 'SELL';
+    ruleReason = `EMA fast crossed ${
+      direction === 'BUY' ? 'above' : 'below'
+    } slow (${config.fastPeriod}/${config.slowPeriod})`;
+  }
   if (!direction) return null;
 
   const bar = candles[index]!;
@@ -242,8 +282,7 @@ export async function evaluateStrategy(input: EvaluateStrategyInput): Promise<Tr
   }
 
   const reason =
-    `${direction === 'BUY' ? 'EMA fast crossed above slow' : 'EMA fast crossed below slow'}` +
-    ` (${config.fastPeriod}/${config.slowPeriod}) on ${symbol} ${timeframe} close ${entry.toString()};` +
+    `${ruleReason} on ${symbol} ${timeframe} close ${entry.toString()};` +
     ` RSI(${config.rsiPeriod}) = ${rsiNow.toFixed(2)} within [${config.rsiOversold}, ${config.rsiOverbought}] bounds.`;
 
   return {
