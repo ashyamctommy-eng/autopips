@@ -64,7 +64,9 @@ function superAdmin(handler: ProtectedHandler) {
 function queryDate(value: unknown): unknown {
   if (value === undefined) return undefined;
   if (typeof value !== 'string') return value;
-  return new Date(value);
+  const parsed = new Date(value);
+  // An unparseable date must never reach Prisma as an `Invalid Date`.
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
 router.get(
@@ -154,9 +156,9 @@ router.get(
         executionRequestedAt: row.executionRequestedAt,
         executionCompletedAt: row.executionCompletedAt,
         executionLatencyMs: row.executionLatencyMs,
-        userId: row.investment.userId,
-        userEmail: row.investment.user.email,
-        planName: row.investment.plan.name,
+        userId: row.investment?.userId ?? '',
+        userEmail: row.investment?.user?.email ?? '',
+        planName: row.investment?.plan?.name ?? '',
       })),
       page,
       pageSize,

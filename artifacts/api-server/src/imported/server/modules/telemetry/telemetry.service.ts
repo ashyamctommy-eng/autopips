@@ -1,9 +1,13 @@
 import type { AdminTelemetrySummary } from '@workspace/api-zod';
 import { logger } from '../../../../lib/logger';
-import { getPlatformLedger } from '../../accounting/ledger';
+import { getPlatformLedger, type PlatformLedger } from '../../accounting/ledger';
 import { readBotRuntimeHeartbeat } from '../bot/bot.runtime.state';
-import { getTelemetryAnalyticsSnapshot } from './telemetry.analytics';
+import { getTelemetryAnalyticsSnapshot, type TelemetryAnalyticsSnapshot } from './telemetry.analytics';
 import { readLatestTelemetryEvent } from './telemetry.events';
+
+/** A ledger figure as a 2dp string, or a neutral zero when the ledger was unreadable. */
+const money = (value: { toFixed: (dp: number) => string } | undefined): string =>
+  value ? value.toFixed(2) : '0.00';
 
 export async function getAdminTelemetrySummary(): Promise<AdminTelemetrySummary> {
   const readCachedEvent = async (type: 'cycle' | 'execution') => {
@@ -14,9 +18,39 @@ export async function getAdminTelemetrySummary(): Promise<AdminTelemetrySummary>
       return null;
     }
   };
+  /*
+   * DEFENSIVE BY DESIGN. This endpoint backs the operations console: a database
+   * blip or an empty ledger must degrade to zeros/placeholders THERE, never to a
+   * 500 that blanks the whole page. Only the two Prisma reads can reject — the
+   * heartbeat and the Redis event reads already fail safe on their own.
+   */
+  const safeAnalytics = async (): Promise<TelemetryAnalyticsSnapshot> => {
+    try {
+      return await getTelemetryAnalyticsSnapshot();
+    } catch (err) {
+      logger.warn({ err }, 'Telemetry analytics unavailable; reporting an empty snapshot');
+      return {
+        activePlanCount: 0,
+        confirmedExecutions: 0,
+        closedTrades: 0,
+        winRatePct: null,
+        strategyPerformance: [],
+        latency: { sampleCount: 0, averageMs: null, p95Ms: null },
+      };
+    }
+  };
+  const safeLedger = async (): Promise<PlatformLedger | null> => {
+    try {
+      return await getPlatformLedger();
+    } catch (err) {
+      logger.warn({ err }, 'Platform ledger unavailable; reporting zeroed financials');
+      return null;
+    }
+  };
+
   const [analytics, ledger, heartbeat, lastCycle, lastExecution] = await Promise.all([
-    getTelemetryAnalyticsSnapshot(),
-    getPlatformLedger(),
+    safeAnalytics(),
+    safeLedger(),
     readBotRuntimeHeartbeat(),
     readCachedEvent('cycle'),
     readCachedEvent('execution'),
@@ -54,11 +88,11 @@ export async function getAdminTelemetrySummary(): Promise<AdminTelemetrySummary>
       latestExecutionLatencyMs,
     },
     financials: {
-      activeCapitalUsd: ledger.totalManagedCapital.toFixed(2),
-      idleBalanceUsd: ledger.idleBalance.toFixed(2),
-      totalEquityUsd: ledger.totalEquity.toFixed(2),
-      realizedPnlUsd: ledger.realizedPnL.toFixed(2),
-      unrealizedPnlUsd: ledger.unrealizedPnL.toFixed(2),
+      activeCapitalUsd: money(ledger?.totalManagedCapital),
+      idleBalanceUsd: money(ledger?.idleBalance),
+      totalEquityUsd: money(ledger?.totalEquity),
+      realizedPnlUsd: money(ledger?.realizedPnL),
+      unrealizedPnlUsd: money(ledger?.unrealizedPnL),
     },
     performance: {
       confirmedExecutions: analytics.confirmedExecutions,

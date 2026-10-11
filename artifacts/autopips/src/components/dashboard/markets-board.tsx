@@ -33,7 +33,7 @@ import type { InstrumentInfo } from '@/types/broker.types';
  * spend the whole room budget before the user touches anything. The cap itself
  * is `MAX_MARKET_ROOMS_PER_SOCKET` and is enforced on every add.
  */
-const DEFAULT_WATCHLIST_SIZE = 6;
+const DEFAULT_WATCHLIST_SIZE = 9;
 
 /**
  * Liquid instruments used to seed the watchlist when the feed offers them.
@@ -42,12 +42,25 @@ const DEFAULT_WATCHLIST_SIZE = 6;
  * from the feed instead.
  */
 const PREFERRED_DEFAULT_SYMBOLS: readonly string[] = [
+  /*
+   * ALWAYS-OPEN INSTRUMENTS FIRST.
+   *
+   * Deriv's synthetic indices quote 24/7; forex, metals and index CFDs do not.
+   * The old list was 4 non-24/7 instruments out of 6, so on a weekend — and
+   * overnight on weekdays — a client opening the board saw a mostly-dead table
+   * ("market closed" / "awaiting tick") with only the two synthetics ticking.
+   * Leading with the synthetic set means a fresh screen shows live prices at any
+   * hour, and the FX/metals rows follow once those markets are open.
+   */
+  'R_10',
+  'R_25',
+  'R_50',
+  'R_75',
+  'R_100',
+  '1HZ100V',
   'frxXAUUSD',
   'frxEURUSD',
   'frxGBPUSD',
-  'frxUSDJPY',
-  'R_100',
-  'R_10',
 ];
 
 /** The default watchlist: preferred instruments first, then the feed, capped. */

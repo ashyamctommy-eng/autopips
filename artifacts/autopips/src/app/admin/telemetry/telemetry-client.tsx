@@ -20,6 +20,7 @@ import type {
 } from '@workspace/api-client-react';
 import { resolveApiUrl } from '@/lib/api-request';
 import { Button } from '@/components/ui/button';
+import { ErrorBoundary, type ErrorFallbackProps } from '@/components/error-boundary';
 
 type StreamState = 'connecting' | 'live' | 'reconnecting' | 'offline';
 const PAGE_SIZE = 12;
@@ -46,8 +47,8 @@ const localDayBoundary = (value: string, endOfDay = false) => {
   const date = new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00'}`);
   return Number.isNaN(date.getTime()) ? undefined : date;
 };
-const statusTone = (status: string) => {
-  const value = status.toUpperCase();
+const statusTone = (status: string | null | undefined) => {
+  const value = (status ?? '').toUpperCase();
   if (value === 'ONLINE' || value === 'CLOSED' || value === 'FILLED') return 'good';
   if (value === 'STALE' || value === 'PENDING' || value === 'OPEN') return 'warn';
   return 'bad';
@@ -122,6 +123,7 @@ function RuntimePanel({ summary, stream, onRetry, loading }: { summary?: AdminTe
 
 function TradeRow({ trade, index }: { trade: AdminTelemetryTrade; index: number }) {
   const pnl = Number(trade.userPnlUsd);
+  const direction = (trade.direction ?? '').toUpperCase();
   const pnlClass = pnl > 0 ? 'text-profit-600' : pnl < 0 ? 'text-loss-600' : 'text-base-100';
   return (
     <tr className="border-b border-line/60 last:border-0 hover:bg-teal-800/[0.025]">
@@ -130,8 +132,8 @@ function TradeRow({ trade, index }: { trade: AdminTelemetryTrade; index: number 
         <div className="mt-1 text-[0.68rem] text-muted">{labelForStrategy(trade.strategyId)}</div>
       </td>
       <td className="whitespace-nowrap px-4 py-3.5">
-        <span className={`inline-flex items-center gap-1 text-xs font-semibold ${trade.direction.toUpperCase() === 'BUY' || trade.direction.toUpperCase() === 'LONG' ? 'text-profit-600' : 'text-loss-600'}`}>
-          {trade.direction.toUpperCase() === 'BUY' || trade.direction.toUpperCase() === 'LONG' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />}{trade.direction}
+        <span className={`inline-flex items-center gap-1 text-xs font-semibold ${direction === 'BUY' || direction === 'LONG' ? 'text-profit-600' : 'text-loss-600'}`}>
+          {direction === 'BUY' || direction === 'LONG' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />}{trade.direction ?? '—'}
         </span>
         <div className="mt-1 text-xs text-muted">{trade.volume} units</div>
       </td>
@@ -151,7 +153,36 @@ function TradeRow({ trade, index }: { trade: AdminTelemetryTrade; index: number 
   );
 }
 
+function TelemetryFallback({ resetError }: ErrorFallbackProps) {
+  return (
+    <div className="mx-auto max-w-[1600px] px-4 pb-12 pt-6 sm:px-6 lg:px-8">
+      <div className={`${cardClass} p-8 text-center`} role="alert" data-testid="telemetry-fallback">
+        <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-warn/10"><Activity className="size-4 text-warn-600" /></div>
+        <h1 className="mt-3 text-base font-semibold text-base-100">No Active Telemetry Data</h1>
+        <p className="mx-auto mt-1 max-w-md text-sm text-muted">This view hit an unexpected state and stopped short of rendering. The rest of the admin console is unaffected.</p>
+        <Button size="sm" variant="outline" className="mt-4" onClick={resetError}>Reload telemetry</Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Error boundary around the whole telemetry view.
+ *
+ * A render-time fault in any card used to bubble to the group boundary and blank
+ * the entire admin console with "Something went wrong". Telemetry is read-only
+ * operations data, so a fault here must contain itself and leave the rest of the
+ * console usable.
+ */
 export default function TelemetryClient() {
+  return (
+    <ErrorBoundary FallbackComponent={TelemetryFallback}>
+      <TelemetryView />
+    </ErrorBoundary>
+  );
+}
+
+function TelemetryView() {
   const queryClient = useQueryClient();
   const summaryQuery = useGetAdminTelemetrySummary({
     query: { queryKey: getGetAdminTelemetrySummaryQueryKey(), refetchInterval: 15000 },
@@ -227,19 +258,19 @@ export default function TelemetryClient() {
     return [...items].sort((a, b) => Number(b.netPnlUsd) - Number(a.netPnlUsd))[0];
   }, [performance?.strategyPerformance]);
   const goldenMomentum = useMemo(
-    () => performance?.strategyPerformance.find((item) =>
+    () => (performance?.strategyPerformance ?? []).find((item) =>
       item.strategyId === 'gold-momentum' || item.strategyId === 'golden_momentum',
     ),
     [performance?.strategyPerformance],
   );
   const availableStrategies = useMemo(
     () => [...new Set([
-      ...(summary?.runtime.enabledStrategies ?? []),
+      ...(summary?.runtime?.enabledStrategies ?? []),
       ...(performance?.strategyPerformance ?? []).map((item) => item.strategyId),
     ])].sort((a, b) => labelForStrategy(a).localeCompare(labelForStrategy(b))),
-    [summary?.runtime.enabledStrategies, performance?.strategyPerformance],
+    [summary?.runtime?.enabledStrategies, performance?.strategyPerformance],
   );
-  const totalPages = logs ? Math.max(1, Math.ceil(logs.total / logs.pageSize)) : 1;
+  const totalPages = logs ? Math.max(1, Math.ceil((logs.total ?? 0) / (logs.pageSize || PAGE_SIZE))) : 1;
 
   return (
     <div className="mx-auto max-w-[1600px] px-4 pb-12 pt-6 sm:px-6 lg:px-8">
@@ -267,7 +298,14 @@ export default function TelemetryClient() {
           <ValueCard label="Idle balance" value={usd(financials?.idleBalanceUsd, true)} testId="metric-idle-balance" footnote="Ledger’s signed unallocated balance" />
           <ValueCard label="Total equity" value={usd(financials?.totalEquityUsd)} testId="metric-total-equity" footnote="Platform equity, ledger-derived" />
           <ValueCard label="Realized P&L" value={usd(financials?.realizedPnlUsd, true)} testId="metric-realized-pnl" footnote={`Unrealized ${usd(financials?.unrealizedPnlUsd, true)}`} accent />
-        </> : [1, 2, 3, 4].map((n) => <SkeletonBlock key={n} />)}
+        </> : summaryQuery.isLoading ? [1, 2, 3, 4].map((n) => <SkeletonBlock key={n} />) : (
+          <div className={`${cardClass} col-span-full p-8 text-center`} role="status" data-testid="empty-telemetry">
+            <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-teal-800/[0.07]"><Activity className="size-4 text-teal-800" /></div>
+            <h2 className="mt-3 text-base font-semibold text-base-100">No Active Telemetry Data</h2>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted">The operations feed reported no metrics for this window. Figures appear here automatically once the worker records a cycle.</p>
+            <Button size="sm" variant="outline" className="mt-4" onClick={() => void summaryQuery.refetch()} data-testid="button-retry-empty">Retry</Button>
+          </div>
+        )}
       </section>
 
       <section className="mb-7 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
@@ -325,12 +363,12 @@ export default function TelemetryClient() {
         </div>
         {logsQuery.isError && !logs ? <div className="flex items-center justify-between gap-3 p-6" role="alert" data-testid="error-logs"><p className="text-sm text-loss-600">Execution ledger failed to load.</p><Button size="sm" variant="outline" onClick={() => void logsQuery.refetch()} data-testid="button-retry-ledger">Retry</Button></div> : null}
         {logsQuery.isLoading && !logs ? <div className="space-y-3 p-5" aria-label="Loading execution records">{[1, 2, 3].map((n) => <div key={n} className="h-10 animate-pulse rounded bg-base-700/40" />)}</div> : null}
-        {!logsQuery.isError && logs && logs.items.length === 0 ? <div className="px-6 py-14 text-center" data-testid="empty-ledger"><div className="mx-auto flex size-10 items-center justify-center rounded-full bg-teal-800/[0.07]"><Activity className="size-4 text-teal-800" /></div><h3 className="mt-3 text-sm font-semibold text-base-100">No executions match</h3><p className="mt-1 text-xs text-muted">Adjust the filters or search to inspect a different slice of the ledger.</p></div> : null}
-        {logs && logs.items.length > 0 ? <>
+        {!logsQuery.isError && logs && (logs.items ?? []).length === 0 ? <div className="px-6 py-14 text-center" data-testid="empty-ledger"><div className="mx-auto flex size-10 items-center justify-center rounded-full bg-teal-800/[0.07]"><Activity className="size-4 text-teal-800" /></div><h3 className="mt-3 text-sm font-semibold text-base-100">No executions match</h3><p className="mt-1 text-xs text-muted">Adjust the filters or search to inspect a different slice of the ledger.</p></div> : null}
+        {logs && (logs.items ?? []).length > 0 ? <>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1040px] text-left">
               <thead className="bg-base-900/55 text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-muted"><tr><th scope="col" className="px-4 py-3">Instrument / strategy</th><th scope="col" className="px-4 py-3">Side / volume</th><th scope="col" className="px-4 py-3">Status</th><th scope="col" className="px-4 py-3">Entry / exit</th><th scope="col" className="px-4 py-3 text-right">User P&amp;L</th><th scope="col" className="px-4 py-3">Opened / execution timing</th><th scope="col" className="px-4 py-3">Investor</th><th scope="col" className="px-4 py-3">Latency</th></tr></thead>
-              <tbody>{logs.items.map((trade, index) => <TradeRow key={trade.id} trade={trade} index={index} />)}</tbody>
+              <tbody>{(logs.items ?? []).map((trade, index) => <TradeRow key={trade.id} trade={trade} index={index} />)}</tbody>
             </table>
           </div>
           <div className="flex flex-col gap-3 border-t border-line/70 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between sm:px-5">
