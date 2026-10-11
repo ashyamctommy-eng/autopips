@@ -37,6 +37,7 @@
  */
 
 import { prisma } from '@/lib/prisma';
+import { serverEnv } from '@/lib/env';
 import { D, toPrismaDecimal, usd, type Numeric } from '@/lib/money';
 import { normaliseMarketSymbol } from '@/lib/contracts';
 import { AUDIT, recordAuditSafe } from '@/server/modules/audit/audit.service';
@@ -74,6 +75,18 @@ export function clampStakeToInvestment(stakeUsd: number, capitalUsd: number): nu
 }
 
 /* ────────────────────────────────── open ─────────────────────────────────── */
+
+/**
+ * Exposure multiplier for the internal book.
+ *
+ * The stake is the MAXIMUM LOSS — P/L is clamped at −stake — and the multiplier
+ * converts it into notional, exactly as a Deriv multiplier contract does. This is
+ * what makes a position's P/L meaningful: with multiplier 1 a $5 stake earned
+ * pennies on a 1% move. Deriv's own default (`DERIV_MULTIPLIER`) is 100.
+ */
+function botMultiplier(): number {
+  return serverEnv().DERIV_MULTIPLIER;
+}
 
 export interface OpenBotPositionInput {
   investmentId: string;
@@ -162,9 +175,12 @@ export async function openBotPosition(input: OpenBotPositionInput): Promise<Open
       symbol,
       side,
       stake: toPrismaDecimal(stake),
-      // Spot-like exposure: the stake IS the notional. The bot's internal book
-      // does not apply a multiplier.
-      multiplier: toPrismaDecimal(1),
+      // Exposure, not leverage on the loss: the stake stays the MAXIMUM LOSS
+      // (P/L is clamped at −stake) while the multiplier turns it into notional —
+      // exactly as a Deriv multiplier contract does. A hard-coded 1 made a $5
+      // stake earn pennies on a 1% move, so the engine looked broken while
+      // behaving correctly. `DERIV_MULTIPLIER` is the platform's own knob.
+      multiplier: toPrismaDecimal(botMultiplier()),
       entryPrice: toPrismaDecimal(entryPrice, 5),
       // The mark starts at the entry price; the tick engine moves it.
       currentPrice: toPrismaDecimal(entryPrice, 5),
@@ -527,13 +543,14 @@ export async function runInternalStrategyCycle(
             continue;
           }
 
+          const multiplier = botMultiplier();
           const allocation = allocateStake({
             capitalUsd: D(investment.capitalUsd).toNumber(),
             currentValUsd: D(investment.currentValUsd).toNumber(),
             maxDrawdownPct: D(investment.plan.maxDrawdown).toNumber(),
             riskPerTradePct,
             platformCapUsd,
-            multiplier: 1,
+            multiplier,
           });
 
           if (allocation.skipped || allocation.stake === null) {

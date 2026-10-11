@@ -20,7 +20,7 @@ import {
 } from '@/lib/market-meta';
 import { cn } from '@/lib/utils';
 import type { InstrumentInfo } from '@/types/broker.types';
-import type { PriceTick } from '@/lib/socket-client';
+import { tickMid, type PriceTick } from '@/lib/socket-client';
 
 /**
  * Markets & quotes board.
@@ -104,21 +104,34 @@ function MarketIconView({ icon }: { icon: MarketIcon }) {
   );
 }
 
-function QuoteCell({ tick, decimals }: { tick: PriceTick | undefined; decimals: number }) {
+function QuoteCell({
+  tick,
+  decimals,
+  direction,
+}: {
+  tick: PriceTick | undefined;
+  decimals: number;
+  direction: 'up' | 'down' | null;
+}) {
   const bid = typeof tick?.bid === 'number' ? tick.bid : null;
   const ask = typeof tick?.ask === 'number' ? tick.ask : null;
   const single = typeof tick?.quote === 'number' ? tick.quote : null;
 
+  // Terminals tint a quote by the direction of its LAST move, so the board reads
+  // at a glance. Green up, red down, neutral until the second tick arrives.
+  const tone =
+    direction === 'up' ? 'text-profit-600' : direction === 'down' ? 'text-loss-600' : 'text-base-100';
+
   // A single-price instrument reports one number; show it under Bid and leave Ask
   // as a dash rather than duplicating it.
   if (bid === null && ask === null && single !== null) {
-    return <span className="font-mono tabular-nums text-base-100">{formatPrice(single, decimals)}</span>;
+    return <span className={cn('font-mono tabular-nums transition-colors', tone)}>{formatPrice(single, decimals)}</span>;
   }
   if (bid === null && ask === null) {
     return <span className="font-mono tabular-nums text-muted">–</span>;
   }
   return (
-    <span className="font-mono tabular-nums text-base-100">
+    <span className={cn('font-mono tabular-nums transition-colors', tone)}>
       {bid === null ? '–' : formatPrice(bid, decimals)}
       <span className="px-1 text-muted">/</span>
       {ask === null ? '–' : formatPrice(ask, decimals)}
@@ -211,6 +224,40 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
     marketSymbols: streamSymbols,
     enabled: streamSymbols.length > 0,
   });
+
+  /*
+   * UP/DOWN TINTING.
+   *
+   * Each quote is coloured by the direction of its LAST move, compared against
+   * the PREVIOUS tick for that symbol — never against the day's open, which would
+   * need a figure the feed does not send. The comparison runs on every tick but
+   * the repaint is throttled: a busy market would otherwise re-render the whole
+   * table dozens of times a second.
+   */
+  const lastPriceRef = React.useRef<Map<string, number>>(new Map());
+  const pendingRef = React.useRef<Record<string, 'up' | 'down'>>({});
+  const [directions, setDirections] = React.useState<Record<string, 'up' | 'down'>>({});
+
+  React.useEffect(() => {
+    for (const [symbol, tick] of Object.entries(ticks)) {
+      const price = tickMid(tick);
+      if (price === null) continue;
+      const previous = lastPriceRef.current.get(symbol);
+      lastPriceRef.current.set(symbol, price);
+      if (previous === undefined || price === previous) continue;
+      pendingRef.current[symbol] = price > previous ? 'up' : 'down';
+    }
+  }, [ticks]);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      const pending = pendingRef.current;
+      if (Object.keys(pending).length === 0) return;
+      pendingRef.current = {};
+      setDirections((prev) => ({ ...prev, ...pending }));
+    }, 400);
+    return () => clearInterval(timer);
+  }, []);
 
   const counts = React.useMemo(() => {
     const map = new Map<MarketCategoryId, number>();
@@ -330,6 +377,7 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
                   const decimals = decimalsFor(instrument, visual);
                   const closed = instrument.exchangeIsOpen === false;
                   const isFavorite = favoriteSet.has(instrument.symbol);
+                  const direction = closed ? null : (directions[instrument.symbol] ?? null);
                   return (
                     <tr
                       key={instrument.symbol}
@@ -377,7 +425,7 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
                         {closed ? (
                           <span className="font-mono tabular-nums text-muted">–</span>
                         ) : (
-                          <QuoteCell tick={tick} decimals={decimals} />
+                          <QuoteCell tick={tick} decimals={decimals} direction={direction} />
                         )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
