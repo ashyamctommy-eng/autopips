@@ -96,6 +96,19 @@ export interface ChartPriceLine {
   axisLabelVisible?: boolean;
 }
 
+/**
+ * One indicator line drawn over the price pane (moving average, Bollinger band).
+ * `data` is computed by the caller from the SAME candles that are plotted, so an
+ * overlay can never describe a series the chart is not showing.
+ */
+export interface ChartOverlay {
+  id: string;
+  color: string;
+  lineWidth?: 1 | 2 | 3 | 4;
+  dashed?: boolean;
+  data: { time: number; value: number }[];
+}
+
 export interface CandlestickChartProps {
   /**
    * Historical candles from the broker adapter
@@ -113,10 +126,14 @@ export interface CandlestickChartProps {
    * get one drawn at zero.
    */
   priceLines?: ChartPriceLine[];
+  /** Indicator lines drawn on the price pane (moving averages, Bollinger bands). */
+  overlays?: ChartOverlay[];
   /** Shows a spinner overlay while a fetch is in flight. */
   isLoading?: boolean;
   /** Override the "no data" copy. */
   emptyMessage?: React.ReactNode;
+  /** Crosshair behaviour, driven by the toolbar's drawing tool. */
+  crosshairMode?: 'normal' | 'magnet';
 }
 
 /**
@@ -134,14 +151,18 @@ export function CandlestickChart({
   timeframe,
   className,
   priceLines,
+  overlays,
   isLoading = false,
   emptyMessage = 'No verified broker data for this instrument yet.',
+  crosshairMode = 'normal',
 }: CandlestickChartProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const chartRef = React.useRef<IChartApi | null>(null);
   const seriesRef = React.useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = React.useRef<ISeriesApi<'Histogram'> | null>(null);
   const priceLineRefs = React.useRef<IPriceLine[]>([]);
+  /** Indicator lines on the price pane, keyed by overlay id. */
+  const overlaySeriesRef = React.useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
   /**
    * Instrument + timeframe the current view was fitted to. Scroll position is a
    * user-owned thing; this is how the chart knows when re-fitting is legitimate
@@ -256,6 +277,13 @@ export function CandlestickChart({
     chartRef.current?.applyOptions({ height });
   }, [height]);
 
+  /* Crosshair tool: magnet snaps the crosshair to the nearest OHLC value. */
+  React.useEffect(() => {
+    chartRef.current?.applyOptions({
+      crosshair: { mode: crosshairMode === 'magnet' ? CrosshairMode.Magnet : CrosshairMode.Normal },
+    });
+  }, [crosshairMode]);
+
   /* Re-apply the palette when the theme changes (no chart re-creation). */
   React.useEffect(() => {
     const chart = chartRef.current;
@@ -285,6 +313,42 @@ export function CandlestickChart({
       wickDownColor: theme.wickDown,
     });
   }, [theme]);
+
+  /* Re-seed data whenever the candle array (or the palette) changes. */
+  React.useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const wanted = new Set((overlays ?? []).map((overlay) => overlay.id));
+    for (const [id, series] of overlaySeriesRef.current) {
+      if (wanted.has(id)) continue;
+      chart.removeSeries(series);
+      overlaySeriesRef.current.delete(id);
+    }
+
+    for (const overlay of overlays ?? []) {
+      let series = overlaySeriesRef.current.get(overlay.id);
+      if (!series) {
+        series = chart.addLineSeries({
+          color: overlay.color,
+          lineWidth: overlay.lineWidth ?? 1,
+          lineStyle: overlay.dashed ? LineStyle.Dashed : LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        overlaySeriesRef.current.set(overlay.id, series);
+      } else {
+        series.applyOptions({ color: overlay.color, lineWidth: overlay.lineWidth ?? 1 });
+      }
+      series.setData(
+        overlay.data
+          .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
+          .map((point) => ({ time: point.time as UTCTimestamp, value: point.value }))
+          .sort((a, b) => (a.time as number) - (b.time as number)),
+      );
+    }
+  }, [overlays]);
 
   /* Re-seed data whenever the candle array (or the palette) changes. */
   React.useEffect(() => {

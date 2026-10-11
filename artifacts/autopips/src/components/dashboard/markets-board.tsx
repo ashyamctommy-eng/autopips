@@ -2,12 +2,12 @@
 
 import * as React from 'react';
 import Link from '@/lib/next/link';
-import { Search, Star } from 'lucide-react';
+import { Fuel, Gem, Search, Star } from 'lucide-react';
 
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
-import { FlagIcon } from '@/components/shared/flag-icon';
+import { CryptoIcon, FlagIcon } from '@/components/shared/flag-icon';
 import { useTradingSocket } from '@/hooks/use-trading-socket';
 import { MAX_MARKET_ROOMS_PER_SOCKET } from '@/lib/contracts';
 import {
@@ -18,36 +18,39 @@ import {
   type MarketIcon,
   type MarketVisual,
 } from '@/lib/market-meta';
+import { tickMid, type PriceTick } from '@/lib/socket-client';
 import { cn } from '@/lib/utils';
 import type { InstrumentInfo } from '@/types/broker.types';
-import { tickMid, type PriceTick } from '@/lib/socket-client';
 
 /**
  * Markets & quotes board.
  *
- * A quotes TABLE (Instrument · Bid/Ask · Spread) laid out the way a desktop
- * terminal lays one out: category tabs across the top, one row per instrument
- * with an icon, a bold ticker and a muted description.
+ * A quotes TABLE (Instrument · Bid/Ask · Spread · ★) laid out like a desktop
+ * terminal: category tabs across the top, one row per instrument with a logo, a
+ * bold ticker and a muted description.
  *
- * TWO RULES THE TABLE HONOURS
- *   1. A price is never invented. No tick yet → an em dash, not a zero, not the
- *      previous close.
- *   2. A closed market says so by SHAPE, not by a badge: the row fades and its
- *      bid/ask/spread become dashes. There is no "tradable / not tradable /
- *      awaiting tick" label anywhere — the requirement, and quieter besides.
+ * RULES THE TABLE HONOURS
+ *   1. A price is never invented. No tick yet → an em dash, not a zero.
+ *   2. A closed market says so by SHAPE, not a badge: the row fades and its
+ *      Bid/Ask/Spread read as dashes. There is no "tradable / awaiting tick" label.
+ *   3. Bid and Ask are STACKED (bid green above, ask red beneath) so the two
+ *      numbers are never read as one. A brief background flash marks the last
+ *      move, so direction is visible without recolouring the numbers.
  *
- * ONE SOCKET FOR THE WHOLE PAGE. The server caps market rooms per connection at
- * `MAX_MARKET_ROOMS_PER_SOCKET`, so the board subscribes only to the rows it is
- * actually showing (up to that cap). Ticks are broadcast namespace-wide, so rows
- * outside the cap still update if some other client is watching them.
+ * ONE SOCKET FOR THE WHOLE PAGE, subscribing only to the rows on screen (up to the
+ * per-connection room cap). Ticks are broadcast namespace-wide, so rows outside
+ * the cap still update if another client is watching them.
  */
 
 const FAVORITES_KEY = 'bbcap.market.favorites';
+const FLASH_MS = 600;
 
 interface Row {
   instrument: InstrumentInfo;
   visual: MarketVisual;
 }
+
+type Flash = 'up' | 'down';
 
 /** Decimal places to show a price at, derived from the instrument's own pip size. */
 function decimalsFor(instrument: InstrumentInfo, visual: MarketVisual): number {
@@ -58,7 +61,6 @@ function decimalsFor(instrument: InstrumentInfo, visual: MarketVisual): number {
     const dot = text.indexOf('.');
     decimals = dot === -1 ? Math.max(2, text.length - 1) : text.length - dot - 1;
   }
-  // FX and metals conventionally quote one digit finer than the pip.
   if (visual.category === 'forex' || visual.category === 'metals') decimals += 1;
   return Math.min(8, Math.max(2, decimals));
 }
@@ -70,7 +72,7 @@ function formatPrice(value: number, decimals: number): string {
   });
 }
 
-/** One icon: dual circular flags, an asset glyph, or a market mark. */
+/** One icon: dual circular flags, a crypto logo, a metal glyph, or a market mark. */
 function MarketIconView({ icon }: { icon: MarketIcon }) {
   if (icon.kind === 'flags') {
     return (
@@ -80,20 +82,36 @@ function MarketIconView({ icon }: { icon: MarketIcon }) {
       </span>
     );
   }
+
   if (icon.kind === 'asset') {
-    const glyph = assetGlyph(icon.asset);
-    return (
-      <span
-        aria-hidden
-        className={cn(
-          'grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold leading-none',
-          glyph.className,
-        )}
-      >
-        {glyph.glyph}
-      </span>
-    );
+    const asset = icon.asset;
+    if (asset === 'OIL' || asset === 'BRENT') {
+      return (
+        <span
+          aria-hidden
+          className="grid size-7 shrink-0 place-items-center rounded-full bg-amber-700/15 text-amber-500"
+        >
+          <Fuel className="size-4" />
+        </span>
+      );
+    }
+    if (asset === 'XAU' || asset === 'XAG' || asset === 'XPD' || asset === 'XPT') {
+      return (
+        <span
+          aria-hidden
+          className={cn(
+            'grid size-7 shrink-0 place-items-center rounded-full',
+            assetGlyph(asset).className,
+          )}
+        >
+          <Gem className="size-4" />
+        </span>
+      );
+    }
+    // Crypto: the real coin logo, with the lettered disc as the fallback.
+    return <CryptoIcon symbol={asset} size={28} />;
   }
+
   return (
     <span
       aria-hidden
@@ -104,37 +122,39 @@ function MarketIconView({ icon }: { icon: MarketIcon }) {
   );
 }
 
+/**
+ * The Bid/Ask cell: BID STACKED ABOVE ASK.
+ *
+ * Fixed colours (bid green, ask red) rather than a single tinted number: with the
+ * two prices on separate lines the colour identifies the SIDE, which a
+ * movement-tinted single value could not do. Direction is carried by the brief
+ * background flash instead, so the two signals never compete.
+ */
 function QuoteCell({
   tick,
   decimals,
-  direction,
+  flash,
 }: {
   tick: PriceTick | undefined;
   decimals: number;
-  direction: 'up' | 'down' | null;
+  flash: Flash | null;
 }) {
   const bid = typeof tick?.bid === 'number' ? tick.bid : null;
   const ask = typeof tick?.ask === 'number' ? tick.ask : null;
   const single = typeof tick?.quote === 'number' ? tick.quote : null;
 
-  // Terminals tint a quote by the direction of its LAST move, so the board reads
-  // at a glance. Green up, red down, neutral until the second tick arrives.
-  const tone =
-    direction === 'up' ? 'text-profit-600' : direction === 'down' ? 'text-loss-600' : 'text-base-100';
+  const bidText = bid !== null ? formatPrice(bid, decimals) : single !== null ? formatPrice(single, decimals) : '–';
+  const askText = ask !== null ? formatPrice(ask, decimals) : '–';
 
-  // A single-price instrument reports one number; show it under Bid and leave Ask
-  // as a dash rather than duplicating it.
-  if (bid === null && ask === null && single !== null) {
-    return <span className={cn('font-mono tabular-nums transition-colors', tone)}>{formatPrice(single, decimals)}</span>;
-  }
-  if (bid === null && ask === null) {
-    return <span className="font-mono tabular-nums text-muted">–</span>;
-  }
   return (
-    <span className={cn('font-mono tabular-nums transition-colors', tone)}>
-      {bid === null ? '–' : formatPrice(bid, decimals)}
-      <span className="px-1 text-muted">/</span>
-      {ask === null ? '–' : formatPrice(ask, decimals)}
+    <span
+      className={cn(
+        'inline-flex flex-col items-end gap-0.5 rounded px-1 py-0.5 font-mono tabular-nums leading-tight transition-colors duration-500',
+        flash === 'up' ? 'bg-profit/10' : flash === 'down' ? 'bg-loss/10' : 'bg-transparent',
+      )}
+    >
+      <span className="text-profit-600">{bidText}</span>
+      <span className="text-loss-600">{askText}</span>
     </span>
   );
 }
@@ -169,11 +189,9 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
         if (Array.isArray(parsed)) loaded = parsed.filter((v): v is string => typeof v === 'string');
       }
     } catch {
-      // A corrupt/blocked store must not break the board; favourites simply start empty.
+      // A corrupt/blocked store must not break the board; favourites start empty.
     }
     setFavorites(loaded);
-    // Terminal boards open on Favorites; with none saved that is an empty screen,
-    // so open on the first market with instruments instead.
     if (loaded.length === 0) setActive('forex');
   }, []);
 
@@ -215,7 +233,6 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
     return needle ? base.filter((row) => row.visual.search.includes(needle)) : base;
   }, [active, byCategory, favoriteSet, query, rows]);
 
-  // Only the rows on screen are requested upstream, up to the per-socket cap.
   const streamSymbols = React.useMemo(
     () => activeRows.slice(0, MAX_MARKET_ROOMS_PER_SOCKET).map((row) => row.instrument.symbol),
     [activeRows],
@@ -226,17 +243,16 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
   });
 
   /*
-   * UP/DOWN TINTING.
-   *
-   * Each quote is coloured by the direction of its LAST move, compared against
-   * the PREVIOUS tick for that symbol — never against the day's open, which would
-   * need a figure the feed does not send. The comparison runs on every tick but
-   * the repaint is throttled: a busy market would otherwise re-render the whole
-   * table dozens of times a second.
+   * MOVEMENT FLASH. Each tick is compared with the PREVIOUS tick for that symbol
+   * (never the day's open, which the feed does not send) and paints a short-lived
+   * background on the price cell. The comparison runs per tick; the repaint is
+   * throttled so a busy market cannot re-render the table dozens of times a
+   * second, and the flash clears itself after FLASH_MS.
    */
   const lastPriceRef = React.useRef<Map<string, number>>(new Map());
-  const pendingRef = React.useRef<Record<string, 'up' | 'down'>>({});
-  const [directions, setDirections] = React.useState<Record<string, 'up' | 'down'>>({});
+  const pendingRef = React.useRef<Record<string, Flash>>({});
+  const [flash, setFlash] = React.useState<Record<string, Flash>>({});
+  const clearTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
     for (const [symbol, tick] of Object.entries(ticks)) {
@@ -254,9 +270,14 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
       const pending = pendingRef.current;
       if (Object.keys(pending).length === 0) return;
       pendingRef.current = {};
-      setDirections((prev) => ({ ...prev, ...pending }));
+      setFlash((prev) => ({ ...prev, ...pending }));
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+      clearTimer.current = setTimeout(() => setFlash({}), FLASH_MS);
     }, 400);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+    };
   }, []);
 
   const counts = React.useMemo(() => {
@@ -276,6 +297,18 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
     <Card className="overflow-hidden">
       <CardHeader className="flex flex-col gap-4 border-b border-line/70 p-0 pb-0">
         <div className="flex flex-col gap-3 p-4 sm:p-5">
+          <label className="relative block">
+            <span className="sr-only">Search instruments</span>
+            <Search aria-hidden className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search instrument"
+              className="h-9 pl-8"
+              data-testid="input-market-search"
+            />
+          </label>
+
           <div className="flex flex-wrap items-center justify-between gap-3">
             <nav aria-label="Market categories" className="-mx-1 flex flex-1 overflow-x-auto">
               <ul className="flex items-stretch gap-1 px-1" role="tablist">
@@ -318,18 +351,6 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
               {connected ? 'live' : 'offline'}
             </span>
           </div>
-
-          <label className="relative block">
-            <span className="sr-only">Search instruments</span>
-            <Search aria-hidden className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search instrument"
-              className="h-9 pl-8"
-              data-testid="input-market-search"
-            />
-          </label>
         </div>
       </CardHeader>
 
@@ -347,7 +368,7 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
               }
               description={
                 active === 'favorites'
-                  ? 'Star an instrument to pin it here — favourites survive a reload and are the first rows streamed.'
+                  ? 'Tap the star beside an instrument to pin it here — favourites survive a reload and are the first rows streamed.'
                   : query
                     ? 'Try a different ticker or currency.'
                     : 'The market feed lists no instruments for this category right now.'
@@ -356,17 +377,21 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] border-collapse text-left">
+            <table className="w-full min-w-[360px] border-collapse text-left">
               <thead>
                 <tr className="bg-base-900/55 text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-muted">
-                  <th scope="col" className="px-4 py-2.5">
+                  <th scope="col" className="px-3 py-2.5 sm:px-4">
                     Instrument
                   </th>
-                  <th scope="col" className="px-4 py-2.5 text-right">
+                  <th scope="col" className="px-3 py-2.5 text-right sm:px-4">
                     Bid/Ask
                   </th>
-                  <th scope="col" className="px-4 py-2.5 text-right">
+                  <th scope="col" className="px-3 py-2.5 text-right sm:px-4">
                     Spread
+                  </th>
+                  <th scope="col" className="w-10 px-2 py-2.5 text-center">
+                    <span className="sr-only">Favourite</span>
+                    <Star aria-hidden className="mx-auto size-3.5" />
                   </th>
                 </tr>
               </thead>
@@ -377,38 +402,20 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
                   const decimals = decimalsFor(instrument, visual);
                   const closed = instrument.exchangeIsOpen === false;
                   const isFavorite = favoriteSet.has(instrument.symbol);
-                  const direction = closed ? null : (directions[instrument.symbol] ?? null);
+                  const rowFlash = closed ? null : (flash[instrument.symbol] ?? null);
                   return (
                     <tr
                       key={instrument.symbol}
                       data-testid={`market-row-${instrument.symbol}`}
                       data-closed={closed ? 'true' : 'false'}
                       data-has-tick={tick ? 'true' : 'false'}
-                      // Closed markets fade out entirely — icon, ticker and subtitle
-                      // alike — and their quote cells read as dashes.
                       className={cn(
                         'border-b border-line/50 transition-colors last:border-0 hover:bg-base-800/40',
                         closed && 'opacity-[0.45]',
                       )}
                     >
-                      <td className="max-w-0 px-4 py-2.5">
+                      <td className="max-w-0 px-3 py-2.5 sm:px-4">
                         <div className="flex items-center gap-2.5">
-                          <button
-                            type="button"
-                            onClick={() => toggleFavorite(instrument.symbol)}
-                            aria-label={
-                              isFavorite
-                                ? `Remove ${visual.ticker} from favourites`
-                                : `Add ${visual.ticker} to favourites`
-                            }
-                            aria-pressed={isFavorite}
-                            className="shrink-0 text-muted transition-colors hover:text-brand-300"
-                          >
-                            <Star
-                              aria-hidden
-                              className={cn('size-3.5', isFavorite && 'fill-brand-400 text-brand-400')}
-                            />
-                          </button>
                           <MarketIconView icon={visual.icon} />
                           <div className="flex min-w-0 flex-col">
                             <Link
@@ -421,19 +428,40 @@ export function MarketsBoard({ instruments }: MarketsBoardProps) {
                           </div>
                         </div>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
+                      <td className="whitespace-nowrap px-3 py-2 text-right text-sm sm:px-4">
                         {closed ? (
-                          <span className="font-mono tabular-nums text-muted">–</span>
+                          <span className="inline-flex flex-col items-end gap-0.5 font-mono tabular-nums leading-tight text-muted">
+                            <span>–</span>
+                            <span>–</span>
+                          </span>
                         ) : (
-                          <QuoteCell tick={tick} decimals={decimals} direction={direction} />
+                          <QuoteCell tick={tick} decimals={decimals} flash={rowFlash} />
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-sm">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm sm:px-4">
                         {closed ? (
                           <span className="font-mono tabular-nums text-muted">–</span>
                         ) : (
                           <SpreadCell tick={tick} decimals={decimals} />
                         )}
+                      </td>
+                      <td className="px-2 py-2.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleFavorite(instrument.symbol)}
+                          aria-label={
+                            isFavorite
+                              ? `Remove ${visual.ticker} from favourites`
+                              : `Add ${visual.ticker} to favourites`
+                          }
+                          aria-pressed={isFavorite}
+                          className="text-muted transition-colors hover:text-brand-300"
+                        >
+                          <Star
+                            aria-hidden
+                            className={cn('size-4', isFavorite && 'fill-brand-400 text-brand-400')}
+                          />
+                        </button>
                       </td>
                     </tr>
                   );

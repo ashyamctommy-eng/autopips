@@ -2,7 +2,6 @@ import Link from '@/lib/next/link';
 import { LineChart } from 'lucide-react';
 
 import { MarketsBoard } from '@/components/dashboard/markets-board';
-import { PageHeader } from '@/components/shared/page-header';
 import { Section } from '@/components/shared/section';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -46,18 +45,14 @@ export default async function DashboardMarketsPage() {
   }
 
   return (
-    <Section width="wide" className="flex flex-col gap-6">
-      <PageHeader
-        eyebrow="Public market feed"
-        title="Markets"
-        description="The Market Feed instrument list, with realtime quotes streamed over a single connection. A price is the Market Feed's reported bid/ask shown at that instrument's precision — it is not converted to USD, and it is left blank rather than invented while the feed is quiet."
-        breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Markets' }]}
-        actions={
-          <Button asChild variant="secondary" size="sm">
-            <Link href="/dashboard/trading">Live trading</Link>
-          </Button>
-        }
-      />
+    <Section width="wide" className="flex flex-col gap-4">
+      {/*
+       * NO HEADER BLOCK. The page opens directly on the quote board's search bar
+       * and category tabs — a terminal shows the table, not a paragraph about the
+       * table. The title survives as a screen-reader-only heading so the page is
+       * not headless.
+       */}
+      <h1 className="sr-only">Markets</h1>
 
       {feedAvailable ? (
         <MarketsBoard instruments={instruments} />

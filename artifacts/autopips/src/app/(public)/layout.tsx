@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { SiteHeader } from '@/components/public/site-header';
 import { SiteFooter } from '@/components/public/site-footer';
+import { SupportChat } from '@/components/public/support-chat';
 import { CookieConsent } from '@/components/public/cookie-consent';
 import { getPublicContactLines } from '@/lib/services/settings.service';
 
@@ -38,6 +39,7 @@ export default async function PublicLayout({ children }: { children: React.React
         {children}
       </main>
       <SiteFooter contacts={contacts} />
+      <SupportChat contacts={contacts} />
       <CookieConsent />
     </div>
   );

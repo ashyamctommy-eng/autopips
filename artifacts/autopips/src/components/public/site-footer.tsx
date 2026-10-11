@@ -7,11 +7,17 @@ import { CookiePreferencesButton } from '@/components/public/cookie-consent';
 import { TARGET_RETURN_DISCLAIMER } from '@/lib/contracts';
 
 /**
- * Public site footer.
+ * Public site footer — a single compact dark banner.
  *
- * Server component — no hooks, no interactivity. The year is read at render
- * time. Nothing here states a statistic: the platform has no user counts, AUM
- * totals, award badges or partner logos to show, so it shows none.
+ * It used to be a four-column directory. A trading site's footer is not a site
+ * map: it is the regulatory strip. What remains is what must remain — the legal
+ * links (a compliance requirement, not decoration), the non-guarantee disclaimer,
+ * the risk line, the copyright and the cookie-preferences control. The contact
+ * mailboxes moved to the floating support trigger, which is where someone looking
+ * for help actually looks.
+ *
+ * Nothing here states a statistic: the platform has no user counts, AUM totals,
+ * awards or partner logos, so it shows none.
  */
 
 export interface FooterLink {
@@ -27,19 +33,12 @@ export const FOOTER_PLATFORM_LINKS: readonly FooterLink[] = [
 ];
 
 export const FOOTER_LEGAL_LINKS: readonly FooterLink[] = [
-  { href: '/terms', label: 'Terms of service' },
-  { href: '/privacy', label: 'Privacy policy' },
+  { href: '/terms', label: 'Terms' },
+  { href: '/privacy', label: 'Privacy' },
   { href: '/risk', label: 'Risk disclosure' },
-  { href: '/faq#returns', label: 'Are returns guaranteed?' },
-  { href: '/faq#data', label: 'Data we store' },
   { href: '/contact', label: 'Contact' },
 ];
 
-/**
- * Role mailboxes on the platform domain. All three are monitored; the contact
- * form on /contact is the canonical channel and is recorded against this
- * platform's own audit log.
- */
 export const CONTACT_LINES = [
   { label: 'Support', email: 'support@baltimorecapital.pro', blurb: 'Account, deposits, withdrawals and KYC.' },
   { label: 'Security', email: 'security@baltimorecapital.pro', blurb: 'Vulnerability reports and account compromise.' },
@@ -52,107 +51,52 @@ export const RISK_LINE =
 
 export interface SiteFooterProps {
   className?: string;
-  /**
-   * Admin-editable direct-line mailboxes (Admin → Platform settings). When absent
-   * the built-in {@link CONTACT_LINES} defaults are shown.
-   */
+  /** Admin-editable direct-line mailboxes (Admin → Platform settings). */
   contacts?: readonly { label: string; email: string; blurb: string }[];
 }
 
-export function SiteFooter({ className, contacts }: SiteFooterProps) {
+export function SiteFooter({ className }: SiteFooterProps) {
   const year = new Date().getFullYear();
-  const contactLines = contacts && contacts.length > 0 ? contacts : CONTACT_LINES;
 
   return (
-    <footer className={cn('border-t border-line bg-base-950/60', className)}>
-      <div className="mx-auto w-full max-w-[1400px] px-4 py-12 sm:px-6 lg:px-8">
-        <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-4">
-          <div className="flex flex-col gap-3">
-            <BrandMark size="md" />
-            <p className="max-w-xs text-sm leading-relaxed text-muted">
-              Automated algorithmic trading infrastructure. Strategy capital executes on Deriv
-              over its WebSocket API; deposits and payouts settle in crypto through NOWPayments.
-            </p>
-          </div>
-
-          <nav aria-labelledby="footer-platform" className="flex flex-col gap-3">
-            <h2 id="footer-platform" className="text-xs font-medium uppercase tracking-wide text-brand-300">
-              Platform
-            </h2>
-            <ul className="flex flex-col gap-2">
-              {FOOTER_PLATFORM_LINKS.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="rounded-sm text-sm text-muted transition-colors hover:text-base-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
-
-          <nav aria-labelledby="footer-legal" className="flex flex-col gap-3">
-            <h2 id="footer-legal" className="text-xs font-medium uppercase tracking-wide text-brand-300">
-              Legal
-            </h2>
-            <ul className="flex flex-col gap-2">
-              {FOOTER_LEGAL_LINKS.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="rounded-sm text-sm text-muted transition-colors hover:text-base-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
-
-          <div className="flex flex-col gap-3">
-            <h2 id="footer-contact" className="text-xs font-medium uppercase tracking-wide text-brand-300">
-              Contact
-            </h2>
-            <ul className="flex flex-col gap-3">
-              {contactLines.map((line) => (
-                <li key={line.email} className="flex flex-col gap-0.5">
-                  <a
-                    href={`mailto:${line.email}`}
-                    className="rounded-sm text-sm text-base-100 transition-colors hover:text-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
-                  >
-                    {line.label} — {line.email}
-                  </a>
-                  <span className="text-xs leading-relaxed text-muted">{line.blurb}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        <div className="mt-10 flex flex-col gap-4 border-t border-line pt-6">
-          <p className="text-xs leading-relaxed text-muted">{TARGET_RETURN_DISCLAIMER}</p>
-          <p
-            role="note"
-            className="text-xs font-medium leading-relaxed text-warn-400"
-            title="Non-dismissible risk statement"
-          >
-            {RISK_LINE}
-          </p>
-          <div className="flex flex-col gap-2 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
-            <p>© {year} Baltimore Capital. All rights reserved.</p>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <CookiePreferencesButton className="text-xs text-muted" />
-              <span aria-hidden>·</span>
-              <p>
-                Baltimore Capital is not a bank and client balances are not insured. Nothing on this site is
-                investment advice.
-              </p>
+    <footer className={cn('border-t border-line bg-base-950', className)}>
+      <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <BrandMark size="sm" />
+              <span className="text-xs text-muted">© {year} Baltimore Capital. All rights reserved.</span>
             </div>
+
+            <nav aria-label="Legal" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {FOOTER_LEGAL_LINKS.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-sm text-xs text-muted transition-colors hover:text-base-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+                >
+                  {link.label}
+                </Link>
+              ))}
+              <span aria-hidden className="text-muted">
+                ·
+              </span>
+              <CookiePreferencesButton className="text-xs text-muted" />
+            </nav>
           </div>
+
+          {/* Regulatory strip — the reason the footer exists. */}
+          <p role="note" className="text-[0.7rem] leading-relaxed text-muted">
+            <span className="font-medium text-warn-400" title="Non-dismissible risk statement">
+              {RISK_LINE}
+            </span>{' '}
+            {TARGET_RETURN_DISCLAIMER} Baltimore Capital is not a bank and client balances are not
+            insured. Nothing on this site is investment advice.
+          </p>
         </div>
       </div>
     </footer>
   );
 }
+
+export default SiteFooter;

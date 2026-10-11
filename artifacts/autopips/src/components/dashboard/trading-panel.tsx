@@ -12,6 +12,9 @@ import { LiveDot, type LiveDotState } from '@/components/shared/live-dot';
 import { SignedUsd, Usd } from '@/components/shared/money';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { OrderTicket } from '@/components/dashboard/order-ticket';
+import { ChartToolbar, type DrawingToolId } from '@/components/dashboard/chart-toolbar';
+import { IndicatorPane } from '@/components/charts/indicator-pane';
+import { computeIndicators, type IndicatorId } from '@/lib/indicators';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,8 +49,6 @@ import { apiFetch } from '@/lib/session-refresh';
  * state — this component never draws a bar the broker did not report.
  */
 
-/** Mirrors the values the candles route accepts (the broker's timeframes). */
-const TIMEFRAME_OPTIONS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const;
 const CANDLE_LIMIT = 300;
 
 export interface TradingPanelInvestment {
@@ -243,7 +244,12 @@ export function TradingPanel({
   const [symbol, setSymbol] = React.useState<string | null>(
     () => initialSymbol ?? defaultInstrument(instruments, availableInstruments),
   );
-  const [timeframe, setTimeframe] = React.useState<string>(TIMEFRAME_OPTIONS[4]);
+  const [timeframe, setTimeframe] = React.useState<string>('1h');
+  /** Indicators drawn on the chart; computed from the same candles it plots. */
+  const [indicators, setIndicators] = React.useState<IndicatorId[]>([]);
+  const [drawingTool, setDrawingTool] = React.useState<DrawingToolId>('cursor');
+  /** Side handed to the ticket by the toolbar's SELL/BUY buttons. */
+  const [orderRequest, setOrderRequest] = React.useState<{ side: 'BUY' | 'SELL'; at: number } | null>(null);
 
   // Follow a later deep link (client-side navigation to another `?symbol=`) while
   // leaving an in-page selection alone when the prop is unchanged.
@@ -340,6 +346,16 @@ export function TradingPanel({
     return mergeTickIntoSeries(candles, latest, timeframe);
   }, [candles, ticks, symbol, timeframe]);
 
+  /*
+   * Indicators are computed from the SAME candles the chart is drawing (including
+   * the live bar folded in from ticks), so an overlay can never describe a series
+   * the user is not looking at.
+   */
+  const indicatorSeries = React.useMemo(
+    () => computeIndicators(liveCandles, indicators),
+    [liveCandles, indicators],
+  );
+
   /**
    * Order overlay for the charted instrument: this account's open positions,
    * with live deltas applied. Only levels the broker actually reported are
@@ -423,7 +439,7 @@ export function TradingPanel({
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 p-5 pt-2">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="trading-investment">Investment room</Label>
               <Select
@@ -443,47 +459,27 @@ export function TradingPanel({
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="trading-instrument">Instrument</Label>
-              <Select
-                value={symbol ?? undefined}
-                onValueChange={(value) => setSymbol(value)}
-                disabled={instrumentOptions.length === 0}
-              >
-                <SelectTrigger id="trading-instrument">
-                  <SelectValue
-                    placeholder={
-                      instrumentOptions.length === 0 ? 'No instruments available' : 'Select'
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {instrumentOptions.map((instrument) => (
-                    <SelectItem key={instrument} value={instrument}>
-                      {instrument}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="trading-timeframe">Timeframe</Label>
-              <Select value={timeframe} onValueChange={(value) => setTimeframe(value)}>
-                <SelectTrigger id="trading-timeframe">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIMEFRAME_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
+
+          {/* Instrument, timeframe, indicators, drawing tools and instant execution
+              all live on the toolbar, directly above the chart. */}
+          <ChartToolbar
+            instruments={instrumentOptions}
+            symbol={symbol}
+            onSymbolChange={(value) => setSymbol(value)}
+            timeframe={timeframe}
+            onTimeframeChange={(value) => setTimeframe(value)}
+            indicators={indicators}
+            onToggleIndicator={(id) =>
+              setIndicators((prev) =>
+                prev.includes(id) ? prev.filter((entry) => entry !== id) : [...prev, id],
+              )
+            }
+            drawingTool={drawingTool}
+            onDrawingToolChange={(tool) => setDrawingTool(tool)}
+            onOrderSide={(side) => setOrderRequest({ side, at: Date.now() })}
+            disabled={!symbol}
+          />
 
           {error ? (
             <Alert variant="warn">
@@ -495,12 +491,26 @@ export function TradingPanel({
           <CandlestickChart
             candles={liveCandles}
             priceLines={priceLines}
+            overlays={indicatorSeries.overlays}
+            crosshairMode={drawingTool === 'crosshair' ? 'magnet' : 'normal'}
             symbol={symbol ?? undefined}
             timeframe={timeframe}
             isLoading={isLoading}
             emptyMessage={emptyMessage}
             height={380}
           />
+
+          {indicatorSeries.pane.length > 0 ? (
+            <IndicatorPane
+              lines={indicatorSeries.pane}
+              title={[
+                indicators.includes('rsi') ? 'RSI 14' : null,
+                indicators.includes('macd') ? 'MACD 12/26/9' : null,
+              ]
+                .filter(Boolean)
+                .join(' \u00b7 ')}
+            />
+          ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3 text-xs text-muted">
@@ -548,6 +558,7 @@ export function TradingPanel({
           symbol={symbol}
           quote={{ bid: tick?.bid ?? null, ask: tick?.ask ?? null, mid }}
           availableUsd={availableUsd}
+          orderRequest={orderRequest}
         />
 
         <Card>

@@ -72,6 +72,13 @@ export interface OrderTicketProps {
    */
   /** Ledger withdrawable cash, or null when it could not be read. */
   availableUsd: number | null;
+  /**
+   * Side requested by the chart toolbar's SELL/BUY buttons. It only SELECTS the
+   * side — the order is still confirmed and placed by this ticket, so a single
+   * click above the chart can never move money. `at` is a nonce so pressing the
+   * same side twice re-applies it.
+   */
+  orderRequest?: { side: 'BUY' | 'SELL'; at: number } | null;
 }
 
 function envelopeError(body: unknown): string | null {
@@ -91,7 +98,7 @@ function openedEntryPrice(body: unknown): number | null {
   return typeof price === 'number' && Number.isFinite(price) ? price : null;
 }
 
-export function OrderTicket({ symbol, quote, availableUsd }: OrderTicketProps) {
+export function OrderTicket({ symbol, quote, availableUsd, orderRequest }: OrderTicketProps) {
   const router = useRouter();
 
   const [side, setSide] = React.useState<TicketSide>('BUY');
@@ -104,6 +111,14 @@ export function OrderTicket({ symbol, quote, availableUsd }: OrderTicketProps) {
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [opened, setOpened] = React.useState<string | null>(null);
+
+  /* The toolbar picked a side: adopt it, and drop any half-open confirmation so
+     the ticket cannot confirm the side that was showing a moment ago. */
+  React.useEffect(() => {
+    if (!orderRequest) return;
+    setSide(orderRequest.side);
+    setConfirmSide(null);
+  }, [orderRequest]);
 
   const stakeUsd = Number(stakeText);
   const multiplier = Number(multiplierText);

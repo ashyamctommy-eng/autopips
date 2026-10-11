@@ -12,6 +12,7 @@ import { AdminSidebar } from '@/components/layout/admin-sidebar';
 import { ClientSidebar } from '@/components/layout/sidebar';
 import { AdminMobileNav } from '@/components/layout/admin-mobile-nav';
 import { MobileNav } from '@/components/layout/mobile-nav';
+import { SupportChat } from '@/components/public/support-chat';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Topbar, type TopbarNotification, type TopbarUser } from '@/components/layout/topbar';
 import type { KycStatusValue } from '@/types/api';
@@ -196,6 +197,10 @@ export function AppShell({
             shells have one — the admin bar is a flat five-item variant so the
             two are not confusable. */}
         {variant === 'admin' ? <AdminMobileNav role={adminRole} /> : <MobileNav />}
+
+        {/* Support is reachable from inside the app too, not only on the public
+            pages — it sits clear of the mobile navigation bar. */}
+        <SupportChat />
 
         {showToaster ? <Toaster /> : null}
       </div>
