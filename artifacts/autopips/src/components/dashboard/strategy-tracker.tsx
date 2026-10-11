@@ -2,13 +2,14 @@
 
 import * as React from 'react';
 import { useRouter } from '@/lib/next/navigation';
-import { Activity, Pause, Play, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { Activity, AlertTriangle, Pause, Play, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 
+import { ErrorBoundary, type ErrorFallbackProps } from '@/components/error-boundary';
 import { DataTable, type DataTableColumn } from '@/components/shared/data-table';
 import { MetricTile } from '@/components/shared/metric-tile';
 import { RiskBadge } from '@/components/shared/risk-badge';
 import { StatusBadge } from '@/components/shared/status-badge';
-import { Pct, SignedUsd, Usd } from '@/components/shared/money';
+import { Pct, SignedUsd, Usd, formatUsdDisplay } from '@/components/shared/money';
 import { TargetRange } from '@/components/shared/disclaimer';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -65,7 +66,54 @@ function formatDate(iso: string | null): string {
 
 type PendingAction = 'pause' | 'resume' | 'close' | null;
 
-export function StrategyTracker({ investment }: StrategyTrackerProps) {
+/** A finite number, or `0` — arithmetic on a partial payload must never yield NaN. */
+function amount(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * One tracker card, wrapped in its own error boundary.
+ *
+ * A fault in a single card used to bubble to the group boundary and replace the
+ * whole dashboard route with "Something went wrong". Each card is independent
+ * here, so the rest of the page — and the other strategies — stay usable.
+ */
+export function StrategyTracker(props: StrategyTrackerProps) {
+  return (
+    <ErrorBoundary FallbackComponent={StrategyTrackerFallback} resetKey={props.investment.id}>
+      <StrategyTrackerView {...props} />
+    </ErrorBoundary>
+  );
+}
+
+function StrategyTrackerFallback({ error, resetError }: ErrorFallbackProps) {
+  return (
+    <Card className="flex flex-col">
+      <CardContent className="flex flex-col items-start gap-2 p-5">
+        <div className="flex items-center gap-2">
+          <AlertTriangle aria-hidden className="size-4 text-warn-600" />
+          <h3 className="text-sm font-semibold text-base-100">
+            This strategy could not be displayed
+          </h3>
+        </div>
+        <p className="text-sm leading-relaxed text-muted">
+          One strategy card hit an unexpected state and stopped short of rendering. Your capital,
+          your positions and the other strategies on this page are unaffected.
+        </p>
+        {!import.meta.env.PROD ? (
+          <pre className="mt-1 max-w-full overflow-auto rounded-lg border border-line bg-base-950 p-3 text-left text-xs text-loss/90">
+            {error.message}
+          </pre>
+        ) : null}
+        <Button size="sm" variant="outline" className="mt-1 h-10 sm:h-8" onClick={resetError}>
+          Try again
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function StrategyTrackerView({ investment }: StrategyTrackerProps) {
   const router = useRouter();
   const [pending, setPending] = React.useState<PendingAction>(null);
   const [confirmClose, setConfirmClose] = React.useState(false);
@@ -95,9 +143,13 @@ export function StrategyTracker({ investment }: StrategyTrackerProps) {
   const isPaused = investment.status === 'PAUSED';
   const isTerminal =
     investment.status === 'MATURED' || investment.status === 'CLOSED' || investment.status === 'CANCELLED';
-  const openPositions = investment.positions.filter((position) => position.status === 'OPEN');
+  // A partially-populated detail payload degrades here instead of throwing: the
+  // table renders its own empty state and the money formatters print an em dash
+  // for a figure the API did not provide. Nothing is zero-filled to fill a gap.
+  const positions = investment.positions ?? [];
+  const openPositions = positions.filter((position) => position.status === 'OPEN');
   const yieldPct = investment.yieldPct;
-  const pnlUsd = investment.realizedPnL + investment.unrealizedPnL;
+  const pnlUsd = amount(investment.realizedPnL) + amount(investment.unrealizedPnL);
 
   const act = async (action: Exclude<PendingAction, null>) => {
     setPending(action);
@@ -223,19 +275,19 @@ export function StrategyTracker({ investment }: StrategyTrackerProps) {
           <MetricTile
             label="Current value"
             value={<Usd value={investment.currentValUsd} tone="neutral" />}
-            sub={`Fees ${investment.feesDeducted.toFixed(2)} USD`}
+            sub={`Fees ${formatUsdDisplay(investment.feesDeducted, { currency: false })} USD`}
             icon={Activity}
           />
           <MetricTile
             label="Running P/L"
             value={<SignedUsd value={pnlUsd} />}
-            sub={`Realized ${investment.realizedPnL.toFixed(2)} · unrealized ${investment.unrealizedPnL.toFixed(2)}`}
+            sub={`Realized ${formatUsdDisplay(investment.realizedPnL, { currency: false })} · unrealized ${formatUsdDisplay(investment.unrealizedPnL, { currency: false })}`}
             icon={pnlUsd >= 0 ? TrendingUp : TrendingDown}
           />
           <MetricTile
             label="Yield"
             value={<Pct value={yieldPct} sign />}
-            sub={`${openPositions.length} open · ${investment.positions.length} total trades`}
+            sub={`${openPositions.length} open · ${positions.length} total trades`}
             icon={TrendingUp}
           />
         </div>
@@ -329,7 +381,7 @@ export function StrategyTracker({ investment }: StrategyTrackerProps) {
           </div>
           <DataTable
             columns={columns}
-            rows={investment.positions}
+            rows={positions}
             getRowKey={(row) => row.id}
             emptyState={
               <EmptyState

@@ -95,4 +95,33 @@ describe('migration read boundary', () => {
     });
     expect(response.status).toBe(401);
   });
+
+  /*
+   * REGRESSION — /dashboard/strategy showed "Something went wrong" for every
+   * client holding capital.
+   *
+   * The Active Strategy Tracker (c1aa0b2) read one investment through
+   * `remote('server/modules/account/account.service', 'getInvestmentForUser')`,
+   * but that method was never added to the allow-list above. The SPA's page
+   * awaits the read during render, so the refusal was not a quiet empty state:
+   * it replaced the whole route with the group error boundary.
+   *
+   * The distinction asserted here is the whole point — an UNKNOWN method is
+   * refused with 404 "Unknown read operation." BEFORE the session gate, so 401
+   * (unauthenticated) is proof the method is allow-listed and routing correctly.
+   * This test fails with 404 if the entry is ever dropped again.
+   */
+  it('accepts the strategy tracker read (allow-listed, then session-gated)', async () => {
+    const response = await fetch(`${base}/api/migration/query`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        module: 'server/modules/account/account.service',
+        method: 'getInvestmentForUser',
+        args: ['ignored-user-id', 'ignored-investment-id'],
+      }),
+    });
+
+    expect(response.status).toBe(401);
+  });
 });

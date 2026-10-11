@@ -5,11 +5,15 @@ import type { SessionUser } from '@/types/api';
 import type { AuditLogRowView, WithdrawalRowView } from '@/components/admin/types';
 import type { WithdrawalDTO } from '@/types/api';
 
-const ADMIN_DATA = 'app/admin/_lib/admin-data';
-
 /**
  * Data helpers for the admin pages. The prisma-backed ones run on the server
  * and are reached through the migration RPC endpoint (staff-gated there).
+ *
+ * The RPC module is spelled out literally at each `remote(...)` call: the
+ * endpoint serves only a closed allow-list, and
+ * `artifacts/api-server/tests/rpc-allowlist.test.ts` statically checks every call
+ * site against it. A call whose module name comes from a variable cannot be
+ * checked, so it does not pass that guard.
  */
 
 export async function requireStaffPage(): Promise<SessionUser> {
@@ -19,10 +23,10 @@ export async function requireStaffPage(): Promise<SessionUser> {
   return user;
 }
 
-export const countPendingWithdrawals: () => Promise<number> = remote(ADMIN_DATA, 'countPendingWithdrawals');
+export const countPendingWithdrawals: () => Promise<number> = remote('app/admin/_lib/admin-data', 'countPendingWithdrawals');
 
 export const attachWithdrawalEmails: (rows: WithdrawalDTO[]) => Promise<WithdrawalRowView[]> = remote(
-  ADMIN_DATA,
+  'app/admin/_lib/admin-data',
   'attachWithdrawalEmails',
 );
 

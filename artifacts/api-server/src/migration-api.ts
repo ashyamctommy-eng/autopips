@@ -18,10 +18,41 @@ const services = {
   'server/modules/legal/disclosure': () => import('./imported/server/modules/legal/disclosure'),
 } as const;
 
-// A closed list, not an arbitrary remote service invocation.
-const readMethods: Record<string, readonly string[]> = {
+/*
+ * A closed list, not an arbitrary remote service invocation.
+ *
+ * THIS IS THE BROWSER'S ENTIRE READ SURFACE. The Vite SPA has no Next.js server:
+ * its "server components" call these service methods through `POST
+ * /api/migration/query` (see `artifacts/autopips/src/lib/rpc.ts`, `remote()`).
+ * A method can be implemented, correct and reachable over REST and STILL be
+ * unreachable from the UI — the request is refused with 404 `Unknown read
+ * operation.` before any session or database work happens, and because the page
+ * awaits it during render the whole route is replaced by the group error
+ * boundary ("Something went wrong").
+ *
+ * That is exactly how `/dashboard/strategy` broke: the Active Strategy Tracker
+ * (c1aa0b2) shipped calling `getInvestmentForUser`, which was never added here.
+ * An account with no ACTIVE/PAUSED investment never calls it (empty state, page
+ * renders), and an account WITH one did nothing but the error page — so the
+ * fault hid behind the operator's own empty demo account.
+ *
+ * KEEP IN SYNC: `artifacts/api-server/tests/rpc-allowlist.test.ts` fails if the
+ * SPA calls a method this map does not name, so that class of blank page cannot
+ * ship again.
+ */
+export const readMethods: Record<string, readonly string[]> = {
   'server/modules/auth/session': ['getSessionUser', 'requireSessionUser'],
-  'server/modules/account/account.service': ['getOverview', 'listInvestments', 'listPositions', 'listTrades', 'listActivity', 'listActivePlans'],
+  'server/modules/account/account.service': [
+    'getOverview',
+    'listInvestments',
+    // One investment with the book of positions the engine opened against it,
+    // plus the derived `yieldPct` — the `/dashboard/strategy` tracker's only read.
+    'getInvestmentForUser',
+    'listPositions',
+    'listTrades',
+    'listActivity',
+    'listActivePlans',
+  ],
   'server/modules/admin/admin.service': ['getAumSummary', 'listUsers', 'listPlans', 'listBrokers', 'getBotControlView', 'getAdminActivity', 'getAdminOverview'],
   'server/modules/audit/audit.service': ['listAudit'],
   'server/modules/positions/position.service': ['listPositions', 'getWallet'],
