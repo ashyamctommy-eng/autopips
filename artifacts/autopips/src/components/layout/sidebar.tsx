@@ -10,6 +10,7 @@ import {
   CandlestickChart,
   History,
   LayoutDashboard,
+  Layers,
   LineChart,
   MessageSquare,
   PanelLeft,
@@ -41,6 +42,10 @@ export interface NavItem {
 /** Client dashboard navigation. Exported so pages can render it elsewhere. */
 export const CLIENT_NAV: NavItem[] = [
   { label: 'Overview', href: '/dashboard', icon: LayoutDashboard, exact: true },
+  // The client's own path to start bot trading: browse the active plans and
+  // deploy idle cash into one. Without this the only funded-client route into a
+  // plan was the operator console.
+  { label: 'Plans', href: '/dashboard/plans', icon: Layers },
   { label: 'Markets', href: '/dashboard/markets', icon: LineChart },
   // The canonical path. `/dashboard/live` remains a working alias, but linking to
   // the alias meant a deep link (e.g. from the markets list, `?symbol=`) left this

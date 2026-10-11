@@ -94,6 +94,7 @@ const GROUPS: Record<string, Group> = {
       '/dashboard/live': () => import('@/app/dashboard/live/page'),
       '/dashboard/markets': () => import('@/app/dashboard/markets/page'),
       '/dashboard/messages': () => import('@/app/dashboard/messages/page'),
+      '/dashboard/plans': () => import('@/app/dashboard/plans/page'),
       '/dashboard/positions': () => import('@/app/dashboard/positions/page'),
       '/dashboard/settings': () => import('@/app/dashboard/settings/page'),
       '/dashboard/trading': () => import('@/app/dashboard/trading/page'),

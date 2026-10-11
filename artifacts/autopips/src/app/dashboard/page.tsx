@@ -345,9 +345,14 @@ export default async function DashboardOverviewPage() {
               title="No active investments yet"
               description="Once capital is deployed into a plan it appears here with its live broker P/L and indicative target range. Deposits land as idle cash first and are not traded until they are allocated."
               action={
-                <Button asChild variant="primary" size="sm" className="h-10 sm:h-8">
-                  <Link href="/dashboard/deposits">Deposit funds</Link>
-                </Button>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button asChild variant="primary" size="sm" className="h-10 sm:h-8">
+                    <Link href="/dashboard/plans">Browse plans</Link>
+                  </Button>
+                  <Button asChild variant="secondary" size="sm" className="h-10 sm:h-8">
+                    <Link href="/dashboard/deposits">Deposit funds</Link>
+                  </Button>
+                </div>
               }
             />
           </div>
