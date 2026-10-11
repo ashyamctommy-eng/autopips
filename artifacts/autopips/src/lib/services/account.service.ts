@@ -4,6 +4,7 @@ export const getOverview = remote('server/modules/account/account.service', 'get
 export const listActivePlans = remote('server/modules/account/account.service', 'listActivePlans');
 export const listActivity = remote('server/modules/account/account.service', 'listActivity');
 export const listInvestments = remote('server/modules/account/account.service', 'listInvestments');
+export const getInvestmentForUser = remote('server/modules/account/account.service', 'getInvestmentForUser');
 export const listPositions = remote('server/modules/account/account.service', 'listPositions');
 export const listTrades = remote('server/modules/account/account.service', 'listTrades');
 

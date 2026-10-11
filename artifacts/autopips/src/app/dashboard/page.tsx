@@ -331,11 +331,18 @@ export default async function DashboardOverviewPage() {
               Capital deployed with a strategy, with broker-sourced P/L.
             </p>
           </div>
-          {investments.length > openInvestments.length ? (
-            <span className="text-xs text-muted">
-              {investments.length - openInvestments.length} closed or matured
-            </span>
-          ) : null}
+          <div className="flex items-center gap-3">
+            {investments.length > openInvestments.length ? (
+              <span className="text-xs text-muted">
+                {investments.length - openInvestments.length} closed or matured
+              </span>
+            ) : null}
+            {openInvestments.length > 0 ? (
+              <Button asChild variant="secondary" size="sm" className="h-10 sm:h-8">
+                <Link href="/dashboard/strategy">Track live</Link>
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         {openInvestments.length === 0 ? (

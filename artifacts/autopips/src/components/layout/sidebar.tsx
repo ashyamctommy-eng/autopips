@@ -46,6 +46,9 @@ export const CLIENT_NAV: NavItem[] = [
   // deploy idle cash into one. Without this the only funded-client route into a
   // plan was the operator console.
   { label: 'Plans', href: '/dashboard/plans', icon: Layers },
+  // The live view of capital already deployed: P/L, the engine's trade log and
+  // the pause/close controls.
+  { label: 'Strategy', href: '/dashboard/strategy', icon: Activity },
   { label: 'Markets', href: '/dashboard/markets', icon: LineChart },
   // The canonical path. `/dashboard/live` remains a working alias, but linking to
   // the alias meant a deep link (e.g. from the markets list, `?symbol=`) left this

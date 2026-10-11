@@ -3,6 +3,7 @@ import type { Metadata } from '@/lib/next/types';
 import { Power } from 'lucide-react';
 
 import { BotControlBar } from '@/components/admin/bot-control-bar';
+import { BotExecutions } from '@/components/admin/bot-executions';
 import { BotRiskPanel } from '@/components/admin/bot-risk-panel';
 import { SystemActivityFeed } from '@/components/admin/system-activity-feed';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -97,6 +98,8 @@ export default async function AdminBotControlPage() {
           </CardContent>
         </Card>
       )}
+
+      <BotExecutions />
 
       <SystemActivityFeed initial={activity} />
     </Section>
