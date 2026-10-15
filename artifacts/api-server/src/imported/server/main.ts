@@ -1,5 +1,5 @@
 /**
- * Baltimore Capital realtime runtime — standalone entrypoint.
+ * Autopips Markets realtime runtime — standalone entrypoint.
  *
  *   npm run dev:ws    (tsx watch)
  *   npm run start:ws  (tsx)

@@ -38,18 +38,18 @@ import type { Candle } from '@/types/broker.types';
  * The fallbacks are the dark palette and cover the server render.
  */
 const CHART_TOKENS = {
-  background: { token: '--c-base-900', fallback: 'rgb(11, 14, 20)' },
-  border: { token: '--chart-axis', fallback: 'rgba(148, 163, 184, 0.14)' },
-  grid: { token: '--chart-grid', fallback: 'rgba(148, 163, 184, 0.06)' },
-  text: { token: '--chart-tick', fallback: 'rgba(148, 163, 184, 0.65)' },
-  crosshair: { token: '--chart-crosshair', fallback: 'rgba(148, 163, 184, 0.35)' },
-  upColor: { token: '--c-profit-500', fallback: 'rgb(16, 185, 129)' },
-  downColor: { token: '--c-loss-500', fallback: 'rgb(244, 63, 94)' },
-  wickUp: { token: '--c-profit-500', alpha: 0.75, fallback: 'rgba(16, 185, 129, 0.75)' },
-  wickDown: { token: '--c-loss-500', alpha: 0.75, fallback: 'rgba(244, 63, 94, 0.75)' },
-  volumeUp: { token: '--c-profit-500', alpha: 0.45, fallback: 'rgba(16, 185, 129, 0.45)' },
-  volumeDown: { token: '--c-loss-500', alpha: 0.45, fallback: 'rgba(244, 63, 94, 0.45)' },
-  accent: { token: '--c-brand-400', alpha: 0.75, fallback: 'rgba(34, 211, 238, 0.75)' },
+  background: { token: '--c-base-900', fallback: 'rgb(250, 250, 250)' },
+  border: { token: '--chart-axis', fallback: 'rgba(17, 24, 39, 0.1)' },
+  grid: { token: '--chart-grid', fallback: 'rgba(17, 24, 39, 0.06)' },
+  text: { token: '--chart-tick', fallback: 'rgba(107, 114, 128, 0.9)' },
+  crosshair: { token: '--chart-crosshair', fallback: 'rgba(107, 114, 128, 0.45)' },
+  upColor: { token: '--c-profit-500', fallback: 'rgb(22, 163, 74)' },
+  downColor: { token: '--c-loss-500', fallback: 'rgb(220, 38, 38)' },
+  wickUp: { token: '--c-profit-500', alpha: 0.75, fallback: 'rgba(22, 163, 74, 0.75)' },
+  wickDown: { token: '--c-loss-500', alpha: 0.75, fallback: 'rgba(220, 38, 38, 0.75)' },
+  volumeUp: { token: '--c-profit-500', alpha: 0.45, fallback: 'rgba(22, 163, 74, 0.45)' },
+  volumeDown: { token: '--c-loss-500', alpha: 0.45, fallback: 'rgba(220, 38, 38, 0.45)' },
+  accent: { token: '--c-brand-400', alpha: 0.75, fallback: 'rgba(32, 160, 118, 0.75)' },
 } satisfies Record<string, TokenSpec>;
 
 type ChartTheme = { [K in keyof typeof CHART_TOKENS]: string } & { fontFamily: string };

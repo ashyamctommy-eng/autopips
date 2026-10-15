@@ -46,13 +46,13 @@ export interface EquityCurveProps {
  * cover the server render.
  */
 const CHART_TOKENS = {
-  tick: { token: '--chart-tick', fallback: 'rgba(148, 163, 184, 0.65)' },
-  grid: { token: '--chart-grid', fallback: 'rgba(148, 163, 184, 0.06)' },
-  axis: { token: '--chart-axis', fallback: 'rgba(148, 163, 184, 0.14)' },
-  crosshair: { token: '--chart-crosshair', fallback: 'rgba(148, 163, 184, 0.35)' },
-  profit: { token: '--c-profit-500', fallback: 'rgb(16, 185, 129)' },
-  loss: { token: '--c-loss-500', fallback: 'rgb(244, 63, 94)' },
-  brand: { token: '--c-brand-400', fallback: 'rgb(34, 211, 238)' },
+  tick: { token: '--chart-tick', fallback: 'rgba(107, 114, 128, 0.9)' },
+  grid: { token: '--chart-grid', fallback: 'rgba(17, 24, 39, 0.06)' },
+  axis: { token: '--chart-axis', fallback: 'rgba(17, 24, 39, 0.1)' },
+  crosshair: { token: '--chart-crosshair', fallback: 'rgba(107, 114, 128, 0.45)' },
+  profit: { token: '--c-profit-500', fallback: 'rgb(22, 163, 74)' },
+  loss: { token: '--c-loss-500', fallback: 'rgb(220, 38, 38)' },
+  brand: { token: '--c-brand-400', fallback: 'rgb(32, 160, 118)' },
 } satisfies Record<string, TokenSpec>;
 
 interface EquityTooltipContentProps extends TooltipProps<number, string> {

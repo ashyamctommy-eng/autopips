@@ -94,7 +94,7 @@ import {
   setBotEnabled,
 } from '@/server/modules/bot/bot-control.service';
 
-const ACTOR = { id: 'admin-1', email: 'ceo@baltimorecapital.pro' };
+const ACTOR = { id: 'admin-1', email: 'ceo@autopipsmarkets.com' };
 
 beforeEach(() => {
   mocks.redisValue = null;

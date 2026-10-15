@@ -28,7 +28,7 @@
 export const DEFAULT_POST_LOGIN_PATH = '/dashboard';
 
 /** Resolving base for validation. `.invalid` is reserved and never routable. */
-const VALIDATION_BASE = 'http://baltimorecapital.invalid';
+const VALIDATION_BASE = 'http://autopipsmarkets.invalid';
 
 /** Signing in and being sent back to the sign-in form is not a useful hop. */
 const AUTH_PATHS = new Set(['/login', '/register']);

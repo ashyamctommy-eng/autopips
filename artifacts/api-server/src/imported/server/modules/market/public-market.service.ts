@@ -371,7 +371,7 @@ let instrumentsCache: { at: number; value: InstrumentInfo[] } | null = null;
  * Deriv rate-limit window still has instruments to list, instead of blanking the
  * Markets tab until the quota clears. Best effort: any I/O error is ignored.
  */
-const INSTRUMENTS_CACHE_FILE = join(tmpdir(), 'bbcap-deriv-instruments.json');
+const INSTRUMENTS_CACHE_FILE = join(tmpdir(), 'autopips-deriv-instruments.json');
 
 async function readCachedCatalog(): Promise<InstrumentInfo[] | null> {
   try {

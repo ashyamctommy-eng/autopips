@@ -22,8 +22,8 @@ import { cn } from '@/lib/utils';
  * the footer dispatches {@link OPEN_COOKIE_SETTINGS_EVENT} to re-open it.
  */
 
-const STORAGE_KEY = 'bbcap-cookie-consent-v1';
-export const OPEN_COOKIE_SETTINGS_EVENT = 'bbcap:cookie-settings';
+const STORAGE_KEY = 'autopips-cookie-consent-v1';
+export const OPEN_COOKIE_SETTINGS_EVENT = 'autopips:cookie-settings';
 
 type Choice = 'all' | 'essential';
 

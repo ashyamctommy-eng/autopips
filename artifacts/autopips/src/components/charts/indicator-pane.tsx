@@ -10,7 +10,9 @@ import {
 } from 'lightweight-charts';
 
 import { cn } from '@/lib/utils';
+import { MONOSPACE_FALLBACK, type TokenSpec } from '@/lib/theme';
 import type { IndicatorLine } from '@/lib/indicators';
+import { useChartTheme } from '@/components/theme/use-theme-tokens';
 
 /**
  * Sub-pane for oscillators (RSI, MACD).
@@ -20,6 +22,19 @@ import type { IndicatorLine } from '@/lib/indicators';
  * price scale would squash both. The time scale is hidden so the two charts read
  * as one instrument view, with the price chart above and this beneath.
  */
+
+/**
+ * The sub-pane's palette, read from the design tokens at runtime so the pane
+ * follows the active theme like every other canvas. `fallback` is the light
+ * palette — the shipped default and the value the first render uses.
+ */
+const PANE_TOKENS = {
+  text: { token: '--chart-tick', fallback: 'rgba(107, 114, 128, 0.9)' },
+  grid: { token: '--chart-grid', fallback: 'rgba(17, 24, 39, 0.06)' },
+  axis: { token: '--chart-axis', fallback: 'rgba(17, 24, 39, 0.1)' },
+  profitFill: { token: '--c-profit-500', alpha: 0.45, fallback: 'rgba(22, 163, 74, 0.45)' },
+  lossFill: { token: '--c-loss-500', alpha: 0.45, fallback: 'rgba(220, 38, 38, 0.45)' },
+} satisfies Record<string, TokenSpec>;
 
 export interface IndicatorPaneProps {
   lines: IndicatorLine[];
@@ -33,6 +48,9 @@ export function IndicatorPane({ lines, title, height = 130, className }: Indicat
   const chartRef = React.useRef<IChartApi | null>(null);
   const seriesRef = React.useRef<Map<string, ISeriesApi<'Line'> | ISeriesApi<'Histogram'>>>(new Map());
 
+  /** Live palette; re-resolves whenever the theme attribute changes. */
+  const theme = useChartTheme(PANE_TOKENS, MONOSPACE_FALLBACK);
+
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -42,17 +60,18 @@ export function IndicatorPane({ lines, title, height = 130, className }: Indicat
       height,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#94a3b8',
+        textColor: theme.text,
         fontSize: 10,
+        fontFamily: theme.fontFamily,
         // The lightweight-charts licence requires the attribution link.
         attributionLogo: true,
       },
       grid: {
-        vertLines: { color: 'rgba(148,163,184,0.07)' },
-        horzLines: { color: 'rgba(148,163,184,0.07)' },
+        vertLines: { color: theme.grid },
+        horzLines: { color: theme.grid },
       },
-      rightPriceScale: { borderColor: 'rgba(148,163,184,0.2)' },
-      timeScale: { borderColor: 'rgba(148,163,184,0.2)', timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: theme.axis },
+      timeScale: { borderColor: theme.axis, timeVisible: true, secondsVisible: false },
       handleScroll: false,
       handleScale: false,
     });
@@ -72,6 +91,24 @@ export function IndicatorPane({ lines, title, height = 130, className }: Indicat
       seriesRef.current.clear();
     };
   }, [height]);
+
+  /* Push palette changes into the live chart instance (creation already used them). */
+  React.useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.applyOptions({
+      layout: {
+        background: { type: ColorType.Solid, color: 'transparent' },
+        textColor: theme.text,
+        fontSize: 10,
+        fontFamily: theme.fontFamily,
+        attributionLogo: true,
+      },
+      grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
+      rightPriceScale: { borderColor: theme.axis },
+      timeScale: { borderColor: theme.axis, timeVisible: true, secondsVisible: false },
+    });
+  }, [theme]);
 
   React.useEffect(() => {
     const chart = chartRef.current;
@@ -109,18 +146,18 @@ export function IndicatorPane({ lines, title, height = 130, className }: Indicat
 
       if (line.kind === 'histogram') {
         (series as ISeriesApi<'Histogram'>).setData(
-          data.map((point) => ({ ...point, color: point.value >= 0 ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)' })),
+          data.map((point) => ({ ...point, color: point.value >= 0 ? theme.profitFill : theme.lossFill })),
         );
       } else {
         (series as ISeriesApi<'Line'>).setData(data);
       }
     }
-  }, [lines]);
+  }, [lines, theme]);
 
   return (
-    <div className={cn('relative overflow-hidden rounded-lg border border-line bg-base-900/40', className)}>
+    <div className={cn('relative overflow-hidden rounded-lg border border-line bg-base-950/50', className)}>
       {title ? (
-        <span className="pointer-events-none absolute left-2 top-1.5 z-10 rounded bg-base-900/70 px-1 text-[0.65rem] text-muted">
+        <span className="pointer-events-none absolute left-2 top-1.5 z-10 rounded bg-base-850/85 px-1 text-[0.65rem] text-muted">
           {title}
         </span>
       ) : null}

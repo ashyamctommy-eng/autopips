@@ -21,7 +21,7 @@ import { getPublicContactLines } from '@/lib/services/settings.service';
 export const metadata: Metadata = {
   title: 'Contact',
   description:
-    'Contact Baltimore Capital support, security and compliance. Send a message through the form or use the role mailboxes; every message is recorded and reviewed.',
+    'Contact Autopips Markets support, security and compliance. Send a message through the form or use the role mailboxes; every message is recorded and reviewed.',
   alternates: { canonical: '/contact' },
 };
 

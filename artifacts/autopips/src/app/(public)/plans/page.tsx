@@ -27,7 +27,7 @@ import { CtaBand } from '@/components/public/cta-band';
 export const metadata: Metadata = {
   title: 'Plans',
   description:
-    'Compare the active Baltimore Capital strategies: minimum and maximum investment, term, target range, risk level, drawdown limit and fee schedule. Targets are indicative and non-guaranteed.',
+    'Compare the active Autopips Markets strategies: minimum and maximum investment, term, target range, risk level, drawdown limit and fee schedule. Targets are indicative and non-guaranteed.',
   alternates: { canonical: '/plans' },
 };
 

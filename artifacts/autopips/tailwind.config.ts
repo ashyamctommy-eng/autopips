@@ -2,7 +2,7 @@ import animate from 'tailwindcss-animate';
 import type { Config } from 'tailwindcss';
 
 /**
- * Baltimore Capital design system.
+ * Autopips Markets design system.
  *
  * Dark-by-default fintech: ink-navy base (#0B1120), Harbor Blue and Capital
  * Gold accents — the public site and the client trading workspace. The admin

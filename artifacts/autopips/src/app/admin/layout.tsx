@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Admin',
-  description: 'Baltimore Capital back office: assets under management, KYC review, payouts and audit trail.',
+  description: 'Autopips Markets back office: assets under management, KYC review, payouts and audit trail.',
 };
 
 /**

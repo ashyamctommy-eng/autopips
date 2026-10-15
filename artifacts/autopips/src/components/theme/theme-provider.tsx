@@ -26,7 +26,7 @@ const ThemeContext = React.createContext<ThemeContextValue | null>(null);
 
 export interface ThemeProviderProps {
   children: React.ReactNode;
-  /** Server-render default. Dark unless a surface explicitly says otherwise. */
+  /** Server-render default. Light unless a surface explicitly says otherwise. */
   defaultTheme?: ThemePreference;
 }
 
@@ -46,7 +46,7 @@ export interface ThemeProviderProps {
 export function ThemeProvider({ children, defaultTheme = DEFAULT_THEME_PREFERENCE }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<ThemePreference>(defaultTheme);
   const [resolvedTheme, setResolvedTheme] = React.useState<ResolvedTheme>(
-    defaultTheme === 'system' ? 'dark' : defaultTheme,
+    defaultTheme === 'system' ? 'light' : defaultTheme,
   );
 
   React.useEffect(() => {

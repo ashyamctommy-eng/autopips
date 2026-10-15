@@ -22,8 +22,8 @@ const booleanish = z
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  NEXT_PUBLIC_APP_URL: z.string().url().default('https://baltimorecapital.pro'),
-  NEXT_PUBLIC_APP_NAME: z.string().default('Baltimore Capital'),
+  NEXT_PUBLIC_APP_URL: z.string().url().default('https://autopipsmarkets.com'),
+  NEXT_PUBLIC_APP_NAME: z.string().default('Autopips Markets'),
 
   // Socket / bot runtime
   WS_PORT: z.coerce.number().int().positive().default(4001),
@@ -36,8 +36,8 @@ const schema = z.object({
 
   // Auth
   JWT_SECRET: z.string().min(32),
-  JWT_ISSUER: z.string().default('baltimorecapital.pro'),
-  JWT_AUDIENCE: z.string().default('baltimorecapital-pro-clients'),
+  JWT_ISSUER: z.string().default('autopipsmarkets.com'),
+  JWT_AUDIENCE: z.string().default('autopipsmarkets-com-clients'),
   ACCESS_TOKEN_TTL: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL: z.coerce.number().int().positive().default(2_592_000),
 
@@ -46,7 +46,7 @@ const schema = z.object({
    *
    * EMPTY (the default) keeps the cookies host-only, which is what a single-host
    * deployment wants: `webtrader.…` would then need its own separate login.
-   * Setting this to `.baltimorecapital.pro` shares ONE session across the apex
+   * Setting this to `.autopipsmarkets.com` shares ONE session across the apex
    * and every subdomain, which is what makes the standalone WebTrader work
    * without a second sign-in.
    *
@@ -55,7 +55,7 @@ const schema = z.object({
    * script can read it. Leave it empty unless subdomains genuinely share a login.
    */
   AUTH_COOKIE_DOMAIN: z.string().default(''),
-  TOTP_ISSUER: z.string().default('Baltimore Capital'),
+  TOTP_ISSUER: z.string().default('Autopips Markets'),
 
   // Credential encryption at rest
   CREDENTIAL_ENCRYPTION_KEY: z.string().min(32),

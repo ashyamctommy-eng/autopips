@@ -308,12 +308,12 @@ export const ASSET_GLYPHS: Readonly<Record<string, { glyph: string; className: s
   SOL: { glyph: '◎', className: 'bg-[#9945FF]/15 text-[#9945FF]' },
   LTC: { glyph: 'Ł', className: 'bg-[#345D9D]/15 text-[#345D9D]' },
   XRP: { glyph: '✕', className: 'bg-[#23292F]/15 text-base-100' },
-  XAU: { glyph: 'Au', className: 'bg-[#D4AF37]/15 text-[#D4AF37]' },
-  XAG: { glyph: 'Ag', className: 'bg-slate-400/20 text-slate-300' },
-  XPD: { glyph: 'Pd', className: 'bg-slate-400/20 text-slate-300' },
-  XPT: { glyph: 'Pt', className: 'bg-slate-400/20 text-slate-300' },
-  OIL: { glyph: '🛢', className: 'bg-amber-700/15 text-amber-500' },
-  BRENT: { glyph: '🛢', className: 'bg-amber-700/15 text-amber-500' },
+  XAU: { glyph: 'Au', className: 'bg-[#D4AF37]/15 text-[#9A7B1F]' },
+  XAG: { glyph: 'Ag', className: 'bg-base-700/60 text-muted' },
+  XPD: { glyph: 'Pd', className: 'bg-base-700/60 text-muted' },
+  XPT: { glyph: 'Pt', className: 'bg-base-700/60 text-muted' },
+  OIL: { glyph: '🛢', className: 'bg-warn/15 text-warn' },
+  BRENT: { glyph: '🛢', className: 'bg-warn/15 text-warn' },
 };
 
 export function assetGlyph(asset: string): { glyph: string; className: string } {

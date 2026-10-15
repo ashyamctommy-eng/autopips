@@ -3,37 +3,49 @@
 @tailwind utilities;
 
 /*
- * BALTIMORE CAPITAL DESIGN TOKENS
- * =======================
+ * AUTOPIPS MARKETS DESIGN TOKENS
+ * ==============================
  * tailwind.config.ts maps these variables onto utilities (`bg-base-850`,
  * `text-muted`, `border-line`, …), so the palette can be swapped per surface
  * without touching a single component.
  *
- *   :root                       → the dark trading surface (public site + /dashboard)
- *   html[data-theme='light']    → the visitor-chosen light theme (ThemeToggle)
- *   html:has(.theme-admin)      → the light executive console (/admin/*)
+ *   :root                       → the LIGHT surface (default: public site + /dashboard)
+ *   html[data-theme='dark']     → the visitor-chosen dark theme (ThemeToggle)
+ *   html:has(.theme-admin)      → the light console (/admin/*), forced
  *
- * The palette is "Beacon": a warm ink-navy base, a calm azure primary
- * ("Harbor Blue") and a warm gold secondary ("Capital Gold"). Warmer neutrals,
- * softer geometry and a human type scale replace the previous cyan terminal
- * look. Semantic money colours (profit green / loss red / warn orange) are
- * unchanged in meaning.
+ * The palette is "Market Green": a crisp neutral paper base, white cards,
+ * ink text and a deep market green as the primary identity, with an antique
+ * gold secondary. Warmth comes only from the gold, used sparingly; everything
+ * else is neutral and quiet, so financial figures stay the loudest thing on
+ * the page. Semantic money colours (profit green / loss red / warn orange) are
+ * unchanged in meaning — and the brand green is deliberately kept DARKER and
+ * more desaturated than the profit green so a brand fill never reads as a
+ * gain indicator.
  *
- * The two light selectors share one variable block: the console and the
- * user-selected light theme are the same palette, so the admin scope cannot
- * drift from it. The selectors have equal specificity and the admin one is
- * listed last, so anything under `.theme-admin` stays on the light executive
- * palette whatever the visitor picked.
+ * LIGHT IS THE DEFAULT, so its values live on `:root`: a visitor with
+ * JavaScript disabled, and the very first painted frame, are both already
+ * light. Dark is the opt-in and is scoped to `html[data-theme='dark']`.
+ *
+ * Ordering is load-bearing. `:root` is a pseudo-class (specificity 0,1,0) while
+ * `html[data-theme='dark']` is (0,1,1), so on a dark page the dark block wins
+ * over `:root` — while `html:has(.theme-admin)`, listed last at (0,1,1), still
+ * beats dark. That is what keeps the console light whatever the visitor picked.
  *
  * Note the scope: the override sits on `html`, not on the admin wrapper, because
  * Radix portals (dialogs, selects, tooltips) mount on document.body — OUTSIDE the
- * wrapper — and would keep the dark palette. Nothing in the light block is
- * reached through JavaScript, so there is no theme flash and no layout shift.
- * The blocking inline script in layout.tsx sets `data-theme` before first paint;
- * with JavaScript disabled the page simply stays dark, which is the default.
+ * wrapper — and would otherwise keep the page palette. Nothing in the light block
+ * is reached through JavaScript, so there is no theme flash and no layout shift.
+ * The blocking inline script in index.html sets `data-theme` before first paint.
  */
 @layer base {
-  :root {
+  /*
+   * THE OPT-IN DARK PALETTE — the trading terminal.
+   *
+   * A warm ink-navy base, the same market green as the light theme but lifted
+   * so it reads on a dark surface, and the gold carried across. Kept deliberately
+   * close in structure to the light block: same token names, same meanings.
+   */
+  html[data-theme='dark'] {
     color-scheme: dark;
 
     /* Surfaces — warm ink navy */
@@ -46,25 +58,25 @@
     --c-base-900: 11 17 32;
     --c-base-950: 7 11 22;
 
-    /* Brand accent — Harbor Blue */
-    --c-brand: 76 111 255;
-    --c-brand-50: 238 242 255;
-    --c-brand-100: 224 231 255;
-    --c-brand-300: 147 170 255;
-    --c-brand-400: 110 140 255;
-    --c-brand-500: 76 111 255;
-    --c-brand-600: 59 91 219;
-    --c-brand-700: 47 73 184;
+    /* Brand — market green, lifted for a dark surface */
+    --c-brand: 16 152 108;
+    --c-brand-50: 232 248 240;
+    --c-brand-100: 200 240 220;
+    --c-brand-300: 92 196 156;
+    --c-brand-400: 46 178 132;
+    --c-brand-500: 16 152 108;
+    --c-brand-600: 10 122 87;
+    --c-brand-700: 8 96 68;
 
-    /* Secondary accent — Capital Gold (identity highlights only) */
-    --c-accent: 240 180 80;
-    --c-accent-50: 255 247 230;
-    --c-accent-100: 253 235 200;
-    --c-accent-300: 246 206 122;
-    --c-accent-400: 240 180 80;
-    --c-accent-500: 226 154 43;
-    --c-accent-600: 185 122 24;
-    --c-accent-700: 138 90 16;
+    /* Secondary accent — antique gold (identity highlights only) */
+    --c-accent: 217 164 65;
+    --c-accent-50: 253 248 235;
+    --c-accent-100: 249 238 208;
+    --c-accent-300: 230 190 110;
+    --c-accent-400: 217 164 65;
+    --c-accent-500: 201 148 46;
+    --c-accent-600: 176 120 30;
+    --c-accent-700: 141 94 20;
 
     /* Semantic */
     --c-profit: 34 197 94;
@@ -87,7 +99,7 @@
     --c-muted-a: 0.68;
 
     /* Primary call-to-action and the text that sits on a filled accent */
-    --c-cta: 76 111 255;
+    --c-cta: 16 152 108;
     --c-on-accent: 247 249 255;
     --c-knob: 7 11 22;
 
@@ -96,34 +108,24 @@
     --c-scrim-a: 0.82;
 
     --shadow-card: 0 1px 0 0 rgba(148, 163, 184, 0.06) inset, 0 10px 34px -14px rgba(2, 6, 23, 0.85);
-    --shadow-cta: 0 10px 28px -12px rgba(76, 111, 255, 0.55);
-    --shadow-glow-cyan: 0 0 34px -10px rgba(76, 111, 255, 0.5);
-    --shadow-glow-emerald: 0 0 34px -10px rgba(240, 180, 80, 0.45);
+    --shadow-raised: 0 1px 0 0 rgba(148, 163, 184, 0.08) inset, 0 18px 48px -20px rgba(2, 6, 23, 0.9);
+    --shadow-cta: 0 10px 28px -12px rgba(16, 152, 108, 0.55);
+    --shadow-glow-cyan: 0 0 34px -10px rgba(16, 152, 108, 0.5);
+    --shadow-glow-emerald: 0 0 34px -10px rgba(217, 164, 65, 0.45);
+
+    --blur-surface: 8px;
+    --blur-surface-raised: 12px;
+
+    /* Glass panels stay translucent on the dark surface. */
+    --c-surface-a: 0.7;
+    --c-surface-raised-a: 0.85;
 
     --bg-grid:
       linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
       linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
-    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(76, 111, 255, 0.2) 0%, rgba(11, 17, 32, 0) 100%);
-    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(240, 180, 80, 0.14) 0%, rgba(11, 17, 32, 0) 100%);
+    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(16, 152, 108, 0.2) 0%, rgba(11, 17, 32, 0) 100%);
+    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(217, 164, 65, 0.14) 0%, rgba(11, 17, 32, 0) 100%);
 
-    /*
-     * Glass surface treatment — one definition, both palettes. `.surface` and
-     * `.surface-raised` (and every `Card`) read these, so a raised element is
-     * the same translucent, blurred panel in the dark terminal and in the light
-     * theme. Blur is a token because the light palette wants a touch more
-     * separation from the page.
-     */
-    --blur-surface: 8px;
-    --blur-surface-raised: 12px;
-    --shadow-raised: 0 1px 0 0 rgba(148, 163, 184, 0.08) inset, 0 18px 48px -20px rgba(2, 6, 23, 0.9);
-
-    /*
-     * Canvas tokens. lightweight-charts and recharts take literal colour
-     * strings (no Tailwind classes), so the chart components read these at
-     * runtime via `getComputedStyle` and re-read them when the theme changes.
-     * Kept explicit rather than derived from the colour tokens so the alpha a
-     * hairline needs can differ per palette without a second design system.
-     */
     --chart-grid: rgba(148, 163, 184, 0.07);
     --chart-axis: rgba(148, 163, 184, 0.16);
     --chart-tick: rgba(148, 163, 184, 0.68);
@@ -131,95 +133,104 @@
   }
 
   /*
-   * SHARED LIGHT PALETTE — the visitor-selected light theme AND the console.
+   * THE DEFAULT LIGHT PALETTE (and the console).
    *
-   * Soft off-white page, white cards, ink text, slate muted, Harbor Blue
-   * primary action. Same tokens, same primitives, different values: the console
-   * is a back office, and a back office read on a white surface at 9am is a
-   * different job from reading candles at midnight.
+   * Crisp neutral paper, pure white cards, ink text, slate muted, deep market
+   * green for actions. The console and the visitor-selected light theme share
+   * one block on purpose so a back office cannot drift from the client surface.
    *
-   * Both selectors carry the SAME declarations on purpose — one palette, two
-   * triggers — so the client light theme and the admin console cannot drift.
-   * Specificity is equal and the console selector is listed last, so inside
-   * /admin the console keeps winning even if the visitor chose dark.
+   * `--c-surface-a` is the light palette's one structural difference: cards are
+   * SOLID rather than translucent. A blurred glass panel over an off-white page
+   * reads as haze, not depth; on paper the separation comes from the hairline
+   * and the shadow instead. One variable, no component change.
    */
+  :root,
   html[data-theme='light'],
   html:has(.theme-admin) {
     color-scheme: light;
 
-    --c-base: 247 248 252;
-    --c-base-50: 15 23 42; /* was the near-white dark tint — invisible on white */
-    --c-base-100: 16 24 39; /* primary text — ink */
-    --c-base-700: 241 245 249; /* badge container — slate-100 */
-    --c-base-800: 241 245 249; /* nested surface / secondary button */
+    /* Surfaces — neutral paper, white cards */
+    --c-base: 250 250 250;
+    --c-base-50: 15 23 42; /* near-black tint: used as ink in the light palette */
+    --c-base-100: 17 24 39; /* primary text — ink */
+    --c-base-700: 244 245 246; /* badge container */
+    --c-base-800: 244 245 246; /* nested surface / secondary button */
     --c-base-850: 255 255 255; /* cards — pure white */
-    --c-base-900: 247 248 252; /* page — off-white */
-    --c-base-950: 241 245 249; /* rails, code blocks — slate-100 */
+    --c-base-900: 250 250 250; /* page — paper */
+    --c-base-950: 244 245 246; /* rails, code blocks */
 
-    /* Accents are darkened so they hold contrast on white. */
-    --c-brand: 59 91 219;
-    --c-brand-50: 47 73 184; /* the dark near-white tint cannot read here */
-    --c-brand-100: 38 58 148;
-    --c-brand-300: 59 91 219;
-    --c-brand-400: 76 111 255;
-    --c-brand-500: 76 111 255;
-    --c-brand-600: 47 73 184;
-    --c-brand-700: 38 58 148;
+    /* Brand — the market green. Dark enough to read as identity, not as a gain. */
+    --c-brand: 6 122 87;
+    --c-brand-50: 240 250 245;
+    --c-brand-100: 214 240 228;
+    --c-brand-300: 92 196 156;
+    --c-brand-400: 32 160 118;
+    --c-brand-500: 6 122 87;
+    --c-brand-600: 5 100 71;
+    --c-brand-700: 4 78 55;
 
-    --c-accent: 185 122 24;
-    --c-accent-50: 138 90 16;
-    --c-accent-100: 120 78 14;
-    --c-accent-300: 185 122 24;
-    --c-accent-400: 185 122 24;
-    --c-accent-500: 226 154 43;
-    --c-accent-600: 138 90 16;
-    --c-accent-700: 107 69 12;
+    /* Secondary accent — antique gold, darkened to hold contrast on paper */
+    --c-accent: 176 120 30;
+    --c-accent-50: 253 248 235;
+    --c-accent-100: 249 238 208;
+    --c-accent-300: 217 164 65;
+    --c-accent-400: 201 148 46;
+    --c-accent-500: 176 120 30;
+    --c-accent-600: 141 94 20;
+    --c-accent-700: 110 73 15;
 
-    --c-profit: 5 150 105;
-    --c-profit-400: 4 120 87;
-    --c-profit-500: 5 150 105;
-    --c-profit-600: 6 95 70;
-    --c-loss: 225 29 72;
-    --c-loss-400: 190 18 60;
-    --c-loss-500: 225 29 72;
-    --c-loss-600: 159 18 57;
+    /* Semantic — a brighter, yellower green than the brand, so the two never
+       blur in a table of figures. */
+    --c-profit: 22 163 74;
+    --c-profit-400: 34 197 94;
+    --c-profit-500: 22 163 74;
+    --c-profit-600: 21 128 61;
+    --c-loss: 220 38 38;
+    --c-loss-400: 239 68 68;
+    --c-loss-500: 220 38 38;
+    --c-loss-600: 185 28 28;
     --c-warn: 194 65 12;
-    --c-warn-400: 154 52 18;
+    --c-warn-400: 234 88 12;
     --c-warn-500: 194 65 12;
-    --c-warn-600: 124 45 18;
+    --c-warn-600: 154 52 18;
 
-    --c-line: 226 232 240; /* slate-200 */
+    --c-line: 230 232 235; /* hairline — cool neutral */
     --c-line-a: 1;
-    --c-muted: 100 116 139; /* subtext — slate-500 */
+    --c-muted: 107 114 128; /* subtext */
     --c-muted-a: 1;
 
-    /* Solid Harbor Blue primary action, white label. */
-    --c-cta: 59 91 219;
+    /* Solid market-green action, white label. */
+    --c-cta: 5 100 71;
     --c-on-accent: 255 255 255;
     --c-knob: 255 255 255;
 
     --c-scrim: 15 23 42;
-    --c-scrim-a: 0.45;
+    --c-scrim-a: 0.4;
 
-    --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 14px 34px -18px rgba(15, 23, 42, 0.2);
-    --shadow-raised: 0 1px 2px 0 rgba(15, 23, 42, 0.05), 0 20px 44px -22px rgba(15, 23, 42, 0.28);
-    --shadow-cta: 0 10px 26px -14px rgba(59, 91, 219, 0.55);
-    --shadow-glow-cyan: 0 0 26px -12px rgba(59, 91, 219, 0.35);
-    --shadow-glow-emerald: 0 0 26px -12px rgba(185, 122, 24, 0.35);
+    /* Crisp, low-spread shadows: depth on paper comes from the hairline. */
+    --shadow-card: 0 1px 2px 0 rgba(17, 24, 39, 0.04), 0 1px 3px 0 rgba(17, 24, 39, 0.03);
+    --shadow-raised: 0 1px 2px 0 rgba(17, 24, 39, 0.05), 0 12px 28px -14px rgba(17, 24, 39, 0.18);
+    --shadow-cta: 0 1px 2px 0 rgba(4, 78, 55, 0.2), 0 8px 20px -10px rgba(5, 100, 71, 0.4);
+    --shadow-glow-cyan: 0 0 24px -14px rgba(6, 122, 87, 0.4);
+    --shadow-glow-emerald: 0 0 24px -14px rgba(176, 120, 30, 0.4);
 
     --blur-surface: 10px;
     --blur-surface-raised: 16px;
 
-    --bg-grid:
-      linear-gradient(rgba(15, 23, 42, 0.045) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(15, 23, 42, 0.045) 1px, transparent 1px);
-    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(59, 91, 219, 0.1) 0%, rgba(247, 248, 252, 0) 100%);
-    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(185, 122, 24, 0.1) 0%, rgba(247, 248, 252, 0) 100%);
+    /* Solid cards in the light palette — see the note above. */
+    --c-surface-a: 1;
+    --c-surface-raised-a: 1;
 
-    --chart-grid: rgba(15, 23, 42, 0.06);
-    --chart-axis: rgba(15, 23, 42, 0.12);
-    --chart-tick: rgba(100, 116, 139, 0.9);
-    --chart-crosshair: rgba(100, 116, 139, 0.45);
+    --bg-grid:
+      linear-gradient(rgba(17, 24, 39, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(17, 24, 39, 0.035) 1px, transparent 1px);
+    --bg-glow-cyan: radial-gradient(60% 60% at 50% 0%, rgba(6, 122, 87, 0.07) 0%, rgba(250, 250, 250, 0) 100%);
+    --bg-glow-emerald: radial-gradient(60% 60% at 50% 0%, rgba(176, 120, 30, 0.08) 0%, rgba(250, 250, 250, 0) 100%);
+
+    --chart-grid: rgba(17, 24, 39, 0.06);
+    --chart-axis: rgba(17, 24, 39, 0.1);
+    --chart-tick: rgba(107, 114, 128, 0.9);
+    --chart-crosshair: rgba(107, 114, 128, 0.45);
   }
 
   * {
@@ -246,54 +257,49 @@
   /* Selection reads in both palettes: a brand wash over the palette's own
      foreground, never a literal white (invisible on a light page). */
   ::selection {
-    background-color: rgb(var(--c-brand) / 0.24);
+    background-color: rgb(var(--c-brand) / 0.22);
     color: rgb(var(--c-base-100));
   }
 
-  /* Scrollbars tuned for the dark surface */
+  /* Scrollbars: one neutral treatment that works on paper and on ink. */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-base-950;
+    @apply bg-transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply rounded-full bg-slate-700/60;
+    background-color: rgb(var(--c-base-100) / 0.18);
+    border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-600/80;
+    background-color: rgb(var(--c-base-100) / 0.3);
   }
 
   :focus-visible {
     @apply outline-none ring-2 ring-brand/70 ring-offset-2 ring-offset-base-900;
   }
-
-  /* ── Light-palette refinements (client light theme + the admin console) ── */
-  html[data-theme='light'] ::-webkit-scrollbar-thumb,
-  html:has(.theme-admin) ::-webkit-scrollbar-thumb {
-    background-color: rgb(var(--c-line));
-  }
-  html[data-theme='light'] ::-webkit-scrollbar-thumb:hover,
-  html:has(.theme-admin) ::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(var(--c-muted));
-  }
 }
 
 @layer components {
   /*
-   * The signature surfaces. One translucent, blurred panel with a hairline
-   * border and a themed shadow — used by `Card`, the chart frames and every
-   * `.surface` call site, in BOTH palettes. `.surface-raised` is the elevated
-   * variant (more blur, stronger shadow); the tokens above keep the two from
-   * drifting apart between themes.
+   * The signature surfaces. One panel with a hairline border and a themed
+   * shadow — used by `Card`, the chart frames and every `.surface` call site,
+   * in BOTH palettes. `.surface-raised` is the elevated variant.
+   *
+   * The fill alpha is a token (`--c-surface-a`) rather than a Tailwind modifier
+   * because the two palettes want different physics: translucent glass on ink,
+   * solid paper on white.
    */
   .surface {
-    @apply rounded-2xl border border-line bg-base-850/70 shadow-card backdrop-blur-[var(--blur-surface)];
+    @apply rounded-2xl border border-line shadow-card backdrop-blur-[var(--blur-surface)];
+    background-color: rgb(var(--c-base-850) / var(--c-surface-a));
   }
 
   .surface-raised {
-    @apply rounded-2xl border border-line bg-base-850/85 shadow-raised backdrop-blur-[var(--blur-surface-raised)];
+    @apply rounded-2xl border border-line shadow-raised backdrop-blur-[var(--blur-surface-raised)];
+    background-color: rgb(var(--c-base-850) / var(--c-surface-raised-a));
   }
 
   /* Subtle grid texture used behind hero / dashboard headers. */

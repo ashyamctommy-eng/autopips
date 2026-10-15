@@ -24,8 +24,9 @@ export type ResolvedTheme = 'dark' | 'light';
 /** localStorage key. Also read by the blocking inline script — keep them in sync. */
 export const THEME_STORAGE_KEY = 'autopips-theme';
 
-/** Dark by default: this is a trading terminal, not a document. */
-export const DEFAULT_THEME_PREFERENCE: ThemePreference = 'dark';
+/** Light by default: the public site is a document first. Dark stays one
+ *  toggle away (the trading terminal), and the admin console is always light. */
+export const DEFAULT_THEME_PREFERENCE: ThemePreference = 'light';
 
 /** The attribute CSS keys off. */
 export const THEME_ATTRIBUTE = 'data-theme';
@@ -37,9 +38,9 @@ export function isThemePreference(value: unknown): value is ThemePreference {
   return value === 'dark' || value === 'light' || value === 'system';
 }
 
-/** `prefers-color-scheme` — dark when unavailable, matching the shipped default. */
+/** `prefers-color-scheme` — light when unavailable, matching the shipped default. */
 export function prefersDark(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
@@ -87,10 +88,10 @@ export function persistTheme(preference: ThemePreference): void {
 /**
  * Blocking pre-paint script, inlined as the first child of `<body>`.
  *
- * It runs before the rest of the body is parsed, so a light-theme visitor never
- * sees a dark frame. It is intentionally tiny and dependency-free: read the
+ * It runs before the rest of the body is parsed, so a dark-theme visitor never
+ * sees a light frame. It is intentionally tiny and dependency-free: read the
  * stored preference, resolve `system` against the OS, stamp the attribute. Any
- * failure (storage disabled, malformed value) leaves the dark default in place.
+ * failure (storage disabled, malformed value) leaves the light default in place.
  */
 export const THEME_INIT_SCRIPT = `(function(){try{var k='${THEME_STORAGE_KEY}';var s=null;try{s=localStorage.getItem(k)}catch(e){}var p=(s==='light'||s==='dark'||s==='system')?s:'${DEFAULT_THEME_PREFERENCE}';var d=!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var r=p==='system'?(d?'dark':'light'):p;var h=document.documentElement;h.setAttribute('${THEME_ATTRIBUTE}',r);h.setAttribute('${THEME_PREFERENCE_ATTRIBUTE}',p);h.classList.toggle('dark',r==='dark')}catch(e){}})();`;
 
@@ -153,9 +154,9 @@ export function resolveTokens<T extends Record<string, TokenSpec>>(
 }
 
 /**
- * The pre-hydration values for a spec — the dark palette. Used so server-rendered
- * SVG and the client's first render agree exactly (no hydration mismatch); the
- * live tokens take over once the charts mount.
+ * The pre-hydration values for a spec — the LIGHT palette (the default). Used so
+ * server-rendered SVG and the client's first render agree exactly (no hydration
+ * mismatch); the live tokens take over once the charts mount.
  */
 export function fallbackTokens<T extends Record<string, TokenSpec>>(
   spec: T,

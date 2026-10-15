@@ -58,7 +58,7 @@ const cardClass = 'rounded-xl border border-line/80 bg-base-850/85 shadow-[0_8px
 function ValueCard({ label, value, footnote, accent = false, testId }: { label: string; value: string; footnote?: string; accent?: boolean; testId: string }) {
   return (
     <article className={`${cardClass} relative min-w-0 overflow-hidden p-4 sm:p-5`}>
-      {accent && <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-teal-700" />}
+      {accent && <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-brand-600" />}
       <p className="text-[0.67rem] font-semibold uppercase tracking-[0.15em] text-muted">{label}</p>
       <p className="mt-3 truncate font-mono text-[1.55rem] font-semibold tracking-tight text-base-100 tabular-nums" data-testid={testId}>{value}</p>
       {footnote && <p className="mt-2 text-xs leading-relaxed text-muted">{footnote}</p>}
@@ -67,7 +67,7 @@ function ValueCard({ label, value, footnote, accent = false, testId }: { label: 
 }
 
 function SkeletonBlock() {
-  return <div className="animate-pulse rounded-xl border border-line/60 bg-white/70 p-5"><div className="h-3 w-24 rounded bg-base-700/70" /><div className="mt-5 h-8 w-36 rounded bg-base-700/70" /><div className="mt-3 h-3 w-28 rounded bg-base-700/50" /></div>;
+  return <div className="animate-pulse rounded-xl border border-line/60 bg-base-850/70 p-5"><div className="h-3 w-24 rounded bg-base-700/70" /><div className="mt-5 h-8 w-36 rounded bg-base-700/70" /><div className="mt-3 h-3 w-28 rounded bg-base-700/50" /></div>;
 }
 
 function RuntimePanel({ summary, stream, onRetry, loading }: { summary?: AdminTelemetrySummary; stream: StreamState; onRetry: () => void; loading: boolean }) {
@@ -79,7 +79,7 @@ function RuntimePanel({ summary, stream, onRetry, loading }: { summary?: AdminTe
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line/70 px-5 py-4 sm:px-6">
         <div>
           <div className="flex items-center gap-2">
-            <Activity aria-hidden className="size-4 text-teal-700" />
+            <Activity aria-hidden className="size-4 text-brand-600" />
             <h2 id="runtime-title" className="text-sm font-semibold tracking-wide text-base-100">Worker runtime</h2>
           </div>
           <p className="mt-1 text-xs text-muted">Heartbeat and cycle telemetry from the live worker.</p>
@@ -112,7 +112,7 @@ function RuntimePanel({ summary, stream, onRetry, loading }: { summary?: AdminTe
               <span><span className="text-muted">Accepted orders · last cycle</span><strong className="ml-2 font-mono font-medium text-base-100" data-testid="metric-trades-executed">{metric(runtime?.tradesExecuted)}</strong></span>
             </div>
             <div className="flex flex-wrap gap-1.5" aria-label="Enabled strategies" data-testid="list-enabled-strategies">
-              {(runtime?.enabledStrategies ?? []).length ? runtime!.enabledStrategies.map((strategy) => <span key={strategy} className="rounded-md border border-teal-700/15 bg-teal-700/[0.06] px-2 py-1 text-[0.68rem] font-medium text-teal-800">{labelForStrategy(strategy)}</span>) : <span className="text-xs text-muted">No enabled strategies reported</span>}
+              {(runtime?.enabledStrategies ?? []).length ? runtime!.enabledStrategies.map((strategy) => <span key={strategy} className="rounded-md border border-brand-600/15 bg-brand-600/[0.06] px-2 py-1 text-[0.68rem] font-medium text-brand-700">{labelForStrategy(strategy)}</span>) : <span className="text-xs text-muted">No enabled strategies reported</span>}
             </div>
           </div>
         </>
@@ -126,7 +126,7 @@ function TradeRow({ trade, index }: { trade: AdminTelemetryTrade; index: number 
   const direction = (trade.direction ?? '').toUpperCase();
   const pnlClass = pnl > 0 ? 'text-profit-600' : pnl < 0 ? 'text-loss-600' : 'text-base-100';
   return (
-    <tr className="border-b border-line/60 last:border-0 hover:bg-teal-800/[0.025]">
+    <tr className="border-b border-line/60 last:border-0 hover:bg-brand-700/[0.03]">
       <td className="whitespace-nowrap px-4 py-3.5">
         <div className="font-medium text-base-100">{trade.instrument}</div>
         <div className="mt-1 text-[0.68rem] text-muted">{labelForStrategy(trade.strategyId)}</div>
@@ -276,7 +276,7 @@ function TelemetryView() {
     <div className="mx-auto max-w-[1600px] px-4 pb-12 pt-6 sm:px-6 lg:px-8">
       <header className="mb-6 flex flex-col gap-4 border-b border-line/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-[0.67rem] font-semibold uppercase tracking-[0.19em] text-teal-800"><ShieldCheck className="size-3.5" /> Super Admin / Operations</div>
+          <div className="mb-2 flex items-center gap-2 text-[0.67rem] font-semibold uppercase tracking-[0.19em] text-brand-700"><ShieldCheck className="size-3.5" /> Super Admin / Operations</div>
           <h1 className="text-2xl font-semibold tracking-tight text-base-100 sm:text-[2rem]">Live telemetry</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-muted">Worker health, broker execution latency and ledger-backed trading outcomes.</p>
         </div>
@@ -300,7 +300,7 @@ function TelemetryView() {
           <ValueCard label="Realized P&L" value={usd(financials?.realizedPnlUsd, true)} testId="metric-realized-pnl" footnote={`Unrealized ${usd(financials?.unrealizedPnlUsd, true)}`} accent />
         </> : summaryQuery.isLoading ? [1, 2, 3, 4].map((n) => <SkeletonBlock key={n} />) : (
           <div className={`${cardClass} col-span-full p-8 text-center`} role="status" data-testid="empty-telemetry">
-            <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-teal-800/[0.07]"><Activity className="size-4 text-teal-800" /></div>
+            <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-brand-700/[0.07]"><Activity className="size-4 text-brand-700" /></div>
             <h2 className="mt-3 text-base font-semibold text-base-100">No Active Telemetry Data</h2>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted">The operations feed reported no metrics for this window. Figures appear here automatically once the worker records a cycle.</p>
             <Button size="sm" variant="outline" className="mt-4" onClick={() => void summaryQuery.refetch()} data-testid="button-retry-empty">Retry</Button>
@@ -311,22 +311,22 @@ function TelemetryView() {
       <section className="mb-7 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
         <article className={`${cardClass} p-5 sm:p-6`} aria-labelledby="execution-title">
           <div className="flex items-start justify-between gap-3">
-            <div><div className="flex items-center gap-2"><Clock3 className="size-4 text-teal-700" /><h2 id="execution-title" className="text-sm font-semibold text-base-100">Execution latency</h2></div><p className="mt-1 text-xs text-muted">Broker acknowledgement · rolling {latency ? `${latency.windowHours}h` : 'window'}</p></div>
-            <span className="rounded-full bg-teal-800/[0.06] px-2.5 py-1 text-[0.68rem] text-teal-800">{metric(latency?.sampleCount)} samples</span>
+            <div><div className="flex items-center gap-2"><Clock3 className="size-4 text-brand-600" /><h2 id="execution-title" className="text-sm font-semibold text-base-100">Execution latency</h2></div><p className="mt-1 text-xs text-muted">Broker acknowledgement · rolling {latency ? `${latency.windowHours}h` : 'window'}</p></div>
+            <span className="rounded-full bg-brand-700/[0.06] px-2.5 py-1 text-[0.68rem] text-brand-700">{metric(latency?.sampleCount)} samples</span>
           </div>
           <div className="mt-6 grid grid-cols-2 gap-4">
-            <div className="border-l-2 border-teal-700 pl-3"><p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted">Average</p><p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-base-100" data-testid="metric-latency-average">{metric(latency?.averageMs, ' ms')}</p></div>
-            <div className="border-l-2 border-amber-600 pl-3"><p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted">95th percentile</p><p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-base-100" data-testid="metric-latency-p95">{metric(latency?.p95Ms, ' ms')}</p></div>
+            <div className="border-l-2 border-brand-600 pl-3"><p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted">Average</p><p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-base-100" data-testid="metric-latency-average">{metric(latency?.averageMs, ' ms')}</p></div>
+            <div className="border-l-2 border-warn-600 pl-3"><p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted">95th percentile</p><p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-base-100" data-testid="metric-latency-p95">{metric(latency?.p95Ms, ' ms')}</p></div>
           </div>
-          <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-base-700/60" aria-hidden><div className="h-full w-[72%] origin-left animate-[telemetry-scan_4s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-teal-800 to-amber-500 opacity-80" /></div>
+          <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-base-700/60" aria-hidden><div className="h-full w-[72%] origin-left animate-[telemetry-scan_4s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-brand-700 to-accent-400 opacity-80" /></div>
         </article>
         <article className={`${cardClass} p-5 sm:p-6`} aria-labelledby="outcomes-title">
-          <div className="flex items-center gap-2"><TrendingUp className="size-4 text-teal-700" /><h2 id="outcomes-title" className="text-sm font-semibold text-base-100">Closed-trade outcomes</h2></div>
+          <div className="flex items-center gap-2"><TrendingUp className="size-4 text-brand-600" /><h2 id="outcomes-title" className="text-sm font-semibold text-base-100">Closed-trade outcomes</h2></div>
           <p className="mt-1 text-xs text-muted">Execution records reconciled to user P&L.</p>
           <div className="mt-5 grid grid-cols-3 gap-3">
             <div><p className="text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-muted">Confirmed executions</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums text-base-100" data-testid="metric-confirmed-executions">{metric(performance?.confirmedExecutions)}</p></div>
             <div><p className="text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-muted">Closed trades</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums text-base-100" data-testid="metric-closed-trades">{metric(performance?.closedTrades)}</p></div>
-            <div className="text-right"><p className="text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-muted">Win rate</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums text-teal-800" data-testid="metric-win-rate">{metric(performance?.winRatePct, '%')}</p></div>
+            <div className="text-right"><p className="text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-muted">Win rate</p><p className="mt-1 font-mono text-xl font-semibold tabular-nums text-brand-700" data-testid="metric-win-rate">{metric(performance?.winRatePct, '%')}</p></div>
           </div>
           <div className="mt-5 border-t border-line/70 pt-4" data-testid="golden-momentum-performance">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -352,18 +352,18 @@ function TelemetryView() {
 
       <section className={`${cardClass} overflow-hidden`} aria-labelledby="ledger-title">
         <div className="flex flex-col gap-4 border-b border-line/70 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-          <div><div className="flex items-center gap-2"><Radio className="size-4 text-teal-700" /><h2 id="ledger-title" className="text-sm font-semibold text-base-100">Execution ledger</h2></div><p className="mt-1 text-xs text-muted">Broker-confirmed records with user-level outcome and timing.</p></div>
+          <div><div className="flex items-center gap-2"><Radio className="size-4 text-brand-600" /><h2 id="ledger-title" className="text-sm font-semibold text-base-100">Execution ledger</h2></div><p className="mt-1 text-xs text-muted">Broker-confirmed records with user-level outcome and timing.</p></div>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <label className="relative"><span className="sr-only">Search instrument or user email</span><Search aria-hidden className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" /><input value={searchValue} onChange={(event) => { setSearchValue(event.target.value); setSearch(event.target.value); }} placeholder="Instrument or user email" className="h-9 w-full rounded-md border border-line bg-white pl-8 pr-3 text-xs text-base-100 outline-none placeholder:text-muted focus:border-teal-700/50 sm:w-52" data-testid="input-ledger-search" /></label>
-             <label><span className="sr-only">Filter by strategy</span><select value={strategy} onChange={(event) => setStrategy(event.target.value)} className="h-9 w-full rounded-md border border-line bg-white px-3 text-xs text-base-100 outline-none focus:border-teal-700/50 sm:w-44" data-testid="select-strategy"><option value="">All strategies</option>{availableStrategies.map((item) => <option key={item} value={item}>{labelForStrategy(item)}</option>)}{strategy && !availableStrategies.includes(strategy) ? <option value={strategy}>{labelForStrategy(strategy)}</option> : null}</select></label>
-            <label><span className="sr-only">Filter by execution status</span><select value={status} onChange={(event) => setStatus(event.target.value)} className="h-9 w-full rounded-md border border-line bg-white px-3 text-xs text-base-100 outline-none focus:border-teal-700/50 sm:w-36" data-testid="select-status"><option value="">All statuses</option><option value="OPEN">Open</option><option value="CLOSED">Closed</option><option value="CANCELLED">Cancelled</option></select></label>
-            <label><span className="sr-only">Executions from date</span><input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} className="h-9 w-full rounded-md border border-line bg-white px-2 text-xs text-base-100 outline-none focus:border-teal-700/50 sm:w-36" data-testid="input-date-from" /></label>
-            <label><span className="sr-only">Executions to date</span><input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} className="h-9 w-full rounded-md border border-line bg-white px-2 text-xs text-base-100 outline-none focus:border-teal-700/50 sm:w-36" data-testid="input-date-to" /></label>
+            <label className="relative"><span className="sr-only">Search instrument or user email</span><Search aria-hidden className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" /><input value={searchValue} onChange={(event) => { setSearchValue(event.target.value); setSearch(event.target.value); }} placeholder="Instrument or user email" className="h-9 w-full rounded-md border border-line bg-base-850 pl-8 pr-3 text-xs text-base-100 outline-none placeholder:text-muted focus:border-brand-600/50 sm:w-52" data-testid="input-ledger-search" /></label>
+             <label><span className="sr-only">Filter by strategy</span><select value={strategy} onChange={(event) => setStrategy(event.target.value)} className="h-9 w-full rounded-md border border-line bg-base-850 px-3 text-xs text-base-100 outline-none focus:border-brand-600/50 sm:w-44" data-testid="select-strategy"><option value="">All strategies</option>{availableStrategies.map((item) => <option key={item} value={item}>{labelForStrategy(item)}</option>)}{strategy && !availableStrategies.includes(strategy) ? <option value={strategy}>{labelForStrategy(strategy)}</option> : null}</select></label>
+            <label><span className="sr-only">Filter by execution status</span><select value={status} onChange={(event) => setStatus(event.target.value)} className="h-9 w-full rounded-md border border-line bg-base-850 px-3 text-xs text-base-100 outline-none focus:border-brand-600/50 sm:w-36" data-testid="select-status"><option value="">All statuses</option><option value="OPEN">Open</option><option value="CLOSED">Closed</option><option value="CANCELLED">Cancelled</option></select></label>
+            <label><span className="sr-only">Executions from date</span><input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} className="h-9 w-full rounded-md border border-line bg-base-850 px-2 text-xs text-base-100 outline-none focus:border-brand-600/50 sm:w-36" data-testid="input-date-from" /></label>
+            <label><span className="sr-only">Executions to date</span><input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} className="h-9 w-full rounded-md border border-line bg-base-850 px-2 text-xs text-base-100 outline-none focus:border-brand-600/50 sm:w-36" data-testid="input-date-to" /></label>
           </div>
         </div>
         {logsQuery.isError && !logs ? <div className="flex items-center justify-between gap-3 p-6" role="alert" data-testid="error-logs"><p className="text-sm text-loss-600">Execution ledger failed to load.</p><Button size="sm" variant="outline" onClick={() => void logsQuery.refetch()} data-testid="button-retry-ledger">Retry</Button></div> : null}
         {logsQuery.isLoading && !logs ? <div className="space-y-3 p-5" aria-label="Loading execution records">{[1, 2, 3].map((n) => <div key={n} className="h-10 animate-pulse rounded bg-base-700/40" />)}</div> : null}
-        {!logsQuery.isError && logs && (logs.items ?? []).length === 0 ? <div className="px-6 py-14 text-center" data-testid="empty-ledger"><div className="mx-auto flex size-10 items-center justify-center rounded-full bg-teal-800/[0.07]"><Activity className="size-4 text-teal-800" /></div><h3 className="mt-3 text-sm font-semibold text-base-100">No executions match</h3><p className="mt-1 text-xs text-muted">Adjust the filters or search to inspect a different slice of the ledger.</p></div> : null}
+        {!logsQuery.isError && logs && (logs.items ?? []).length === 0 ? <div className="px-6 py-14 text-center" data-testid="empty-ledger"><div className="mx-auto flex size-10 items-center justify-center rounded-full bg-brand-700/[0.07]"><Activity className="size-4 text-brand-700" /></div><h3 className="mt-3 text-sm font-semibold text-base-100">No executions match</h3><p className="mt-1 text-xs text-muted">Adjust the filters or search to inspect a different slice of the ledger.</p></div> : null}
         {logs && (logs.items ?? []).length > 0 ? <>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1040px] text-left">
@@ -380,7 +380,7 @@ function TelemetryView() {
             </div>
           </div>
         </> : null}
-        <div className="flex items-start gap-2 border-t border-line/50 bg-teal-900/[0.025] px-4 py-3 text-[0.68rem] leading-relaxed text-muted sm:px-5"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-teal-800" /><p>Financial figures are sourced from the platform ledger. Idle balance is the ledger’s signed unallocated balance; it is not independently recomputed here. Trade outcomes reflect recorded user P&amp;L.</p></div>
+        <div className="flex items-start gap-2 border-t border-line/50 bg-brand-700/[0.03] px-4 py-3 text-[0.68rem] leading-relaxed text-muted sm:px-5"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-brand-700" /><p>Financial figures are sourced from the platform ledger. Idle balance is the ledger’s signed unallocated balance; it is not independently recomputed here. Trade outcomes reflect recorded user P&amp;L.</p></div>
       </section>
     </div>
   );

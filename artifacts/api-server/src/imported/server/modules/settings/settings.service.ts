@@ -298,8 +298,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     description:
       'The "Support" mailbox shown in the site footer and on the Contact page. Client enquiries about accounts, deposits, withdrawals and KYC route here.',
     kind: 'text',
-    defaultValue: 'support@baltimorecapital.pro',
-    inputHint: 'e.g. support@baltimorecapital.pro',
+    defaultValue: 'support@autopipsmarkets.com',
+    inputHint: 'e.g. support@autopipsmarkets.com',
   },
   {
     key: 'contact.security_email',
@@ -308,8 +308,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     description:
       'The "Security" mailbox shown in the site footer and on the Contact page. Vulnerability reports and account-compromise notices route here.',
     kind: 'text',
-    defaultValue: 'security@baltimorecapital.pro',
-    inputHint: 'e.g. security@baltimorecapital.pro',
+    defaultValue: 'security@autopipsmarkets.com',
+    inputHint: 'e.g. security@autopipsmarkets.com',
   },
   {
     key: 'contact.compliance_email',
@@ -318,8 +318,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     description:
       'The "Compliance" mailbox shown in the site footer and on the Contact page. Identity review and regulatory enquiries route here.',
     kind: 'text',
-    defaultValue: 'compliance@baltimorecapital.pro',
-    inputHint: 'e.g. compliance@baltimorecapital.pro',
+    defaultValue: 'compliance@autopipsmarkets.com',
+    inputHint: 'e.g. compliance@autopipsmarkets.com',
   },
   {
     key: 'disclosure.internal_execution_notice',
@@ -328,15 +328,15 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     description:
       'Shown on the public Risk page in place of the broker wording WHEN EXECUTION_MODE=internal, so the page always describes how this deployment actually executes. Paragraphs are separated by a blank line. Have changes reviewed by counsel.',
     kind: 'longtext',
-    defaultValue: `Baltimore Capital is not a broker, a bank or a venue. When you open a position, Baltimore Capital is your counterparty: the position is a contract between you and Baltimore Capital, priced from independent third-party market data. No order is placed on any external exchange or broker.
+    defaultValue: `Autopips Markets is not a broker, a bank or a venue. When you open a position, Autopips Markets is your counterparty: the position is a contract between you and Autopips Markets, priced from independent third-party market data. No order is placed on any external exchange or broker.
 
-Why this matters. Because Baltimore Capital takes the other side of your position, profit on a winning position is paid by Baltimore Capital and a loss is retained by Baltimore Capital. This differs from a brokerage, where your counterparty is the market. Baltimore Capital's ability to pay what it owes you is therefore a risk you carry, alongside market risk.
+Why this matters. Because Autopips Markets takes the other side of your position, profit on a winning position is paid by Autopips Markets and a loss is retained by Autopips Markets. This differs from a brokerage, where your counterparty is the market. Autopips Markets's ability to pay what it owes you is therefore a risk you carry, alongside market risk.
 
-Baltimore Capital is not a licensed venue. Positions are not traded on any regulated exchange, and no exchange, clearing house or compensation scheme stands behind them. There is no investor-compensation or deposit-protection cover, and no guarantee that Baltimore Capital can meet its obligations.
+Autopips Markets is not a licensed venue. Positions are not traded on any regulated exchange, and no exchange, clearing house or compensation scheme stands behind them. There is no investor-compensation or deposit-protection cover, and no guarantee that Autopips Markets can meet its obligations.
 
 Synthetic indices (R_10, R_100 and volatility indices) are priced from a public market feed and are not traded on any venue.
 
-Pricing is sourced from independent third-party market-data providers. Historical bars and live quotes are used as published by those providers and are not set by Baltimore Capital; a feed outage can delay or prevent a position from being priced, opened or closed.`,
+Pricing is sourced from independent third-party market-data providers. Historical bars and live quotes are used as published by those providers and are not set by Autopips Markets; a feed outage can delay or prevent a position from being priced, opened or closed.`,
     inputHint: 'Paragraphs separated by a blank line.',
   },
 ] as const;

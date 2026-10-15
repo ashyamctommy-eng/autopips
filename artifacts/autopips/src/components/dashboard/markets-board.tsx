@@ -43,7 +43,7 @@ import type { InstrumentInfo } from '@/types/broker.types';
  * the cap still update if another client is watching them.
  */
 
-const FAVORITES_KEY = 'bbcap.market.favorites';
+const FAVORITES_KEY = 'autopips.market.favorites';
 const FLASH_MS = 600;
 
 interface Row {
@@ -90,7 +90,7 @@ function MarketIconView({ icon }: { icon: MarketIcon }) {
       return (
         <span
           aria-hidden
-          className="grid size-7 shrink-0 place-items-center rounded-full bg-amber-700/15 text-amber-500"
+          className="grid size-7 shrink-0 place-items-center rounded-full bg-warn/15 text-warn"
         >
           <Fuel className="size-4" />
         </span>

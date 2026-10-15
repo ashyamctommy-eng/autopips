@@ -26,8 +26,8 @@ export interface SupportLine {
 }
 
 const DEFAULT_LINES: readonly SupportLine[] = [
-  { label: 'Support', email: 'support@baltimorecapital.pro', blurb: 'Account, deposits, withdrawals and KYC.' },
-  { label: 'Security', email: 'security@baltimorecapital.pro', blurb: 'Vulnerability reports and account compromise.' },
+  { label: 'Support', email: 'support@autopipsmarkets.com', blurb: 'Account, deposits, withdrawals and KYC.' },
+  { label: 'Security', email: 'security@autopipsmarkets.com', blurb: 'Vulnerability reports and account compromise.' },
 ];
 
 export interface SupportChatProps {

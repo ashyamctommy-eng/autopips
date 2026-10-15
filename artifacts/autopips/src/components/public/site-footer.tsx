@@ -40,9 +40,9 @@ export const FOOTER_LEGAL_LINKS: readonly FooterLink[] = [
 ];
 
 export const CONTACT_LINES = [
-  { label: 'Support', email: 'support@baltimorecapital.pro', blurb: 'Account, deposits, withdrawals and KYC.' },
-  { label: 'Security', email: 'security@baltimorecapital.pro', blurb: 'Vulnerability reports and account compromise.' },
-  { label: 'Compliance', email: 'compliance@baltimorecapital.pro', blurb: 'Identity review and regulatory enquiries.' },
+  { label: 'Support', email: 'support@autopipsmarkets.com', blurb: 'Account, deposits, withdrawals and KYC.' },
+  { label: 'Security', email: 'security@autopipsmarkets.com', blurb: 'Vulnerability reports and account compromise.' },
+  { label: 'Compliance', email: 'compliance@autopipsmarkets.com', blurb: 'Identity review and regulatory enquiries.' },
 ] as const;
 
 /** The single non-dismissible risk line, rendered on every public page. */
@@ -65,7 +65,7 @@ export function SiteFooter({ className }: SiteFooterProps) {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <BrandMark size="sm" />
-              <span className="text-xs text-muted">© {year} Baltimore Capital. All rights reserved.</span>
+              <span className="text-xs text-muted">© {year} Autopips Markets. All rights reserved.</span>
             </div>
 
             <nav aria-label="Legal" className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -90,7 +90,7 @@ export function SiteFooter({ className }: SiteFooterProps) {
             <span className="font-medium text-warn-400" title="Non-dismissible risk statement">
               {RISK_LINE}
             </span>{' '}
-            {TARGET_RETURN_DISCLAIMER} Baltimore Capital is not a bank and client balances are not
+            {TARGET_RETURN_DISCLAIMER} Autopips Markets is not a bank and client balances are not
             insured. Nothing on this site is investment advice.
           </p>
         </div>

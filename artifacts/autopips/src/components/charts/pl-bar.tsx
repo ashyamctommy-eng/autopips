@@ -45,12 +45,12 @@ export interface PlBarProps {
  * fallbacks are the dark palette and cover the server render.
  */
 const CHART_TOKENS = {
-  tick: { token: '--chart-tick', fallback: 'rgba(148, 163, 184, 0.65)' },
-  grid: { token: '--chart-grid', fallback: 'rgba(148, 163, 184, 0.06)' },
-  axis: { token: '--chart-axis', fallback: 'rgba(148, 163, 184, 0.14)' },
-  cursor: { token: '--chart-grid', fallback: 'rgba(148, 163, 184, 0.06)' },
-  profit: { token: '--c-profit-500', fallback: 'rgb(16, 185, 129)' },
-  loss: { token: '--c-loss-500', fallback: 'rgb(244, 63, 94)' },
+  tick: { token: '--chart-tick', fallback: 'rgba(107, 114, 128, 0.9)' },
+  grid: { token: '--chart-grid', fallback: 'rgba(17, 24, 39, 0.06)' },
+  axis: { token: '--chart-axis', fallback: 'rgba(17, 24, 39, 0.1)' },
+  cursor: { token: '--chart-grid', fallback: 'rgba(17, 24, 39, 0.06)' },
+  profit: { token: '--c-profit-500', fallback: 'rgb(22, 163, 74)' },
+  loss: { token: '--c-loss-500', fallback: 'rgb(220, 38, 38)' },
 } satisfies Record<string, TokenSpec>;
 
 interface BarTooltipProps extends TooltipProps<number, string> {

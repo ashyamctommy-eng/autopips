@@ -2,8 +2,9 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
-/** Stable id for the logo gradient — one definition, reused by every instance. */
-const GRADIENT_ID = 'baltimore-capital-mark-gradient';
+/** Stable id for the logo gradient — one definition, reused by every instance.
+ *  Must stay unique on the page: two different ids would double the paint. */
+const GRADIENT_ID = 'autopips-markets-mark-gradient';
 
 const SIZE_GLYPH: Record<NonNullable<BrandMarkProps['size']>, string> = {
   sm: 'size-6',
@@ -28,14 +29,23 @@ export interface BrandMarkProps extends React.HTMLAttributes<HTMLSpanElement> {
 }
 
 /**
- * The Baltimore Capital mark — "the Beacon B".
+ * The Autopips Markets mark — the monogram A.
  *
- * A rounded badge carries a monogram B whose two bowls read as ascending arcs
- * (growth), with a warm gold beacon at the shoulder: the capital point the
- * platform guides toward. The glyph is drawn in FIXED brand colours rather than
- * theme tokens on purpose — a logo should look the same in the dark terminal,
- * the light theme and the admin console — while the wordmark's accent follows
- * the active palette so it stays legible on both surfaces.
+ * A deep-green badge holding a white capital A with a gold crossbar. The full
+ * supplied icon — bull head, horned A, candlestick cluster, rising arrow — was
+ * tried here first and failed the only test that matters: at the 24px the header
+ * actually renders it at, the horns radiating from the apex fought the A's legs
+ * and the glyph read as an X, and the candle cluster turned to mud below ~40px.
+ *
+ * So the mark is reduced to what survives: one unambiguous letterform and a
+ * two-tone accent. The bull-and-candles identity is carried by the supplied
+ * artwork itself, which ships as the app/OG image (see `public/brand-icon.png`)
+ * where it is displayed large enough to be read.
+ *
+ * The glyph is drawn in FIXED brand colours rather than theme tokens on purpose —
+ * a logo should look the same in the dark terminal, the light theme and the
+ * admin console — while the wordmark follows the active palette so it stays
+ * legible on both surfaces.
  *
  * Pure inline SVG + text, no external asset, so it is safe in any bundle and
  * renders identically on the server.
@@ -52,42 +62,33 @@ export function BrandMark({
       <svg
         viewBox="0 0 32 32"
         role="img"
-        aria-label="Baltimore Capital"
+        aria-label="Autopips Markets"
         className={cn('shrink-0', SIZE_GLYPH[size])}
       >
         <defs>
           <linearGradient id={GRADIENT_ID} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#4C6FFF" />
-            <stop offset="100%" stopColor="#7C5CFF" />
+            <stop offset="0%" stopColor="#0E8A61" />
+            <stop offset="100%" stopColor="#075B41" />
           </linearGradient>
         </defs>
         <rect x="1" y="1" width="30" height="30" rx="9" fill={`url(#${GRADIENT_ID})`} />
-        {/* Monogram B: one stem, two bowls that rise as they open. */}
+
+        {/* The A: two straight legs, apex at the top-centre. */}
         <path
-          d="M12.5 9 V23"
+          d="M10.6 25.4 L16 13.4 M21.4 25.4 L16 13.4"
           fill="none"
           stroke="#FFFFFF"
-          strokeWidth={2.6}
+          strokeWidth={2.5}
           strokeLinecap="round"
         />
+        {/* The crossbar carries the gold — the one two-tone accent. */}
         <path
-          d="M12.5 9 H17 A3.5 3.5 0 0 1 17 16 H12.5"
+          d="M12.7 21.2 H19.3"
           fill="none"
-          stroke="#FFFFFF"
-          strokeWidth={2.6}
+          stroke="#D9A441"
+          strokeWidth={2.2}
           strokeLinecap="round"
-          strokeLinejoin="round"
         />
-        <path
-          d="M12.5 16 H17.5 A3.5 3.5 0 0 1 17.5 23 H12.5"
-          fill="none"
-          stroke="#FFFFFF"
-          strokeWidth={2.6}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        {/* The beacon: capital gold, at the shoulder of the mark. */}
-        <circle cx="23.5" cy="8.5" r="2.4" fill="#F0B450" />
       </svg>
       {showWordmark ? (
         <span
@@ -97,7 +98,7 @@ export function BrandMark({
             wordmarkClassName,
           )}
         >
-          Baltimore <span className="text-accent-400">Capital</span>
+          Autopips <span className="text-brand-600">Markets</span>
         </span>
       ) : null}
     </span>

@@ -60,11 +60,11 @@ function useMounted(): boolean {
  * change.
  *
  * The FIRST render (on the server and on the client's hydration pass) returns
- * the spec's fallbacks — the dark palette — so the server HTML and the hydrated
- * SVG/JSX agree to the byte. After mount the live token values take over. That
- * keeps the chart markup hydration-safe while still following the theme; the
- * canvas chart (lightweight-charts) reads live values from its effects instead,
- * because its markup carries no colours.
+ * the spec's fallbacks — the light palette, the shipped default — so the server
+ * HTML and the hydrated SVG/JSX agree to the byte. After mount the live token
+ * values take over. That keeps the chart markup hydration-safe while still
+ * following the theme; the canvas chart (lightweight-charts) reads live values
+ * from its effects instead, because its markup carries no colours.
  */
 export function useChartTheme<T extends Record<string, TokenSpec>>(
   spec: T,

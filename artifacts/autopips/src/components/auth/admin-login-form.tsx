@@ -214,7 +214,7 @@ export function AdminLoginForm({ nextPath = '/admin' }: AdminLoginFormProps) {
         </span>
         <div className="flex flex-col gap-1">
           <h1 className="text-base font-semibold uppercase tracking-[0.16em] text-base-100">
-            Baltimore Capital Super Admin
+            Autopips Markets Super Admin
           </h1>
           <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted">
             Platform management &amp; bot operations
@@ -274,7 +274,7 @@ export function AdminLoginForm({ nextPath = '/admin' }: AdminLoginFormProps) {
               aria-describedby={emailField.describedBy}
               onChange={(event) => setEmail(event.target.value)}
               disabled={busy}
-              placeholder="you@baltimorecapital.pro"
+              placeholder="you@autopipsmarkets.com"
               className="pl-9"
             />
           </div>

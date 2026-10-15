@@ -37,7 +37,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <header className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-4 px-4 py-6 sm:px-6 lg:px-8">
           <Link
             href="/"
-            aria-label="Baltimore Capital home"
+            aria-label="Autopips Markets home"
             className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70"
           >
             <BrandMark size="md" />

@@ -24,9 +24,9 @@ interface ThemeOption {
   Icon: typeof Sun;
 }
 
-/** Order matches the visual weight of the choice: light, dark, then follow the OS. */
+/** Order matches the shipped default first: light is the product's surface, dark is the terminal. */
 const OPTIONS: ThemeOption[] = [
-  { value: 'light', label: 'Light', description: 'Executive surface', Icon: Sun },
+  { value: 'light', label: 'Light', description: 'Default surface', Icon: Sun },
   { value: 'dark', label: 'Dark', description: 'Trading terminal', Icon: Moon },
   { value: 'system', label: 'System', description: 'Match device', Icon: Monitor },
 ];
@@ -56,7 +56,7 @@ export interface ThemeToggleProps extends React.ButtonHTMLAttributes<HTMLButtonE
 export function ThemeToggle({ className, showLabel = false, ...props }: ThemeToggleProps) {
   const { theme, resolvedTheme, setTheme } = useTheme();
   const TriggerIcon = ICON_FOR[theme];
-  const current = OPTIONS.find((option) => option.value === theme) ?? OPTIONS[1]!;
+  const current = OPTIONS.find((option) => option.value === theme) ?? OPTIONS[0]!;
 
   return (
     <DropdownMenu>
